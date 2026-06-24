@@ -8,7 +8,7 @@
 # are skipped so configure still succeeds.
 # ------------------------------------------------------------------------------
 
-foreach(_hemerion_app gnc_flight ecs_gateway datalink)
+foreach(_hemerion_app gnc_flight can_actuator_link datalink)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_app}/CMakeLists.txt")
     add_subdirectory(${_hemerion_app})
   endif()

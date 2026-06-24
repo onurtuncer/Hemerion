@@ -9,7 +9,7 @@ Top-level firmware executables. An app is the only thing in the repository that 
 | App | Target | Description |
 |---|---|---|
 | `gnc_flight/` | STM32H743 | Main GNC flight computer: sensors → EKF → control → actuators |
-| `ecs_gateway/` | STM32F446 | EtherCAT ↔ CAN gateway: relays TwinCAT setpoints to CAN actuators |
+| `can_actuator_link/` | STM32F446 | Minimal CAN actuator command sender; demonstrates `modules/comms` framing |
 | `datalink/` | STM32F446 | Telemetry downlink + uplink: MAVLink over UART/radio |
 
 ---
