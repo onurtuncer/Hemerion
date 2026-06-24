@@ -1,6 +1,6 @@
 # HEMERION — Embedded Firmware Framework
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Linux Build](https://github.com/onurtuncer/Hemerion/actions/workflows/linux.yml/badge.svg)](https://github.com/onurtuncer/Hemerion/actions/workflows/linux.yml)
 [![Windows Build](https://github.com/onurtuncer/Hemerion/actions/workflows/windows.yml/badge.svg)](https://github.com/onurtuncer/Hemerion/actions/workflows/windows.yml)
 [![codecov](https://codecov.io/gh/onurtuncer/Hemerion/branch/main/graph/badge.svg)](https://codecov.io/gh/onurtuncer/Hemerion)

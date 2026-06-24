@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
 #
-# SPDX-License-Identifier: MIT License-Filename: LICENSE
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # Top-level firmware executables. Each app links one or more modules with the
 # active BSP. Listed explicitly per app/README.md; apps not yet implemented

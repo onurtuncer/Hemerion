@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
 #
-# SPDX-License-Identifier: MIT License-Filename: LICENSE
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # Host-side simulation targets. Nothing under sim/ is ever cross-compiled --
 # this directory is only added when HEMERION_BUILD_SIM is ON, which the root

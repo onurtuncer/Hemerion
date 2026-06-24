@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
 #
-# SPDX-License-Identifier: MIT License-Filename: LICENSE
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # Root superbuild -- includes all modules, bsp, sim, apps, tests, and docs.
 # Cross/native/test build modes are selected via CMakePresets.json, which sets

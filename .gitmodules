@@ -1,3 +1,18 @@
 [submodule "vendor/FreeRTOS-Kernel"]
 	path = vendor/FreeRTOS-Kernel
 	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+[submodule "vendor/cmsis-core"]
+	path = vendor/cmsis-core
+	url = https://github.com/STMicroelectronics/cmsis-core.git
+[submodule "vendor/cmsis-device-h7"]
+	path = vendor/cmsis-device-h7
+	url = https://github.com/STMicroelectronics/cmsis-device-h7.git
+[submodule "vendor/stm32h7xx-hal-driver"]
+	path = vendor/stm32h7xx-hal-driver
+	url = https://github.com/STMicroelectronics/stm32h7xx-hal-driver.git
+[submodule "vendor/cmsis-device-f4"]
+	path = vendor/cmsis-device-f4
+	url = https://github.com/STMicroelectronics/cmsis-device-f4.git
+[submodule "vendor/stm32f4xx-hal-driver"]
+	path = vendor/stm32f4xx-hal-driver
+	url = https://github.com/STMicroelectronics/stm32f4xx-hal-driver.git

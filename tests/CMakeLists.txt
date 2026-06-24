@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
 #
-# SPDX-License-Identifier: MIT License-Filename: LICENSE
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # Cross-cutting integration and SWIL tests. Per-module unit tests live inside
 # each module's own test/ subdirectory instead. Categories not yet
