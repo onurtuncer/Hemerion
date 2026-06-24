@@ -1,0 +1,47 @@
+name: Linux Build
+
+on:
+  push:
+    paths-ignore: ['README.md']
+  pull_request:
+
+jobs:
+  test-native:
+    name: test-native (build + ctest)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system deps
+        run: sudo apt-get update
+
+      - name: Configure
+        run: cmake --preset=test-native
+
+      - name: Build
+        run: cmake --build --preset=test-native
+
+      - name: Run tests
+        run: ctest --preset=test-native --output-on-failure
+
+  fmu-native:
+    name: fmu-native (build + FMU tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system deps
+        run: sudo apt-get update
+
+      - name: Configure
+        run: cmake --preset=fmu-native
+
+      - name: Build
+        run: cmake --build --preset=fmu-native
+
+      - name: Run FMU tests
+        run: ctest --preset=fmu-native -L fmu --output-on-failure

@@ -1,0 +1,52 @@
+name: Cross Build (ARM)
+
+on:
+  push:
+    paths:
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'toolchains/**'
+      - 'cmake/**'
+      - 'CMakePresets.json'
+      - '.github/workflows/cross_build.yml'
+  pull_request:
+
+jobs:
+  renode-h743:
+    name: renode-h743 (build only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install arm-none-eabi-gcc
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+
+      - name: Configure
+        run: cmake --preset=renode-h743
+
+      - name: Build
+        run: cmake --build --preset=renode-h743
+
+  cross-stm32f446:
+    name: cross-stm32f446 (build only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install arm-none-eabi-gcc
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi
+
+      - name: Configure
+        run: cmake --preset=cross-stm32f446
+
+      - name: Build
+        run: cmake --build --preset=cross-stm32f446

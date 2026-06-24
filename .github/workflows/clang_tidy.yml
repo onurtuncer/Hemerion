@@ -1,0 +1,58 @@
+name: Clang-Tidy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'sim/**'
+      - 'tests/**'
+      - '.clang-tidy'
+      - '.github/workflows/clang_tidy.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build clang-18 clang-tidy-18
+
+      # Direct cmake call (no preset) to avoid -Rpass=.* from clang-debug
+      # which floods the log with thousands of inlining notes.
+      # Native host config only — clang-tidy runs against modules/apps/bsp/sim
+      # as compiled for the native host, not the arm-none-eabi cross targets.
+      - name: Configure
+        run: |
+          cmake -B build/clang-tidy -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_CXX_EXTENSIONS=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DHEMERION_BUILD_TESTS=ON
+
+      - name: Run clang-tidy
+        run: |
+          python3 /usr/lib/llvm-18/bin/run-clang-tidy \
+            -clang-tidy-binary clang-tidy-18 \
+            -p build/clang-tidy \
+            -j "$(nproc)" \
+            $(find modules apps bsp sim tests -name '*.cpp' | sort | tr '\n' ' ')

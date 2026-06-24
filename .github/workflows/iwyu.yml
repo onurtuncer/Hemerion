@@ -1,0 +1,67 @@
+name: IWYU
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'sim/**'
+      - 'tests/**'
+      - '.github/workflows/iwyu.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  iwyu:
+    name: include-what-you-use (informational)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build clang iwyu
+
+      # Use a direct cmake call instead of --preset=clang-debug to avoid the
+      # -Rpass=.* remarks flag, which floods the build log with thousands of
+      # inlining notes and makes the IWYU output unreadable.
+      - name: Configure
+        run: |
+          cmake -B build/iwyu -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_CXX_EXTENSIONS=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DHEMERION_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build/iwyu
+
+      # Informational only: surfaces IWYU suggestions without failing the build.
+      # The codebase is not yet IWYU-clean; this produces a diff for review.
+      - name: Run include-what-you-use
+        continue-on-error: true
+        run: |
+          iwyu_tool -p build/iwyu modules apps bsp sim tests \
+            -- -Xiwyu --cxx17ns -Xiwyu --no_fwd_decls \
+            | tee iwyu-report.txt
+
+      - name: Upload IWYU report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwyu-report
+          path: iwyu-report.txt

@@ -1,0 +1,31 @@
+name: CMake-Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - '**/CMakeLists.txt'
+      - '**/*.cmake'
+      - '.github/workflows/cmake_lint.yml'
+      - '.cmake-format'
+  schedule:
+    - cron: '0 5 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cmake_lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run CMake Lint
+        run: |
+          sudo pip3 install --break-system-packages cmakelang
+          find . \( -path ./build -o -path ./vendor -o -path ./.venv \) -prune \
+            -o -type f \( -name CMakeLists.txt -o -name "*.cmake" \) -print \
+            | xargs cmake-lint --config-files .cmake-format

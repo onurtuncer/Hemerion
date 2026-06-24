@@ -1,0 +1,32 @@
+name: Clang-Format
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'sim/**'
+      - '.github/workflows/clang_format.yml'
+      - '**/.clang-format'
+      - '.run-clang-format'
+  schedule:
+    - cron: '0 5 * * *' # Runs every day at 5:00 AM
+
+jobs:
+  clang_format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run clang format
+        run: |
+          sudo apt update
+          sudo apt install -y git clang-format-18
+          bash .run-clang-format
+          output=$(git diff)
+          echo "$output"
+          if [ -n "$output" ]; then exit 1; else exit 0; fi

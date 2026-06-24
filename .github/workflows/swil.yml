@@ -1,0 +1,32 @@
+name: SWIL Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ closed ]
+
+jobs:
+  test-swil:
+    name: test-swil (Renode)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    container: antmicro/renode:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends cmake ninja-build python3-pip
+          pip3 install pyrenode3
+
+      - name: Configure
+        run: cmake --preset=test-swil
+
+      - name: Build
+        run: cmake --build --preset=test-swil
+
+      - name: Run SWIL tests
+        run: ctest --preset=test-swil -L swil --output-on-failure

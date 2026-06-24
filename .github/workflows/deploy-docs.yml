@@ -1,0 +1,115 @@
+name: Build & Deploy Docs to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'doc/**'
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'sim/**'
+      - 'get_project_name.py'
+      - '.github/workflows/deploy-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; cancel any in-progress run so the
+# latest commit is always what gets deployed.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r doc/requirements.txt
+          echo "Sphinx version: $(sphinx-build --version)"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq doxygen graphviz \
+            texlive-latex-extra texlive-pictures texlive-fonts-recommended \
+            poppler-utils
+          echo "Doxygen version: $(doxygen --version)"
+          echo "pdflatex version: $(pdflatex --version | head -1)"
+
+      - name: Build TikZ figures to PNG
+        run: |
+          REPO="$(pwd)"
+          TIKZ_SRC="${REPO}/doc/tikz"
+          TIKZ_BUILD="${REPO}/build/tikz"
+          STATIC_OUT="${REPO}/doc/_static"
+          mkdir -p "${TIKZ_BUILD}"
+          for tex in "${TIKZ_SRC}"/*.tex; do
+            fig=$(basename "${tex}" .tex)
+            echo "Compiling ${fig}.tex ..."
+            pdflatex -interaction=nonstopmode -halt-on-error \
+                     -output-directory "${TIKZ_BUILD}" "${tex}"
+            echo "Converting ${fig}.pdf to PNG ..."
+            pdftoppm -r 200 -png -singlefile \
+                     "${TIKZ_BUILD}/${fig}.pdf" "${STATIC_OUT}/${fig}"
+            echo "  -> ${STATIC_OUT}/${fig}.png"
+          done
+
+      - name: Generate Doxyfile and build XML
+        run: |
+          REPO="$(pwd)"
+          OUT="${REPO}/build/doxygen"
+          mkdir -p "${OUT}"
+          echo "Substituting Doxyfile.in placeholders..."
+          sed \
+            -e "s|@CMAKE_PROJECT_NAME@|Hemerion|g" \
+            -e "s|@CMAKE_SOURCE_DIR@|${REPO}|g" \
+            -e "s|@CMAKE_BINARY_DIR@|${REPO}/build|g" \
+            -e "s|@DOXYGEN_OUTPUT_DIR@|${OUT}|g" \
+            doc/Doxyfile.in > "${REPO}/build/Doxyfile"
+          echo "Running Doxygen..."
+          doxygen "${REPO}/build/Doxyfile"
+          echo "Doxygen XML:"
+          ls "${OUT}/xml/" | head -5
+
+      - name: Build Sphinx HTML
+        run: |
+          echo "Building Sphinx docs..."
+          sphinx-build -T -b html \
+            -Dbreathe_projects.Hemerion="$(pwd)/build/doxygen/xml" \
+            doc/ build/sphinx
+          echo "Sphinx output pages: $(find build/sphinx -name '*.html' | wc -l)"
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/sphinx
+
+  deploy:
+    needs: build-docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

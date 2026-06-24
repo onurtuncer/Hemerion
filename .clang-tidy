@@ -1,0 +1,115 @@
+---
+Checks: >
+    -*,
+    clang-diagnostic-*,
+    -clang-diagnostic-unknown-warning-option,
+    -clang-diagnostic-enum-constexpr-conversion,
+    clang-analyzer-*,
+    -clang-analyzer-cplusplus*,
+    -clang-analyzer-optin.core.EnumCastOutOfRange,
+    bugprone-*,
+    -bugprone-easily-swappable-parameters,
+    -bugprone-exception-escape,
+    -bugprone-chained-comparison,
+    cppcoreguidelines-*,
+    -cppcoreguidelines-macro-usage,
+    -cppcoreguidelines-pro-type-static-cast-downcast,
+    -cppcoreguidelines-pro-type-vararg,
+    -cppcoreguidelines-pro-type-union-access,
+    -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+    -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+    -cppcoreguidelines-pro-bounds-constant-array-index,
+    -cppcoreguidelines-avoid-magic-numbers,
+    -cppcoreguidelines-non-private-member-variables-in-classes,
+    -cppcoreguidelines-avoid-do-while,
+    -cppcoreguidelines-owning-memory,
+    misc-*,
+    -misc-non-private-member-variables-in-classes,
+    -misc-no-recursion,
+    -misc-const-correctness,
+    -misc-include-cleaner,
+    -misc-use-internal-linkage,
+    -misc-use-anonymous-namespace,
+    modernize-*,
+    -modernize-use-trailing-return-type,
+    -modernize-use-nodiscard,
+    -modernize-type-traits,
+    performance-*,
+    readability-*,
+    -readability-braces-around-statements,
+    -readability-named-parameter,
+    -readability-magic-numbers,
+    -readability-isolate-declaration,
+    -readability-function-cognitive-complexity,
+    -readability-use-anyofallof,
+    -readability-identifier-length,
+    -readability-suspicious-call-argument,
+    -readability-implicit-bool-conversion
+WarningsAsErrors: >
+    -*,
+    clang-diagnostic-*,
+    -clang-diagnostic-unknown-warning-option,
+    -clang-diagnostic-enum-constexpr-conversion,
+    clang-analyzer-*,
+    -clang-analyzer-cplusplus*,
+    -clang-analyzer-optin.core.EnumCastOutOfRange,
+    bugprone-*,
+    -bugprone-easily-swappable-parameters,
+    -bugprone-exception-escape,
+    -bugprone-chained-comparison,
+    cppcoreguidelines-*,
+    -cppcoreguidelines-macro-usage,
+    -cppcoreguidelines-pro-type-static-cast-downcast,
+    -cppcoreguidelines-pro-type-vararg,
+    -cppcoreguidelines-pro-type-union-access,
+    -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+    -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+    -cppcoreguidelines-pro-bounds-constant-array-index,
+    -cppcoreguidelines-avoid-magic-numbers,
+    -cppcoreguidelines-non-private-member-variables-in-classes,
+    -cppcoreguidelines-avoid-do-while,
+    -cppcoreguidelines-owning-memory,
+    misc-*,
+    -misc-non-private-member-variables-in-classes,
+    -misc-no-recursion,
+    -misc-const-correctness,
+    -misc-include-cleaner,
+    -misc-use-internal-linkage,
+    -misc-use-anonymous-namespace,
+    modernize-*,
+    -modernize-use-trailing-return-type,
+    -modernize-use-nodiscard,
+    -modernize-type-traits,
+    performance-*,
+    readability-*,
+    -readability-braces-around-statements,
+    -readability-named-parameter,
+    -readability-magic-numbers,
+    -readability-isolate-declaration,
+    -readability-function-cognitive-complexity,
+    -readability-use-anyofallof,
+    -readability-identifier-length,
+    -readability-suspicious-call-argument,
+    -readability-implicit-bool-conversion
+HeaderFilterRegex: '.*/Aetherion/(Aerodynamics|Coordinate|Environment|Estimation|Examples|FMU|FlightDynamics|IO|ODE|RigidBody|Serialization|Simulation|Spatial)/.*'
+FormatStyle:     none
+CheckOptions:
+  - key:             modernize-use-override.AllowOverrideAndFinal
+    value:           '1'
+  - key:             cppcoreguidelines-explicit-virtual-functions.AllowOverrideAndFinal
+    value:           '1'
+  - key:             cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value:           '1'
+  - key:             cppcoreguidelines-pro-type-member-init.IgnoreArrays
+    value:           '1'
+    # ignore Eigen, yaml-cpp, until added to IWYU and also ignore internal GCC headers (bits/)
+  - key:             misc-include-cleaner.IgnoreHeaders
+    value:           'Eigen/src/.*|yaml-cpp/.*|bits/.*|external/.*'
+    # AV Rule 1: functions shall not exceed 200 LSLOC.
+  - key:             readability-function-size.LineThreshold
+    value:           '200'
+    # AV Rule 3: cyclomatic complexity of any function shall be 20 or less.
+  - key:             readability-function-size.CyclomaticComplexityThreshold
+    value:           '20'
+ExtraArgs:
+  - '-std=c++23'

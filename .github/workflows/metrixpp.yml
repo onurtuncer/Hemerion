@@ -1,0 +1,60 @@
+name: Metrix++
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'sim/**'
+      - 'tests/**'
+      - '.github/workflows/metrixpp.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metrixpp:
+    name: metrix++ cyclomatic complexity (informational)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Metrix++
+        run: pip install "metrixpp>=1.8.1"
+
+      - name: Collect cyclomatic complexity metrics
+        run: |
+          metrix++ collect --std.code.complexity.cyclomatic --std.code.lines.code \
+            -- modules apps bsp sim tests
+
+      - name: View report (functions sorted by complexity)
+        run: |
+          metrix++ view --db-file=metrixpp.db | tee metrixpp-report.txt
+
+      # Informational/secondary only: clang-tidy's readability-function-size
+      # (CyclomaticComplexityThreshold=20, see .clang-tidy) is the hard CI gate
+      # for AV Rule 3. metrix++ uses a different counting methodology and the
+      # codebase has not been triaged against it specifically, so this stays
+      # a non-blocking report at the same threshold for cross-checking.
+      - name: Check against complexity limit
+        continue-on-error: true
+        run: |
+          metrix++ limit --db-file=metrixpp.db \
+            --max-limit=std.code.complexity:cyclomatic:20
+
+      - name: Upload Metrix++ report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrixpp-report
+          path: |
+            metrixpp.db
+            metrixpp-report.txt

@@ -1,0 +1,57 @@
+name: Coverage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  upload-coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: sudo apt update && sudo apt install -y lcov gcovr gcc-13 g++-13
+
+    - name: Configure compiler alternatives
+      run: |
+        sudo update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-13 100
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+
+    - name: Configure (native host + coverage flags)
+      run: cmake --preset=test-native
+
+    - name: Build
+      run: cmake --build --preset=test-native
+
+    - name: Run tests
+      run: ctest --preset=test-native
+      continue-on-error: true
+
+    - name: Generate coverage report (Cobertura XML)
+      run: |
+        gcovr \
+          --root . \
+          --exclude 'tests/.*' \
+          --exclude 'vendor/.*' \
+          --exclude 'cmake/.*' \
+          --exclude '.*/_deps/.*' \
+          --exclude '.*CMakeFiles.*' \
+          --gcov-executable gcov-13 \
+          --gcov-ignore-errors=no_working_dir_found \
+          --xml build/test-native/coverage.xml \
+          --xml-pretty \
+          build/test-native
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v7
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        slug: onurtuncer/Hemerion
+        files: build/test-native/coverage.xml
+        fail_ci_if_error: false
+        verbose: true
