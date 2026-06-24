@@ -163,7 +163,8 @@ The framework includes a structured verification strategy:
 ## Dependencies
 
 - **FreeRTOS-Kernel** — vendored via CMake / git submodules
-- **Embedded Template Library (ETL)** — STL alternative for bare-metal C++
+- **CMSIS-Core, CMSIS-Device (H7/F4), STM32H7xx/STM32F4xx HAL drivers** — vendored via git submodules; see `vendor/CMakeLists.txt` for the `CMSIS::Core`, `CMSIS::STM32H7`, `STM32H7xx::HAL`, `CMSIS::STM32F4`, `STM32F4xx::HAL` targets
+- **Embedded Template Library (ETL)** — vendored via git submodule; STL alternative for bare-metal C++
 - **fmi4c** — FMI 2.0 export for module FMUs
 - **fmu4cpp** — FMI 2.0 import; used by `sim/fmi/plant` to consume Aetherion's plant FMU
 - **Renode** — SWIL simulation platform

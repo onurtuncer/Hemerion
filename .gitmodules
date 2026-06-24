@@ -16,3 +16,6 @@
 [submodule "vendor/stm32f4xx-hal-driver"]
 	path = vendor/stm32f4xx-hal-driver
 	url = https://github.com/STMicroelectronics/stm32f4xx-hal-driver.git
+[submodule "vendor/etl"]
+	path = vendor/etl
+	url = https://github.com/ETLCPP/etl.git
