@@ -19,6 +19,7 @@ Shared CMake helper functions, find-modules, and vendor target wrappers. The roo
 | `open_ecat.cmake` | CMake target wrapper for `vendor/open_ecat` |
 | `FindRenode.cmake` | Find-module — locates Renode executable for CTest SWIL targets |
 | `FindPyrenode3.cmake` | Find-module — locates pyrenode3 Python package |
+| `FindArmNoneEabiGcc.cmake` | Find-module — verifies the arm-none-eabi-gcc cross-compiler and its version, ahead of `toolchains/arm-none-eabi.cmake` |
 | `version.cmake` | Reads `VERSION` file; injects `HEMERION_VERSION_*` into compile definitions |
 | `sanitizers.cmake` | Enables ASan/UBSan for `test-native` preset on supported compilers |
 
