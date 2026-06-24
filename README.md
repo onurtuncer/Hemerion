@@ -203,6 +203,10 @@ The framework includes a structured verification strategy:
 | Renode | ≥ 1.15 | SWIL simulation |
 | Python | ≥ 3.10 | Renode scripting, pyrenode3 |
 
+Run `scripts/check-toolchain.ps1` (Windows) or `scripts/check-toolchain.sh` (Linux) to verify your environment against this table before configuring a preset.
+
+To install whatever's missing, run `scripts/install-toolchain.ps1` (Windows, via winget) or `scripts/install-toolchain.sh` (Linux, via apt + pip). Both prompt before installing each tool individually; pass `-Yes`/`-y` to skip prompts. Re-run the check script afterwards in a new shell.
+
 Clone with submodules:
 
 ```bash

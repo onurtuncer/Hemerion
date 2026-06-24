@@ -10,9 +10,21 @@
 
 cmake_minimum_required(VERSION 3.26)
 
+# Single source of truth for the project version is package.xml -- extract it
+# here rather than duplicating the number in project(VERSION ...).
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" _hemerion_package_xml)
+string(REGEX MATCH "<package[^>]* version=\"([0-9]+\\.[0-9]+\\.[0-9]+)\"" _hemerion_version_match
+       "${_hemerion_package_xml}")
+if(NOT CMAKE_MATCH_1)
+  message(FATAL_ERROR "Could not find version=\"X.Y.Z\" in package.xml")
+endif()
+set(HEMERION_VERSION "${CMAKE_MATCH_1}")
+unset(_hemerion_package_xml)
+unset(_hemerion_version_match)
+
 project(
   Hemerion
-  VERSION 0.1.0
+  VERSION ${HEMERION_VERSION}
   DESCRIPTION "Embedded firmware framework for aerospace GNC and real-time embedded systems"
   HOMEPAGE_URL "https://github.com/onurtuncer/Hemerion"
   LANGUAGES C CXX ASM)

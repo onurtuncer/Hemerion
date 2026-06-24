@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="hemerion_sim_renode" version="0.1.0">
+  <description>Renode board definitions (.repl) and emulation scripts (.resc) for STM32H7/STM32F4 SWIL targets</description>
+  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <license>GPL-3.0-only</license>
+  <url type="repository">https://github.com/onurtuncer/Hemerion</url>
+
+  <tool_depend>Renode::renode</tool_depend>
+  <tool_depend>pyrenode3</tool_depend>
+</package>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="hemerion_gnc" version="0.1.0">
+  <description>EKF/UKF state estimation, control law; FMI co-simulation interface</description>
+  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <license>GPL-3.0-only</license>
+  <url type="repository">https://github.com/onurtuncer/Hemerion</url>
+
+  <build_depend>FreeRTOS::Kernel</build_depend>
+  <build_depend>ETL::etl</build_depend>
+
+  <export>
+    <artifact type="static_lib" target="hemerion_gnc"/>
+    <artifact type="fmu" condition="HEMERION_BUILD_FMU"/>
+    <artifact type="test" condition="HEMERION_BUILD_TESTS"/>
+  </export>
+</package>

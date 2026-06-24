@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="hemerion" version="0.1.0">
+  <description>Embedded firmware framework for aerospace GNC and real-time embedded systems</description>
+  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <license>GPL-3.0-only</license>
+  <url type="repository">https://github.com/onurtuncer/Hemerion</url>
+  <url type="documentation">https://onurtuncer.github.io/Hemerion/</url>
+
+  <build_depend>FreeRTOS::Kernel</build_depend>
+  <build_depend>ETL::etl</build_depend>
+  <build_depend>arm-none-eabi-gcc</build_depend>
+  <build_depend>CMake</build_depend>
+  <build_depend>Ninja</build_depend>
+
+  <export>
+    <module name="hemerion_sensors" path="modules/sensors"/>
+    <module name="hemerion_actuators" path="modules/actuators"/>
+    <module name="hemerion_comms" path="modules/comms"/>
+    <module name="hemerion_gnc" path="modules/gnc"/>
+    <module name="hemerion_rtos_core" path="modules/rtos_core"/>
+    <module name="hemerion_fault" path="modules/fault"/>
+    <module name="hemerion_power" path="modules/power"/>
+    <module name="hemerion_datalogger" path="modules/datalogger"/>
+    <module name="hemerion_sim" path="sim" condition="HEMERION_BUILD_SIM"/>
+  </export>
+</package>

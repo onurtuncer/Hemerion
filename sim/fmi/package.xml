@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="hemerion_sim_fmi" version="0.1.0">
+  <description>FMI 2.0 co-simulation master: steps module FMUs and the Aetherion plant FMU in lockstep</description>
+  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <license>GPL-3.0-only</license>
+  <url type="repository">https://github.com/onurtuncer/Hemerion</url>
+
+  <build_depend>fmu4cpp</build_depend>
+  <build_depend>Aetherion::Aetherion</build_depend>
+
+  <export>
+    <artifact type="executable" target="hemerion_fmi_master" condition="HEMERION_BUILD_SIM"/>
+    <artifact type="static_lib" target="hemerion_plant" condition="HEMERION_BUILD_SIM"/>
+  </export>
+</package>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="hemerion_sim_udp_bridge" version="0.1.0">
+  <description>UDP transport for the FMI master when Aetherion runs out-of-process or on a different host</description>
+  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <license>GPL-3.0-only</license>
+  <url type="repository">https://github.com/onurtuncer/Hemerion</url>
+
+  <export>
+    <artifact type="static_lib" target="hemerion_udp_bridge" condition="HEMERION_BUILD_SIM"/>
+  </export>
+</package>
