@@ -63,6 +63,20 @@ if(HEMERION_BUILD_SIM AND CMAKE_CROSSCOMPILING)
 endif()
 
 # ------------------------------------------------------------------------------
+# FreeRTOS port selection -- must run before add_subdirectory(vendor) below:
+# vendor/FreeRTOS-Kernel's CMakeLists.txt requires a `freertos_config` target
+# and FREERTOS_PORT to already exist, and FreeRTOSConfig.h lives in the BSP,
+# not in vendor/ (see bsp/README.md's FreeRTOSConfig notes). The active BSP
+# supplies both via freertos_port.cmake; BSPs without FreeRTOS support (e.g.
+# native_linux) simply omit that file and FreeRTOS-Kernel is left unconfigured.
+# ------------------------------------------------------------------------------
+if(HEMERION_BSP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/freertos_port.cmake")
+  add_library(freertos_config INTERFACE)
+  target_include_directories(freertos_config INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}")
+  include("bsp/${HEMERION_BSP}/freertos_port.cmake")
+endif()
+
+# ------------------------------------------------------------------------------
 # Vendored dependencies (git submodules) -- no source copies live in this tree
 # ------------------------------------------------------------------------------
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CMakeLists.txt")

@@ -6,13 +6,13 @@
 // hemerion/rtos_core/task_registry.h
 //
 // Central static registry of every FreeRTOS task an app intends to create.
-// This is deliberately decoupled from xTaskCreate(): linking FreeRTOS::Kernel
-// requires a BSP-supplied freertos_config target and port (see
-// vendor/FreeRTOS-Kernel/CMakeLists.txt), and no BSP provides FreeRTOSConfig.h
-// yet (bsp/stm32h743_nucleo is still a scaffold). Apps register descriptors
-// here during startup so the set of tasks can be validated (no duplicate
-// names, in-range priorities, sane stack sizes) on host; the loop that calls
-// xTaskCreate() once per descriptor lands once a BSP exists.
+// This is deliberately decoupled from xTaskCreate(): bsp/stm32h743_nucleo now
+// supplies FreeRTOSConfig.h and the freertos_config/FREERTOS_PORT wiring (see
+// vendor/FreeRTOS-Kernel/CMakeLists.txt), but this module itself still only
+// links ETL, not FreeRTOS::Kernel -- see modules/rtos_core/CMakeLists.txt.
+// Apps register descriptors here during startup so the set of tasks can be
+// validated (no duplicate names, in-range priorities, sane stack sizes) on
+// host; the loop that calls xTaskCreate() once per descriptor is the next step.
 // ------------------------------------------------------------------------------
 #pragma once
 

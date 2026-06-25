@@ -15,6 +15,14 @@ foreach(_hemerion_vendor_dep FreeRTOS-Kernel etl fmi4c open_ecat)
 endforeach()
 unset(_hemerion_vendor_dep)
 
+# FreeRTOS::Kernel -- upstream's CMakeLists.txt only defines the bare
+# `freertos_kernel` target; it requires the freertos_config/FREERTOS_PORT
+# wiring set up by the root CMakeLists.txt (from the active BSP) before this
+# add_subdirectory() call above runs.
+if(TARGET freertos_kernel)
+  add_library(FreeRTOS::Kernel ALIAS freertos_kernel)
+endif()
+
 # ------------------------------------------------------------------------------
 # STM32 CMSIS device headers + HAL drivers. None of these ST submodules ship a
 # CMakeLists.txt usable as-is: cmsis-core's is CMSIS-pack-generated and only

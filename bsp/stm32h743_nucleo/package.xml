@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="hemerion_bsp_stm32h743_nucleo" version="0.1.0">
+  <description>Board support package for the NUCLEO-H743ZI2: startup, clock tree, linker script, FreeRTOSConfig.h, and gpio/uart/board HAL implementations</description>
+  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <license>GPL-3.0-only</license>
+  <url type="repository">https://github.com/onurtuncer/Hemerion</url>
+
+  <build_depend>CMSIS::STM32H7</build_depend>
+  <build_depend>STM32H7xx::HAL</build_depend>
+  <build_depend>FreeRTOS::Kernel</build_depend>
+
+  <export>
+    <artifact type="interface_lib" target="hemerion_bsp_stm32h743_nucleo"/>
+  </export>
+</package>
