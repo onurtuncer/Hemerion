@@ -74,7 +74,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "HEMERION_BSP": "native_linux",
         "HEMERION_BUILD_FMU": "OFF",
-        "HEMERION_BUILD_TESTS": "ON"
+        "HEMERION_BUILD_TESTS": "ON",
+        "HEMERION_BUILD_SIM": "ON"
       }
     },
     {
