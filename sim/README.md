@@ -60,6 +60,47 @@ presets.
 
 ---
 
+## `shm_bridge/` — shared-memory transport
+
+Used when Aetherion runs as its own local process instead of being imported
+in-process via `fmi/plant/PlantModel` — the FMI master and that process
+synchronize each simulation step over a named shared-memory segment rather
+than function calls.
+
+```
+sim/shm_bridge/
+├── CMakeLists.txt
+├── include/hemerion/sim/shm_bridge/
+│   ├── bridge_protocol.h   # BridgeRegion wire format + StepPhase handshake
+│   ├── shm_segment.h       # Cross-platform named-segment RAII wrapper
+│   └── shm_bridge.h        # Lockstep API built on the two headers above
+├── src/
+│   ├── shm_segment.cpp     # shm_open/mmap (POSIX) or CreateFileMapping (Windows)
+│   └── shm_bridge.cpp
+└── test/
+```
+
+The FMI master creates the segment (`ShmBridge::create_master`) once per
+run; Aetherion attaches to it (`ShmBridge::open_peer`). Each step is a
+four-phase handshake over a lock-free atomic in the shared region —
+`kIdle → kInputsPosted → kOutputsPosted → kIdle` — with `kShutdownRequested`
+unblocking the peer's wait loop during teardown:
+
+```cpp
+hemerion::sim::shm_bridge::ShmBridge master = *ShmBridge::create_master("hemerion_aetherion_step");
+master.post_inputs(sim_time_s, dt_s, actuator_commands);
+ChannelFrame outputs;
+master.wait_for_outputs(outputs, 1000ms);
+```
+
+Synchronization is a spin-wait with a short sleep backoff, not an OS
+semaphore — acceptable for same-host steps that complete in microseconds to
+low milliseconds. `udp_bridge/` is the alternative transport for when
+Aetherion runs out-of-process on a different host, where this shared-memory
+approach doesn't apply.
+
+---
+
 ## Dependencies
 
 - **`fmu4cpp`** — vendored under `vendor/fmu4cpp`; wrapped by
