@@ -101,6 +101,50 @@ approach doesn't apply.
 
 ---
 
+## `udp_bridge/` — UDP transport
+
+Used when Aetherion runs out-of-process on a different host from the FMI
+master, where `shm_bridge/`'s shared-memory segment doesn't apply — the two
+sides exchange one UDP datagram per step instead of synchronizing over
+shared bytes.
+
+```
+sim/udp_bridge/
+├── CMakeLists.txt
+├── include/hemerion/sim/udp_bridge/
+│   ├── bridge_protocol.h  # StepPacket wire format + PacketType
+│   ├── udp_socket.h       # Cross-platform connected-UDP-socket RAII wrapper
+│   └── udp_bridge.h       # Lockstep API built on the two headers above
+├── src/
+│   ├── udp_socket.cpp     # BSD sockets (POSIX) or Winsock (Windows)
+│   └── udp_bridge.cpp
+└── test/
+```
+
+The FMI master binds a socket and targets Aetherion's address
+(`UdpBridge::create_master`); Aetherion binds its own socket pointed back at
+the master (`UdpBridge::create_peer`). Each step is two datagrams rather than
+a shared phase transition — a `kInputs` packet from the master, a `kOutputs`
+packet back from the peer — with a `kShutdown` packet unblocking the peer's
+wait loop during teardown:
+
+```cpp
+hemerion::sim::udp_bridge::UdpBridge master =
+    *UdpBridge::create_master("0.0.0.0", 9100, "192.168.1.50", 9100);
+master.post_inputs(sim_time_s, dt_s, actuator_commands);
+ChannelFrame outputs;
+master.wait_for_outputs(outputs, 1000ms);
+```
+
+UDP can drop a datagram outright, so a `wait_for_*()` timeout here can mean
+the packet itself never arrived, not just a slow peer — callers are expected
+to retry the corresponding `post_*()` call after a timeout. Both ends are
+assumed to be the same architecture; no byte-swapping is done on `StepPacket`,
+matching the no-byte-swap assumption `shm_bridge/` already makes for its
+shared region.
+
+---
+
 ## Dependencies
 
 - **`fmu4cpp`** — vendored under `vendor/fmu4cpp`; wrapped by
