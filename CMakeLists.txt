@@ -51,6 +51,15 @@ option(HEMERION_BUILD_TESTS "Build native unit/integration tests" OFF)
 option(HEMERION_BUILD_SIM "Build host-side simulation targets (sim/) -- never cross-compiled" OFF)
 option(HEMERION_BUILD_DOCS "Build Doxygen/Sphinx documentation" OFF)
 
+# Must run before any add_subdirectory() that calls add_test() (every
+# module's test/CMakeLists.txt, plus tests/ below) -- enable_testing() only
+# takes effect in directories processed after it runs, so calling it down in
+# the "cross-cutting integration / SWIL tests" block (after modules/apps/sim
+# are already added) left ctest unable to see any module-level test.
+if(HEMERION_BUILD_TESTS)
+  enable_testing()
+endif()
+
 set(HEMERION_BSP
     ""
     CACHE STRING "Active board support package directory under bsp/ (empty = none selected)")
@@ -132,7 +141,6 @@ endif()
 # ------------------------------------------------------------------------------
 if(HEMERION_BUILD_TESTS)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
-    enable_testing()
     add_subdirectory(tests)
   endif()
 endif()

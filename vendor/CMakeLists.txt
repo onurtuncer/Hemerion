@@ -6,9 +6,19 @@
 # vendor/ holds git submodules only -- no vendored source is copied into this
 # tree. Each submodule that exposes its own CMakeLists.txt is added below;
 # submodules not yet checked out are skipped so configure still succeeds.
+#
+# FreeRTOS-Kernel is additionally skipped whenever no freertos_config target
+# exists: its own CMakeLists.txt hard-fails (FATAL_ERROR) without one, and
+# only a BSP that supplies FreeRTOSConfig.h via freertos_port.cmake creates
+# that target (see root CMakeLists.txt). Presets whose active BSP doesn't
+# exist yet or doesn't support FreeRTOS (e.g. HEMERION_BSP=native_linux,
+# documented in bsp/README.md but not yet implemented) must still configure.
 # ------------------------------------------------------------------------------
 
 foreach(_hemerion_vendor_dep FreeRTOS-Kernel etl fmi4c open_ecat)
+  if(_hemerion_vendor_dep STREQUAL "FreeRTOS-Kernel" AND NOT TARGET freertos_config)
+    continue()
+  endif()
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_vendor_dep}/CMakeLists.txt")
     add_subdirectory(${_hemerion_vendor_dep})
   endif()
@@ -64,6 +74,15 @@ unset(_hemerion_cmsis_family)
 # of linking this target, the same way BSPs supply FreeRTOSConfig.h ahead of
 # FreeRTOS::Kernel (see bsp/README.md). *_template.c files are excluded: they
 # are scaffolding the BSP is expected to copy and implement, not link as-is.
+#
+# EXCLUDE_FROM_ALL keeps these out of the default build target: without it,
+# ninja/make compile every *_hal_driver.c unconditionally (they're STATIC
+# libraries, which are part of "all" by default), even for presets whose BSP
+# is some other family or doesn't exist yet (e.g. HEMERION_BSP=native_linux)
+# and therefore never supplies stm32<family>xx_hal_conf.h on the include
+# path -- those sources then fail to compile despite never being needed.
+# With EXCLUDE_FROM_ALL, the library is still built on demand for any preset
+# whose BSP actually target_link_libraries()s it.
 foreach(_hemerion_hal_driver IN ITEMS "stm32h7xx-hal-driver:STM32H7xx" "stm32f4xx-hal-driver:STM32F4xx")
   string(REPLACE ":" ";" _hemerion_hal_driver ${_hemerion_hal_driver})
   list(GET _hemerion_hal_driver 0 _hemerion_hal_dir)
@@ -73,7 +92,7 @@ foreach(_hemerion_hal_driver IN ITEMS "stm32h7xx-hal-driver:STM32H7xx" "stm32f4x
                                                  "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_hal_dir}/Src")
     file(GLOB _hemerion_hal_sources "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_hal_dir}/Src/*.c")
     list(FILTER _hemerion_hal_sources EXCLUDE REGEX "_template\\.c$")
-    add_library(${_hemerion_hal_dir} STATIC ${_hemerion_hal_sources})
+    add_library(${_hemerion_hal_dir} STATIC EXCLUDE_FROM_ALL ${_hemerion_hal_sources})
     target_include_directories(${_hemerion_hal_dir}
                                 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_hal_dir}/Inc")
     target_link_libraries(${_hemerion_hal_dir} PUBLIC CMSIS::${_hemerion_cmsis_family})
