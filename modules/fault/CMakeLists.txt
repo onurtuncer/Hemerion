@@ -5,14 +5,11 @@
 # ------------------------------------------------------------------------------
 # modules/fault -- fault code registry and software watchdog supervisor.
 #
-# Only those two pure-logic pieces are implemented so far (see package.xml);
-# the health monitor's HAL-backed inputs (BSP-fed sensor/peripheral faults)
-# and the hardware IWDG feed are not yet built. Both pieces have no hardware
-# or RTOS dependency, so this target only needs the standard library --
-# cmake/hemerion_module.cmake (the documented hemerion_add_module() helper)
-# and cmake/hemerion_hal/fault.h do not exist yet, so this file uses plain
-# CMake rather than the not-yet-built helper. Migrate to
-# hemerion_add_module() once it lands.
+# Only those two pure-logic pieces are implemented so far (see package.xml); the health monitor's HAL-backed inputs
+# (BSP-fed sensor/peripheral faults) and the hardware IWDG feed are not yet built. Both pieces have no hardware or RTOS
+# dependency, so this target only needs the standard library -- cmake/hemerion_module.cmake (the documented
+# hemerion_add_module() helper) and cmake/hemerion_hal/fault.h do not exist yet, so this file uses plain CMake rather
+# than the not-yet-built helper. Migrate to hemerion_add_module() once it lands.
 # ------------------------------------------------------------------------------
 
 add_library(hemerion_fault STATIC src/fault_registry.cpp src/watchdog.cpp)

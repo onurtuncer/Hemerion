@@ -3,18 +3,20 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Root superbuild -- includes all modules, bsp, sim, apps, tests, and docs.
-# Cross/native/test build modes are selected via CMakePresets.json, which sets
-# the toolchain file, HEMERION_BSP, and the HEMERION_BUILD_* options below.
+# Root superbuild -- includes all modules, bsp, sim, apps, tests, and docs. Cross/native/test build modes are selected
+# via CMakePresets.json, which sets the toolchain file, HEMERION_BSP, and the HEMERION_BUILD_* options below.
 # ------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.26)
 
-# Single source of truth for the project version is package.xml -- extract it
-# here rather than duplicating the number in project(VERSION ...).
+# Single source of truth for the project version is package.xml -- extract it here rather than duplicating the number in
+# project(VERSION ...).
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" _hemerion_package_xml)
-string(REGEX MATCH "<package[^>]* version=\"([0-9]+\\.[0-9]+\\.[0-9]+)\"" _hemerion_version_match
-       "${_hemerion_package_xml}")
+string(
+  REGEX MATCH
+        "<package[^>]* version=\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
+        _hemerion_version_match
+        "${_hemerion_package_xml}")
 if(NOT CMAKE_MATCH_1)
   message(FATAL_ERROR "Could not find version=\"X.Y.Z\" in package.xml")
 endif()
@@ -37,9 +39,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE
-      RelWithDebInfo
-      CACHE STRING "Build type" FORCE)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
 # ------------------------------------------------------------------------------
@@ -51,18 +51,15 @@ option(HEMERION_BUILD_TESTS "Build native unit/integration tests" OFF)
 option(HEMERION_BUILD_SIM "Build host-side simulation targets (sim/) -- never cross-compiled" OFF)
 option(HEMERION_BUILD_DOCS "Build Doxygen/Sphinx documentation" OFF)
 
-# Must run before any add_subdirectory() that calls add_test() (every
-# module's test/CMakeLists.txt, plus tests/ below) -- enable_testing() only
-# takes effect in directories processed after it runs, so calling it down in
-# the "cross-cutting integration / SWIL tests" block (after modules/apps/sim
-# are already added) left ctest unable to see any module-level test.
+# Must run before any add_subdirectory() that calls add_test() (every module's test/CMakeLists.txt, plus tests/ below)
+# -- enable_testing() only takes effect in directories processed after it runs, so calling it down in the "cross-cutting
+# integration / SWIL tests" block (after modules/apps/sim are already added) left ctest unable to see any module-level
+# test.
 if(HEMERION_BUILD_TESTS)
   enable_testing()
 endif()
 
-set(HEMERION_BSP
-    ""
-    CACHE STRING "Active board support package directory under bsp/ (empty = none selected)")
+set(HEMERION_BSP "" CACHE STRING "Active board support package directory under bsp/ (empty = none selected)")
 
 if(HEMERION_BUILD_FMU AND CMAKE_CROSSCOMPILING)
   message(FATAL_ERROR "HEMERION_BUILD_FMU requires a native toolchain, not a cross-compiling one")
@@ -72,12 +69,10 @@ if(HEMERION_BUILD_SIM AND CMAKE_CROSSCOMPILING)
 endif()
 
 # ------------------------------------------------------------------------------
-# FreeRTOS port selection -- must run before add_subdirectory(vendor) below:
-# vendor/FreeRTOS-Kernel's CMakeLists.txt requires a `freertos_config` target
-# and FREERTOS_PORT to already exist, and FreeRTOSConfig.h lives in the BSP,
-# not in vendor/ (see bsp/README.md's FreeRTOSConfig notes). The active BSP
-# supplies both via freertos_port.cmake; BSPs without FreeRTOS support (e.g.
-# native_linux) simply omit that file and FreeRTOS-Kernel is left unconfigured.
+# FreeRTOS port selection -- must run before add_subdirectory(vendor) below: vendor/FreeRTOS-Kernel's CMakeLists.txt
+# requires a `freertos_config` target and FREERTOS_PORT to already exist, and FreeRTOSConfig.h lives in the BSP, not in
+# vendor/ (see bsp/README.md's FreeRTOSConfig notes). The active BSP supplies both via freertos_port.cmake; BSPs without
+# FreeRTOS support (e.g. native_linux) simply omit that file and FreeRTOS-Kernel is left unconfigured.
 # ------------------------------------------------------------------------------
 if(HEMERION_BSP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/freertos_port.cmake")
   add_library(freertos_config INTERFACE)
@@ -100,8 +95,8 @@ if(HEMERION_BSP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/CMak
 endif()
 
 # ------------------------------------------------------------------------------
-# Modules -- reusable firmware libraries; each builds a static lib, and
-# optionally an FMU and/or native test binary depending on the options above
+# Modules -- reusable firmware libraries; each builds a static lib, and optionally an FMU and/or native test binary
+# depending on the options above
 # ------------------------------------------------------------------------------
 foreach(
   _hemerion_module
@@ -120,12 +115,10 @@ endforeach()
 unset(_hemerion_module)
 
 # ------------------------------------------------------------------------------
-# Apps -- top-level firmware executables (link modules + bsp); skipped when
-# building FMUs, since FMU shared libraries are the link target in that mode
+# Apps -- top-level firmware executables (link modules + bsp); skipped when building FMUs, since FMU shared libraries
+# are the link target in that mode
 # ------------------------------------------------------------------------------
-if(HEMERION_BUILD_APPS
-   AND NOT HEMERION_BUILD_FMU
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/CMakeLists.txt")
+if(HEMERION_BUILD_APPS AND NOT HEMERION_BUILD_FMU AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/CMakeLists.txt")
   add_subdirectory(apps)
 endif()
 

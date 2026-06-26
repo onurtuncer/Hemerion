@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Native unit tests for modules/power. Only added when HEMERION_BUILD_TESTS is
-# ON (test-native preset) -- see modules/power/CMakeLists.txt.
+# Native unit tests for modules/power. Only added when HEMERION_BUILD_TESTS is ON (test-native preset) -- see
+# modules/power/CMakeLists.txt.
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_power_battery_monitor test_battery_monitor.cpp)

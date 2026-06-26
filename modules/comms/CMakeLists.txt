@@ -5,13 +5,11 @@
 # ------------------------------------------------------------------------------
 # modules/comms -- CAN framing.
 #
-# Only the CAN framing layer is implemented so far (see package.xml); the
-# EtherCAT slave stack and MAVLink codec described there are not yet built.
-# CAN framing has no hardware dependency, so this target only needs ETL --
-# cmake/hemerion_module.cmake (the documented hemerion_add_module() helper)
-# and cmake/hemerion_hal/can.h do not exist yet, so this file uses plain
-# CMake rather than the not-yet-built helper. Migrate to hemerion_add_module()
-# once it lands.
+# Only the CAN framing layer is implemented so far (see package.xml); the EtherCAT slave stack and MAVLink codec
+# described there are not yet built. CAN framing has no hardware dependency, so this target only needs ETL --
+# cmake/hemerion_module.cmake (the documented hemerion_add_module() helper) and cmake/hemerion_hal/can.h do not exist
+# yet, so this file uses plain CMake rather than the not-yet-built helper. Migrate to hemerion_add_module() once it
+# lands.
 # ------------------------------------------------------------------------------
 
 add_library(hemerion_comms STATIC src/can_frame.cpp)

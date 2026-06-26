@@ -5,13 +5,12 @@
 # ------------------------------------------------------------------------------
 # arm-none-eabi.cmake
 #
-# Toolchain file for Cortex-M targets (STM32H7, STM32F4) built with the GNU Arm
-# Embedded ("arm-none-eabi") cross-compiler, version 12 or newer. Selected by
-# the cross-base preset family in CMakePresets.json via "toolchainFile".
+# Toolchain file for Cortex-M targets (STM32H7, STM32F4) built with the GNU Arm Embedded ("arm-none-eabi")
+# cross-compiler, version 12 or newer. Selected by the cross-base preset family in CMakePresets.json via
+# "toolchainFile".
 #
-# Only baseline flags that apply to every Cortex-M variant live here. MCU-
-# specific flags (-mcpu, -mfpu, -mfloat-abi) belong on the BSP's interface
-# target -- see bsp/README.md -- so this single file covers all variants.
+# Only baseline flags that apply to every Cortex-M variant live here. MCU- specific flags (-mcpu, -mfpu, -mfloat-abi)
+# belong on the BSP's interface target -- see bsp/README.md -- so this single file covers all variants.
 # ------------------------------------------------------------------------------
 
 set(CMAKE_SYSTEM_NAME Generic)

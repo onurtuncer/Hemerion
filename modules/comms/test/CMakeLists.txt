@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Native unit tests for modules/comms. Only added when HEMERION_BUILD_TESTS is
-# ON (test-native preset) -- see modules/comms/CMakeLists.txt.
+# Native unit tests for modules/comms. Only added when HEMERION_BUILD_TESTS is ON (test-native preset) -- see
+# modules/comms/CMakeLists.txt.
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_comms_can_frame test_can_frame.cpp)

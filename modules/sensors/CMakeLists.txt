@@ -5,13 +5,11 @@
 # ------------------------------------------------------------------------------
 # modules/sensors -- IMU raw-to-SI unit conversion.
 #
-# Only the IMU raw-count-to-SI-unit conversion is implemented so far (see
-# package.xml); the GPS NMEA/UBX parsers, barometer driver, and FMU export
-# described there are not yet built. The conversion math has no hardware
-# dependency, so this target needs no peripheral/bus libraries --
-# cmake/hemerion_module.cmake (the documented hemerion_add_module() helper)
-# does not exist yet, so this file uses plain CMake rather than the
-# not-yet-built helper. Migrate to hemerion_add_module() once it lands.
+# Only the IMU raw-count-to-SI-unit conversion is implemented so far (see package.xml); the GPS NMEA/UBX parsers,
+# barometer driver, and FMU export described there are not yet built. The conversion math has no hardware dependency, so
+# this target needs no peripheral/bus libraries -- cmake/hemerion_module.cmake (the documented hemerion_add_module()
+# helper) does not exist yet, so this file uses plain CMake rather than the not-yet-built helper. Migrate to
+# hemerion_add_module() once it lands.
 # ------------------------------------------------------------------------------
 
 add_library(hemerion_sensors STATIC src/imu/imu_conversion.cpp)

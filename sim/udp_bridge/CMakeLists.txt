@@ -3,12 +3,10 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# sim/udp_bridge -- UDP transport for the FMI master when Aetherion runs
-# out-of-process or on a different host (see package.xml). Host-only: this
-# directory is only reached when HEMERION_BUILD_SIM is ON, which the root
-# CMakeLists.txt already guards against CMAKE_CROSSCOMPILING. Implemented on
-# both POSIX (BSD sockets) and Windows (Winsock), selected at compile time in
-# src/udp_socket.cpp.
+# sim/udp_bridge -- UDP transport for the FMI master when Aetherion runs out-of-process or on a different host (see
+# package.xml). Host-only: this directory is only reached when HEMERION_BUILD_SIM is ON, which the root CMakeLists.txt
+# already guards against CMAKE_CROSSCOMPILING. Implemented on both POSIX (BSD sockets) and Windows (Winsock), selected
+# at compile time in src/udp_socket.cpp.
 # ------------------------------------------------------------------------------
 
 add_library(hemerion_udp_bridge STATIC src/udp_socket.cpp src/udp_bridge.cpp)

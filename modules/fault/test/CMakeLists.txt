@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Native unit tests for modules/fault. Only added when HEMERION_BUILD_TESTS is
-# ON (test-native preset) -- see modules/fault/CMakeLists.txt.
+# Native unit tests for modules/fault. Only added when HEMERION_BUILD_TESTS is ON (test-native preset) -- see
+# modules/fault/CMakeLists.txt.
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_fault_registry test_fault_registry.cpp)

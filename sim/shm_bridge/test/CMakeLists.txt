@@ -3,11 +3,9 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Native unit tests for sim/shm_bridge. Only added when HEMERION_BUILD_TESTS
-# is ON (test-native preset) -- see sim/shm_bridge/CMakeLists.txt. Both
-# binaries run single-process: they open two handles onto the same named
-# segment to exercise the cross-process protocol without spawning a second
-# process.
+# Native unit tests for sim/shm_bridge. Only added when HEMERION_BUILD_TESTS is ON (test-native preset) -- see
+# sim/shm_bridge/CMakeLists.txt. Both binaries run single-process: they open two handles onto the same named segment to
+# exercise the cross-process protocol without spawning a second process.
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_shm_bridge_segment test_shm_segment.cpp)

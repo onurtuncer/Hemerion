@@ -3,10 +3,9 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Native unit tests for sim/udp_bridge. Only added when HEMERION_BUILD_TESTS
-# is ON (test-native preset) -- see sim/udp_bridge/CMakeLists.txt. Both
-# binaries run single-process: they bind two sockets on 127.0.0.1 to exercise
-# the protocol without spawning a second process.
+# Native unit tests for sim/udp_bridge. Only added when HEMERION_BUILD_TESTS is ON (test-native preset) -- see
+# sim/udp_bridge/CMakeLists.txt. Both binaries run single-process: they bind two sockets on 127.0.0.1 to exercise the
+# protocol without spawning a second process.
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_udp_bridge_socket test_udp_socket.cpp)

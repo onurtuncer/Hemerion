@@ -5,9 +5,8 @@
 # ------------------------------------------------------------------------------
 # x86_64-windows-msvc.cmake
 #
-# Toolchain file for native Windows builds with MSVC 2022. Used for
-# fmu-native and shm_bridge builds on Windows; adds the Windows 10 shared-
-# memory APIs required by sim/shm_bridge.
+# Toolchain file for native Windows builds with MSVC 2022. Used for fmu-native and shm_bridge builds on Windows; adds
+# the Windows 10 shared- memory APIs required by sim/shm_bridge.
 # ------------------------------------------------------------------------------
 
 set(CMAKE_SYSTEM_NAME Windows)

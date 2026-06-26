@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# Native unit tests for modules/rtos_core. Only added when HEMERION_BUILD_TESTS
-# is ON (test-native preset) -- see modules/rtos_core/CMakeLists.txt.
+# Native unit tests for modules/rtos_core. Only added when HEMERION_BUILD_TESTS is ON (test-native preset) -- see
+# modules/rtos_core/CMakeLists.txt.
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_rtos_core_task_registry test_task_registry.cpp)
