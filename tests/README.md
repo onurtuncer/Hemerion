@@ -38,35 +38,100 @@ ctest --preset fmu-native -L fmu --output-on-failure
 
 ## SWIL test harness (`swil/`)
 
-SWIL tests use `pyrenode3` to launch a Renode instance, load the firmware ELF, and observe behaviour through the machine API. Each test is a Python file consumed by pytest via a CTest `add_test(... COMMAND pytest ...)` entry.
+SWIL tests use `pyrenode3` (Renode's Python bindings, hosted in-process via
+pythonnet/CoreCLR) to launch a Renode machine, load the firmware ELF, and
+observe behaviour over its UART. Each test is a Python file consumed by
+pytest via the `add_test(... COMMAND pytest ...)` entry in
+`tests/swil/CMakeLists.txt`.
 
 ```
 tests/swil/
-├── conftest.py             # Renode machine fixture (start / teardown)
-├── test_sensor_pipeline.py # IMU task publishes to gnc queue within deadline
-├── test_fault_injection.py # Force sensor timeout; assert fault task fires
-└── test_can_gateway.py     # EtherCAT frame → CAN frame round-trip latency
+├── CMakeLists.txt     # find_package(Renode)/find_package(Pyrenode3) gate + add_test
+├── requirements.txt    # pytest + pyrenode3 (pinned commit), for the venv described below
+├── conftest.py          # renode_machine fixture: loads the platform, yields the Machine
+└── test_led_blink.py   # apps/led_blink smoke test: watches usart3 for "LED ON"/"LED OFF"
 ```
 
-The `conftest.py` fixture:
-1. Creates a `pyrenode3.RenodeWrapper` instance.
-2. Loads `sim/renode/scripts/swil_lockstep.resc`.
-3. Loads the firmware ELF from the build directory.
-4. Yields the machine handle to the test.
-5. On teardown, stops Renode and captures the UART log.
+The `renode_machine` fixture in `conftest.py`:
+1. Sets `$repl` to `sim/renode/boards/nucleo_h743zi2.repl` (absolute path — `execute_script` resolves relative paths against Renode's own install root, not the repo).
+2. Runs `sim/renode/scripts/swil_lockstep.resc`, which creates the machine and loads that platform.
+3. Yields the `Machine` handle to the test.
+4. On teardown, calls `Emulation().clear()`.
 
-Example test structure:
+The test itself still has to `load_elf()` its own firmware and start the
+emulation — the fixture only brings up the bare platform:
 
 ```python
-def test_imu_task_deadline(renode_machine):
-    machine = renode_machine
-    machine.StartEmulation()
-    # Advance 100 ticks deterministically
-    machine.TimeSource.AdvanceBy(TimeInterval.FromMilliseconds(100))
-    uart_log = machine.GetUartOutput("usart3")
-    assert "IMU_OK" in uart_log
-    assert "DEADLINE_MISS" not in uart_log
+from pyrenode3.wrappers import Emulation, TerminalTester
+from conftest import firmware_elf, peripheral
+
+def test_led_blinks(renode_machine):
+    renode_machine.load_elf(str(firmware_elf("led_blink")))
+
+    tester = TerminalTester(peripheral(renode_machine, "sysbus.usart3"), timeout=5.0)
+    Emulation().StartAll()
+
+    assert tester.WaitFor("LED ON", None, False, False, False, False) is not None
 ```
+
+`firmware_elf()` skips (rather than fails) when the target app hasn't been
+built under `build/renode-h743/` yet — `tests/swil` runs against whatever
+that preset most recently produced; it doesn't drive the cross-build itself.
+
+### Setup: Renode + pyrenode3
+
+`pyrenode3` hosts Renode via pythonnet/CoreCLR in-process, which requires
+Renode's **.NET 8 / CoreCLR** Linux build. The Windows Renode installer ships
+a .NET-Framework build that pyrenode3 cannot load — on a Windows dev machine,
+run the harness from **WSL2** instead (matches the Ubuntu + Renode container
+CI uses). Cross-compiling the firmware itself still happens on the Windows
+host with the ARM toolchain already set up there; WSL only needs Renode and
+the pyrenode3 venv.
+
+One-time setup inside the WSL2 distro:
+
+```bash
+# Renode (.deb ships the CoreCLR build; /usr/bin/renode is a launcher
+# wrapping `dotnet /opt/renode/bin/Renode.dll`)
+wget https://github.com/renode/renode/releases/download/v1.16.1/renode_1.16.1_amd64.deb
+sudo apt install ./renode_1.16.1_amd64.deb
+
+python3 -m venv ~/swilvenv
+~/swilvenv/bin/pip install -r tests/swil/requirements.txt
+```
+
+pyrenode3's loader needs to be pointed at Renode's *build output*
+(`/opt/renode/bin`), not the `/usr/bin/renode` shell launcher, which it
+can't introspect:
+
+```bash
+export PYRENODE_BUILD_DIR=/opt/renode
+export PYRENODE_BUILD_OUTPUT=bin
+```
+
+### Running
+
+Build the firmware on Windows first (the WSL side only runs tests, it
+doesn't cross-compile):
+
+```powershell
+cmake --build --preset renode-h743 --target led_blink
+```
+
+Then, from WSL2, against the repo on the Windows drive (`/mnt/d/...`):
+
+```bash
+cd /mnt/d/Dev/Hemerion/tests/swil
+~/swilvenv/bin/python3 -m pytest test_led_blink.py -v
+```
+
+`tests/swil/CMakeLists.txt`'s `find_package(Renode)` / `find_package(Pyrenode3)`
+gate means a `cmake --preset test-swil` configure on Windows (where Renode
+is the incompatible .NET-Framework build) silently skips `tests/swil`
+rather than failing — the `ctest --preset test-swil` path is meant for a
+single Linux environment (CI's Ubuntu + Renode container) that has both the
+ARM toolchain and a CoreCLR Renode build; it isn't wired to span the
+Windows-build / WSL-test split above.
 
 ---
 

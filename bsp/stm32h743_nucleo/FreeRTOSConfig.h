@@ -82,6 +82,13 @@
 #define INCLUDE_xTaskGetHandle 1
 #define INCLUDE_xTaskResumeFromISR 1
 
+/* .isr_vector is in flash (see linker/stm32h743zi_flash.ld), so the port
+ * can't patch SVCall/PendSV to point at vPortSVCHandler/xPortPendSVHandler
+ * directly -- bsp/stm32h743_nucleo/src/freertos_hooks.c installs CMSIS-named
+ * wrappers that branch to them instead ("Indirect Routing"). The port's
+ * xPortStartScheduler() Direct-Routing check requires this to be 0. */
+#define configCHECK_HANDLER_INSTALLATION 0
+
 /* Cortex-M7 NVIC: STM32H7 implements 4 priority bits (16 levels) */
 #define configPRIO_BITS 4
 #define configLIBRARY_LOWEST_INTERRUPT_PRIORITY 0xf

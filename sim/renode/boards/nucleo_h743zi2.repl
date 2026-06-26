@@ -1,0 +1,49 @@
+// ------------------------------------------------------------------------------
+// Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+//
+// SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+// ------------------------------------------------------------------------------
+// NUCLEO-H743ZI2 board description for Renode SWIL. Renode ships a CPU
+// description for this exact die (platforms/cpus/stm32h743.repl) but only a
+// board file for its H753 sibling (platforms/boards/nucleo_h753zi.repl) --
+// the H743 and H753 share the same Nucleo-144 baseboard, so the LED/button
+// wiring below is copied from that bundled board file verbatim, just paired
+// with the H743 CPU description instead of the H753 one.
+//
+// LD1 (green, PB0), LD2 (yellow, PE1), LD3 (red, PB14), and the USER button
+// (PC13) match the BSP's pin choices in bsp/stm32h743_nucleo/src/gpio.c and
+// the Nucleo-144 schematic. usart3 (PD8/PD9, the ST-LINK VCP) is already
+// defined by stm32h743.repl; tests/swil reads its output via the analyzer
+// pyrenode3 attaches in sim/renode/scripts/swil_lockstep.resc.
+// ------------------------------------------------------------------------------
+
+using "platforms/cpus/stm32h743.repl"
+
+GreenLED: Miscellaneous.LED @ gpioPortB 0
+
+YellowLED: Miscellaneous.LED @ gpioPortE 1
+
+RedLED: Miscellaneous.LED @ gpioPortB 14
+
+UserButton1: Miscellaneous.Button @ gpioPortC 13
+    -> gpioPortC@13
+
+gpioPortB:
+    0 -> GreenLED@0
+    14 -> RedLED@0
+
+gpioPortE:
+    1 -> YellowLED@0
+
+// stm32h743.repl's PWR region is an untyped sysbus Tag (logs and always
+// reads 0); it already overrides D3CR/VOSRDY with a constant 0x2000 so
+// SystemClock_Config's voltage-scaling wait succeeds, but CSR1/ACTVOSRDY
+// has no such override, so the busy-wait in ExitRun0Mode()
+// (system_stm32h7xx.c, run before main()) spins forever under SWIL. Tag
+// the same constant readiness bit (0x2000) onto CSR1 the way the bundled
+// platform does for D3CR. Must use "init add" (not "init") -- redeclaring
+// a bare "init:" here replaces the entire inherited sysbus init list,
+// silently dropping the parent's D3CR/PWR/etc. tags.
+sysbus:
+    init add:
+        Tag <0x58024804, 0x58024804> "CSR1" 0x2000  // ACTVOSRDY flag (b13)

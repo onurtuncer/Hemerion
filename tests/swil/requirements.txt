@@ -1,0 +1,20 @@
+# ------------------------------------------------------------------------------
+# Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+#
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+# ------------------------------------------------------------------------------
+# Python dependencies for tests/swil/ (see tests/README.md). Install into a
+# venv, then point PYRENODE_BIN at your Renode install before running pytest:
+#
+#   python -m venv .venv
+#   .venv/bin/pip install -r tests/swil/requirements.txt
+#   PYRENODE_BIN=/path/to/Renode python -m pytest tests/swil
+#
+# pyrenode3 is not published on PyPI -- antmicro only ships it from git.
+# cmake/FindPyrenode3.cmake checks for it the same way: `import
+# importlib.metadata; m.version("pyrenode3")`, which this commit-pinned
+# install satisfies.
+# ------------------------------------------------------------------------------
+
+pytest>=8.0
+pyrenode3 @ git+https://github.com/antmicro/pyrenode3.git@a80d3643934d471f290f049fc50f4973969a068a

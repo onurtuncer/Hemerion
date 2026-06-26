@@ -1,0 +1,10 @@
+:name: HemerionSwilLockstep
+using sysbus
+
+$name?="nucleo_h743zi2"
+$repl?=@sim/renode/boards/nucleo_h743zi2.repl
+
+mach create $name
+machine LoadPlatformDescription $repl
+
+showAnalyzer sysbus.usart3

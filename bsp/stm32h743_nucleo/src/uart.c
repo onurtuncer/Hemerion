@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
  * ------------------------------------------------------------------------------ */
 
+#include <stdbool.h>
+
 #include "hemerion/hal/uart.h"
 #include "stm32h7xx_hal.h"
 

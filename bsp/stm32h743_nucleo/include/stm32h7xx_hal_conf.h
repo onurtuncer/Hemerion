@@ -30,6 +30,7 @@ extern "C" {
 /* ########################## Module Selection ############################## */
 #define HAL_MODULE_ENABLED
 #define HAL_CORTEX_MODULE_ENABLED
+#define HAL_DMA_MODULE_ENABLED /* UART_HandleTypeDef references DMA_HandleTypeDef unconditionally */
 #define HAL_FLASH_MODULE_ENABLED
 #define HAL_GPIO_MODULE_ENABLED
 #define HAL_PWR_MODULE_ENABLED
@@ -92,6 +93,10 @@ extern "C" {
 #ifdef HAL_GPIO_MODULE_ENABLED
 #include "stm32h7xx_hal_gpio.h"
 #endif /* HAL_GPIO_MODULE_ENABLED */
+
+#ifdef HAL_DMA_MODULE_ENABLED
+#include "stm32h7xx_hal_dma.h"
+#endif /* HAL_DMA_MODULE_ENABLED */
 
 #ifdef HAL_EXTI_MODULE_ENABLED
 #include "stm32h7xx_hal_exti.h"

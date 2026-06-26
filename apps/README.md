@@ -11,6 +11,7 @@ Top-level firmware executables. An app is the only thing in the repository that 
 | `gnc_flight/` | STM32H743 | Main GNC flight computer: sensors → EKF → control → actuators |
 | `can_actuator_link/` | STM32F446 | Minimal CAN actuator command sender; demonstrates `modules/comms` framing |
 | `datalink/` | STM32F446 | Telemetry downlink + uplink: MAVLink over UART/radio |
+| `led_blink/` | STM32H743 | Minimal FreeRTOS LED blink demo; primary SWIL example via `tests/swil/test_led_blink.py` |
 
 ---
 
