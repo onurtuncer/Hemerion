@@ -40,6 +40,53 @@ function Test-ToolWorking {
     return -not ($raw -match "was not found")
 }
 
+function Test-AetherionInstalled {
+    $hints = @($env:AETHERION_ROOT, "$env:ProgramFiles\Aetherion", "${env:ProgramFiles(x86)}\Aetherion") | Where-Object { $_ }
+    foreach ($hint in $hints) {
+        if (-not (Test-Path $hint)) { continue }
+        if (Get-ChildItem -Path $hint -Recurse -Filter "AetherionConfig.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1) { return $true }
+        if (Test-Path (Join-Path $hint "include\Aetherion\Aetherion.h")) { return $true }
+    }
+    return $false
+}
+
+function Install-Aetherion {
+    if (Test-AetherionInstalled) {
+        Write-Host "Aetherion -- already installed, skipping [fmu co-simulation]" -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Aetherion -- not found [fmu co-simulation]" -ForegroundColor Yellow
+    if (-not (Confirm-Install "Aetherion (FMU co-simulation library, latest GitHub release)")) {
+        Write-Host "Skipped Aetherion." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/onurtuncer/Aetherion/releases/latest" -Headers @{ "User-Agent" = "Hemerion-installer" }
+    } catch {
+        Write-Host "Could not query the Aetherion releases API: $_" -ForegroundColor Red
+        return
+    }
+
+    $asset = $release.assets | Where-Object { $_.name -eq "Aetherion.msi" } | Select-Object -First 1
+    if (-not $asset) {
+        Write-Host "No Aetherion.msi asset found on the latest Aetherion release ($($release.tag_name)). Skipping." -ForegroundColor Red
+        return
+    }
+
+    $msiPath = Join-Path $env:TEMP "Aetherion.msi"
+    Write-Host "Downloading $($asset.browser_download_url)" -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $msiPath
+
+    Write-Host "Running: msiexec /i $msiPath /qn /norestart" -ForegroundColor Cyan
+    $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", "`"$msiPath`"", "/qn", "/norestart") -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Host "Aetherion install failed (msiexec exit code $($proc.ExitCode))." -ForegroundColor Red
+    }
+    Remove-Item $msiPath -ErrorAction SilentlyContinue
+}
+
 function Install-WingetPackage {
     param([string]$Name, [string]$Id, [string]$DetectCommand, [string]$Category, [string[]]$ExtraArgs = @())
 
@@ -96,5 +143,8 @@ if ($Heavy) {
         Write-Host "`nMSVC (cl) not found. Re-run with -Heavy to install Visual Studio Build Tools, or install Visual Studio manually." -ForegroundColor Yellow
     }
 }
+
+Write-Host "`n-- Aetherion (FMU co-simulation) --"
+Install-Aetherion
 
 Write-Host "`nDone. Open a NEW shell (so PATH updates apply) and run scripts/check-toolchain.ps1 to verify." -ForegroundColor Cyan
