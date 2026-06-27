@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+  SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+
+  FMI 2.0 model description for the GPS UBX hardware simulator FMU
+  (Hemerion/gps/fmu/fmuMain.cpp). This FMU has no FMI-level outputs -- its
+  only effect is a UDP side channel (a UBX-NAV-PVT frame sent on every
+  fmi2DoStep), so <Outputs> in ModelStructure is intentionally empty. The
+  guid below must match kExpectedGuid in fmuMain.cpp exactly.
+-->
+<fmiModelDescription
+    fmiVersion="2.0"
+    modelName="HemerionGpsUbxSimulator"
+    guid="{3F2A1C9E-7B4D-4E8A-9C3F-6A1B2C3D4E5F}"
+    description="Truth-state-to-UBX-NAV-PVT GPS hardware simulator for SWIL/HIL co-simulation"
+    generationTool="hand-written (see fmuMain.cpp header comment)"
+    variableNamingConvention="flat">
+
+  <CoSimulation
+      modelIdentifier="hemerion_gps_fmu"
+      canHandleVariableCommunicationStepSize="true"
+      canGetAndSetFMUstate="false"
+      canSerializeFMUstate="false"
+      providesDirectionalDerivative="false"/>
+
+  <ModelVariables>
+    <ScalarVariable name="latitude_deg" valueReference="0" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="longitude_deg" valueReference="1" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="altitude_m" valueReference="2" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="ground_speed_mps" valueReference="3" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="course_deg" valueReference="4" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+  </ModelVariables>
+
+  <ModelStructure>
+    <!-- No <Outputs/> entries: this FMU's effect is the UDP side channel in fmi2DoStep, not FMI variable exchange. -->
+  </ModelStructure>
+
+</fmiModelDescription>

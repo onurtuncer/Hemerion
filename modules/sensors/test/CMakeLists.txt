@@ -30,3 +30,13 @@ target_link_libraries(test_hemerion_sensors_gps_driver PRIVATE hemerion_sensors)
 
 add_test(NAME sensors.gps_driver COMMAND test_hemerion_sensors_gps_driver)
 set_tests_properties(sensors.gps_driver PROPERTIES LABELS "unit")
+
+# Round-trip test for the GPS FMU simulator (gps/fmu/). ubxEmitter.cpp is compiled directly into this test binary
+# rather than via hemerion_sensors, since the emitter is sim-only code gated behind HEMERION_BUILD_FMU in
+# gps/fmu/CMakeLists.txt and must not be linked into cross-compiled firmware.
+add_executable(test_hemerion_sensors_ubx_emitter test_ubx_emitter.cpp
+                                                  "${CMAKE_CURRENT_SOURCE_DIR}/../src/gps/fmu/ubxEmitter.cpp")
+target_link_libraries(test_hemerion_sensors_ubx_emitter PRIVATE hemerion_sensors)
+
+add_test(NAME sensors.ubx_emitter COMMAND test_hemerion_sensors_ubx_emitter)
+set_tests_properties(sensors.ubx_emitter PROPERTIES LABELS "unit")
