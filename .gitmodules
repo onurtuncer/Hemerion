@@ -19,3 +19,6 @@
 [submodule "vendor/etl"]
 	path = vendor/etl
 	url = https://github.com/ETLCPP/etl.git
+[submodule "vendor/verilator"]
+	path = vendor/verilator
+	url = https://github.com/verilator/verilator.git
