@@ -11,6 +11,8 @@ Board support packages. One subdirectory per physical or virtual target. A BSP o
 | `stm32h743_nucleo/` | STM32H743ZI Nucleo-144 | Primary HWIL and Renode SWIL target |
 | `stm32f446_custom/` | Custom ECS gateway board | CAN + EtherCAT slave, TwinCAT 3 interface |
 | `native_linux/` | x86_64 Linux (PREEMPT_RT) | POSIX shims over FreeRTOS API for desktop testing |
+| `zynq_core0/` *(planned)* | Zynq-7020 PS Core 0 | Linux (PetaLinux), OpenAMP `remoteproc` master, ETH bridge to Aetherion. See [AMP targets](#amp-targets-planned) below. |
+| `zynq_core1/` *(planned)* | Zynq-7020 PS Core 1 | FreeRTOS, bare-metal — runs the same Hemerion tasks as `stm32h743_nucleo` over RPMsg. |
 | `template/` | Scaffold for new boards | Copy this to add a new target |
 
 ---
@@ -72,6 +74,39 @@ If a peripheral is not available on a given target (e.g. `native_linux/` has no 
 5. Add a Renode `.repl` file in `sim/renode/boards/` if SWIL simulation is needed.
 
 No module source changes. No root `CMakeLists.txt` changes beyond `add_subdirectory`.
+
+---
+
+## AMP targets (planned)
+
+`zynq_core0/` and `zynq_core1/` are an **evaluated alternative** to the
+STM32H743 path, explored as part of an optional FPGA mezzanine (see
+`fpga/README.md`). They are not a committed replacement — design work
+stopped at the architecture-reference stage, no BSP code exists yet, and
+`stm32h743_nucleo` remains the primary target until a Phase 1 prototype
+(PYNQ-Z2) validates the split.
+
+The split follows Xilinx's standard AMP (Asymmetric Multi-Processing)
+model on the Zynq-7020's two Cortex-A9 cores:
+
+- **Core 0 — Linux.** Owns the Ethernet bridge to Aetherion, loads the
+  Core 1 firmware image via `remoteproc`, and handles bulk data logging.
+  HAL contract is implemented with POSIX sockets/pthreads instead of
+  HAL+FreeRTOS.
+- **Core 1 — FreeRTOS.** Runs Hemerion's existing tasks essentially
+  unchanged — same `hemerion/hal/*` contract, same `FLIGHT_SAFE` pragma
+  regions, same task code. Only the BSP underneath differs.
+
+Cross-core communication is OpenAMP/RPMsg, not the `hemerion/hal/*`
+contract — it is a new transport, not a new HAL header. If this track is
+picked up, the RPMsg interface should land as a `modules/comms` addition
+(see `modules/README.md`), since it is firmware-side IPC, not
+board-specific hardware access.
+
+**Critical constraint if this is ever implemented:** Core 1's GNC loop
+must not depend on Core 0 being alive. If Linux locks up, RPMsg sends are
+skipped, not blocked — `FLIGHT_SAFE` code must never wait on the Linux
+side.
 
 ---
 

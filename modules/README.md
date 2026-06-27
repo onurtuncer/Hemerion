@@ -16,7 +16,7 @@ Reusable firmware libraries. Each module is an independent CMake subdirectory th
 |---|---|
 | `sensors/` | IMU, barometer, GPS drivers; raw → SI unit conversion; FMU export |
 | `actuators/` | Servo, ESC, pyro channel drivers; FMU export |
-| `comms/` | CAN framing, EtherCAT slave stack, MAVLink codec |
+| `comms/` | CAN framing, EtherCAT slave stack, MAVLink codec; OpenAMP/RPMsg transport *(planned, see `bsp/README.md` AMP targets)* |
 | `gnc/` | EKF/UKF state estimation, control law; FMI co-simulation interface |
 | `rtos_core/` | FreeRTOS task definitions, queue registry, tick config, memory pools |
 | `fault/` | Health monitor, watchdog, error code registry |

@@ -41,6 +41,7 @@ to the boundless realm of *Aetherion*.
 - **Embedded Template Library (ETL)** as an STL alternative for bare-metal targets
 - **CMakePresets-based cross-compilation** toolchain for ARM Cortex-M targets
 - **Post-modern C++23 firmware design**
+- **Optional Zynq-7020 AMP mezzanine** *(planned)* — FPGA-accelerated sensor preprocessing, evaluated alongside the STM32H743 path
 
 ---
 
@@ -66,6 +67,10 @@ hemerion/
 ├── bsp/                    # Board support packages (one per target)
 │   ├── stm32h743_nucleo/
 │   └── template/
+│
+├── fpga/                   # PL IP blocks for the optional Zynq AMP mezzanine (planned)
+│   ├── ip/                 # imu_fir, sensor_sync, pwm_dshot, can_fd, ...
+│   └── verilator/          # Verilator C++ harness pattern for Catch2/CTest
 │
 ├── sim/                    # Host-side simulation targets (never cross-compiled)
 │   ├── renode/
@@ -127,6 +132,37 @@ whichever toolchain is active.
 **`sim/` is host-only.** Nothing under `sim/` is ever cross-compiled. Renode
 board definitions, the FMI master, and the shared-memory bridge to Aetherion
 live here and link against the native build of module FMUs.
+
+### Planned: optional FPGA / AMP tier
+
+An optional Zynq-7020 mezzanine, run in Xilinx's AMP (Asymmetric
+Multi-Processing) configuration, is under evaluation as an alternative to
+the STM32H743 path — not a committed replacement:
+
+```
+┌─────────────────────────────┐
+│      Aetherion (Plant)      │  ← FMI 2.0 / UDP
+└────────────┬────────────────┘
+             │
+┌────────────▼────────────────┐
+│  Zynq-7020 PS — Core 0      │  ← Linux, OpenAMP remoteproc, ETH bridge
+│  (bsp/zynq_core0, planned)  │
+└────────────┬────────────────┘
+             │ RPMsg (OpenAMP)
+┌────────────▼────────────────┐
+│  Zynq-7020 PS — Core 1      │  ← FreeRTOS, same Hemerion tasks unchanged
+│  (bsp/zynq_core1, planned)  │
+└────────────┬────────────────┘
+             │ AXI / EMIO
+┌────────────▼────────────────┐
+│  Zynq-7020 PL — FPGA IP     │  ← fpga/ip/*: IMU FIR, sensor sync, ...
+└──────────────────────────────┘
+```
+
+See `fpga/README.md` and the "AMP targets (planned)" section of
+`bsp/README.md` for status and open questions. `stm32h743_nucleo` remains
+the primary HWIL/SWIL target until a Phase 1 prototype validates this
+path.
 
 ---
 
