@@ -11,7 +11,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install dependencies
       run: sudo apt update && sudo apt install -y lcov gcovr gcc-13 g++-13
