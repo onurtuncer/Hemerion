@@ -15,10 +15,15 @@ jobs:
           submodules: recursive
 
       - name: Install system deps
-        run: sudo apt-get update
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14
 
       - name: Configure
         run: cmake --preset=test-native
+        env:
+          CC: gcc-14
+          CXX: g++-14
 
       - name: Build
         run: cmake --build --preset=test-native
@@ -35,13 +40,18 @@ jobs:
           submodules: recursive
 
       - name: Install system deps
-        run: sudo apt-get update
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14
 
       - name: Configure
         run: cmake --preset=fmu-native
+        env:
+          CC: gcc-14
+          CXX: g++-14
 
       - name: Build
         run: cmake --build --preset=fmu-native
 
       - name: Run FMU tests
-        run: ctest --preset=fmu-native -L fmu --output-on-failure
+        run: ctest --preset=fmu-native --output-on-failure

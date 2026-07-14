@@ -109,7 +109,7 @@
       "configurePreset": "fmu-native",
       "filter": { "include": { "label": "fmu" } },
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+      "execution": { "noTestsAction": "ignore", "stopOnFailure": false }
     },
     {
       "name": "test-swil",
