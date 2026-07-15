@@ -8,6 +8,7 @@
 # Configuration file for the Sphinx documentation builder.
 
 import os
+import re
 import sys
 
 # Step 1: Add parent directory to sys.path
@@ -25,9 +26,14 @@ print(f"Project name from top level: {project_name}")
 
 # -- Project information -----------------------------------------------------
 
-version_txt = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'version.txt'))
-with open(version_txt, 'r', encoding='utf-8') as _f:
-    _project_version = _f.read().strip()
+# Single source of truth for the project version is package.xml (same as the
+# top-level CMakeLists.txt).
+package_xml = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'package.xml'))
+with open(package_xml, 'r', encoding='utf-8') as _f:
+    _version_match = re.search(r'<package[^>]* version="([0-9]+\.[0-9]+\.[0-9]+)"', _f.read())
+if _version_match is None:
+    raise ValueError(f'Could not find version="X.Y.Z" in {package_xml}')
+_project_version = _version_match.group(1)
 
 project = project_name
 author = 'Onur Tuncer, PhD'
