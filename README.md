@@ -231,7 +231,7 @@ The framework includes a structured verification strategy:
 |---|---|---|
 | CMake | ≥ 3.26 | Build system |
 | arm-none-eabi-gcc | ≥ 12 | Cross-compiler |
-| GCC or MSVC | host default | Native / FMU builds |
+| GCC ≥ 14 or MSVC 2022 | host native | Native / FMU builds — GCC 14+ required for `<print>` (C++23); Ubuntu 24.04 ships GCC 13 by default, install via `sudo apt-get install g++-14` |
 | Renode | ≥ 1.15 | SWIL simulation |
 | Python | ≥ 3.10 | Renode scripting, pyrenode3 |
 
