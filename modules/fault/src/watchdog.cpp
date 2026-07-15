@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file watchdog.cpp
+/// @brief Implements the WatchdogSupervisor deadline tracking declared in
+/// watchdog.h.
+
 #include "hemerion/fault/watchdog.h"
 
 namespace hemerion::fault {

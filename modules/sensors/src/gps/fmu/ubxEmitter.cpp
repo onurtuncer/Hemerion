@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file ubxEmitter.cpp
+/// @brief Implements the UBX-NAV-PVT frame encoder declared in
+/// ubxEmitter.hpp.
+
 #include "Hemerion/gps/fmu/ubxEmitter.hpp"
 
 #include <cmath>

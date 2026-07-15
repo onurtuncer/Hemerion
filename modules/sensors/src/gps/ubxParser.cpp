@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file ubxParser.cpp
+/// @brief Implements the streaming UBX frame parser declared in
+/// ubxParser.hpp.
+
 #include "Hemerion/gps/ubxParser.hpp"
 
 namespace hemerion::sensors::gps {

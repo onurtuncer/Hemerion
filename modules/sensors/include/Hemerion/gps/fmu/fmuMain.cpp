@@ -3,28 +3,31 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
-// Hemerion/gps/fmu/fmuMain.cpp
-//
-// FMI 2.0 Co-Simulation slave entry points for the GPS UBX hardware
-// simulator. This FMU has no FMI output variables -- its effect is a UDP
-// side channel: each fmi2DoStep() call turns the current truth-state
-// inputs into a noisy GpsFix (GpsNoiseModel), encodes it as a real
-// UBX-NAV-PVT frame (UbxEmitter), and sends it to a fixed UDP peer
-// (UdpSender) -- typically Renode's emulated UART4 RX backend, so the real,
-// unmodified GpsDriver/UbxParser on the firmware side decodes it exactly as
-// it would bytes from a physical u-blox M9N.
-//
-// UDP destination is read once at fmi2Instantiate() from
-// HEMERION_GPS_FMU_UDP_HOST / HEMERION_GPS_FMU_UDP_PORT (defaults
-// 127.0.0.1:5762) rather than exposed as an FMI string parameter -- this
-// keeps fmi2SetString unimplemented, which is fine: it's only mandatory for
-// FMUs that declare String-typed variables in model_description.xml, and
-// this one doesn't.
-//
-// model_description.xml's <fmiModelDescription guid="..."> must match
-// kExpectedGuid below exactly; fmi2Instantiate() refuses to start otherwise
-// rather than silently running against the wrong model description.
-// ------------------------------------------------------------------------------
+
+/// @file fmuMain.cpp
+/// @brief FMI 2.0 Co-Simulation slave entry points for the GPS UBX hardware
+/// simulator.
+///
+/// This FMU has no FMI output variables -- its effect is a UDP side
+/// channel: each fmi2DoStep() call turns the current truth-state inputs
+/// into a noisy GpsFix (GpsNoiseModel), encodes it as a real UBX-NAV-PVT
+/// frame (UbxEmitter), and sends it to a fixed UDP peer (UdpSender) --
+/// typically Renode's emulated UART4 RX backend, so the real, unmodified
+/// GpsDriver/UbxParser on the firmware side decodes it exactly as it would
+/// bytes from a physical u-blox M9N.
+///
+/// UDP destination is read once at fmi2Instantiate() from
+/// HEMERION_GPS_FMU_UDP_HOST / HEMERION_GPS_FMU_UDP_PORT (defaults
+/// 127.0.0.1:5762) rather than exposed as an FMI string parameter -- this
+/// keeps fmi2SetString unimplemented, which is fine: it's only mandatory
+/// for FMUs that declare String-typed variables in model_description.xml,
+/// and this one doesn't.
+///
+/// model_description.xml's <fmiModelDescription guid="..."> must match
+/// kExpectedGuid below exactly; fmi2Instantiate() refuses to start
+/// otherwise rather than silently running against the wrong model
+/// description.
+
 #include "Hemerion/gps/fmu/fmi2Minimal.hpp"
 #include "Hemerion/gps/fmu/gpsNoiseModel.hpp"
 #include "Hemerion/gps/fmu/ubxEmitter.hpp"

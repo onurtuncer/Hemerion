@@ -3,15 +3,16 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
-// Hemerion/gps/ubxParser.hpp
-//
-// Streaming parser for the u-blox UBX binary protocol. Only UBX-NAV-PVT
-// (class 0x01, id 0x07) is decoded -- it alone carries a complete fix
-// (position, altitude, speed, course, accuracy, satellite count, fix type),
-// unlike NMEA's split across GGA/RMC. Other messages are checksummed and
-// skipped rather than buffered, so a receiver streaming additional UBX
-// classes doesn't desync this parser.
-// ------------------------------------------------------------------------------
+
+/// @file ubxParser.hpp
+/// @brief Streaming parser for the u-blox UBX binary protocol.
+///
+/// Only UBX-NAV-PVT (class 0x01, id 0x07) is decoded -- it alone carries a
+/// complete fix (position, altitude, speed, course, accuracy, satellite
+/// count, fix type), unlike NMEA's split across GGA/RMC. Other messages are
+/// checksummed and skipped rather than buffered, so a receiver streaming
+/// additional UBX classes doesn't desync this parser.
+
 #pragma once
 
 #include <array>
@@ -22,14 +23,20 @@
 
 namespace hemerion::sensors::gps {
 
+/// @brief Byte-at-a-time UBX frame parser decoding UBX-NAV-PVT; see
+/// @ref ubxParser.hpp for the message-handling policy.
 class UbxParser {
  public:
-  // Feeds one byte from the receiver. Returns kNone and overwrites `out`
-  // once a UBX-NAV-PVT message has been fully decoded and its checksum
-  // verified; kIncomplete while a message is still being assembled;
-  // kChecksumMismatch or kUnsupportedMessage if a completed message is
-  // rejected. `timestamp_us` is the caller's local clock value when this
-  // byte was received; it is copied into `out.timestamp_us` on success.
+  /// @brief Feeds one byte from the receiver.
+  ///
+  /// @param byte         Next raw byte of the UBX stream.
+  /// @param timestamp_us Caller's local clock value when this byte was
+  ///                     received; copied into `out.timestamp_us` on success.
+  /// @param out          Overwritten once a UBX-NAV-PVT message completes.
+  /// @return kNone once a UBX-NAV-PVT message has been fully decoded and its
+  ///         checksum verified (with `out` overwritten); kIncomplete while a
+  ///         message is still being assembled; kChecksumMismatch or
+  ///         kUnsupportedMessage if a completed message is rejected.
   [[nodiscard]] GpsParseError parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out);
 
  private:

@@ -2,13 +2,18 @@
  * Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
  *
  * SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
- * ------------------------------------------------------------------------------
- * Board-level init for bsp/stm32h743_nucleo. This is bsp/stm32h743_nucleo's
- * own copy of the hal_board_init()/hal_board_reset() contract -- cmake/
- * hemerion_hal/ (the shared, board-agnostic declaration of this contract,
- * see cmake/README.md) does not exist yet. Once it lands, this header should
- * shrink to just the function bodies in board.c implementing that contract.
  * ------------------------------------------------------------------------------ */
+
+/**
+ * @file board.h
+ * @brief Board-level init for bsp/stm32h743_nucleo.
+ *
+ * This is bsp/stm32h743_nucleo's own copy of the
+ * hal_board_init()/hal_board_reset() contract -- cmake/hemerion_hal/ (the
+ * shared, board-agnostic declaration of this contract, see cmake/README.md)
+ * does not exist yet. Once it lands, this header should shrink to just the
+ * function bodies in board.c implementing that contract.
+ */
 
 #ifndef HEMERION_HAL_BOARD_H
 #define HEMERION_HAL_BOARD_H

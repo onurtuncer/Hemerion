@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file queue_registry.cpp
+/// @brief Implements the QueueRegistry validation logic declared in
+/// queue_registry.h.
+
 #include "hemerion/rtos_core/queue_registry.h"
 
 #include <cstring>

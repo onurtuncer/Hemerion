@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file battery_monitor.cpp
+/// @brief Implements the battery telemetry fault evaluation declared in
+/// battery_monitor.h.
+
 #include "hemerion/power/battery_monitor.h"
 
 #include <algorithm>

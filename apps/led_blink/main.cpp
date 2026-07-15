@@ -3,14 +3,16 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
-// apps/led_blink/main.cpp
-//
-// Minimal FreeRTOS task that toggles LD1 (GreenLED, PB0 on the Nucleo-144
-// baseboard) every 500 ms and prints "LED ON"/"LED OFF" over USART3 (the
-// ST-LINK VCP). Serves as the BSP/FreeRTOS smoke test and the primary SWIL
-// example app -- see sim/renode/boards/nucleo_h743zi2.repl and
-// tests/swil/test_led_blink.py, which assert on this exact UART text.
-// ------------------------------------------------------------------------------
+
+/// @file main.cpp
+/// @brief LED-blink example app: BSP/FreeRTOS smoke test and primary SWIL
+/// example.
+///
+/// Minimal FreeRTOS task that toggles LD1 (GreenLED, PB0 on the Nucleo-144
+/// baseboard) every 500 ms and prints "LED ON"/"LED OFF" over USART3 (the
+/// ST-LINK VCP). See sim/renode/boards/nucleo_h743zi2.repl and
+/// tests/swil/test_led_blink.py, which assert on this exact UART text.
+
 #include <cstring>
 
 #include "FreeRTOS.h"

@@ -2,15 +2,20 @@
  * Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
  *
  * SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
- * ------------------------------------------------------------------------------
- * GPIO HAL for bsp/stm32h743_nucleo. See board.h's header comment: this is
- * the BSP's own copy of the contract documented in cmake/README.md's
- * hemerion_hal/ snippet, since that shared directory doesn't exist yet.
+ * ------------------------------------------------------------------------------ */
+
+/**
+ * @file gpio.h
+ * @brief GPIO HAL for bsp/stm32h743_nucleo.
+ *
+ * See board.h's header comment: this is the BSP's own copy of the contract
+ * documented in cmake/README.md's hemerion_hal/ snippet, since that shared
+ * directory doesn't exist yet.
  *
  * `port` is the GPIOx letter ('A'..'I' on the LQFP144 package this MCU
  * ships in); `pin` is 0..15. Ports/pins outside that range are a programmer
  * error -- configASSERT()-style behavior, not a runtime error path.
- * ------------------------------------------------------------------------------ */
+ */
 
 #ifndef HEMERION_HAL_GPIO_H
 #define HEMERION_HAL_GPIO_H
@@ -22,12 +27,13 @@
 extern "C" {
 #endif
 
+/** Pin direction/output-type selected by hal_gpio_set_mode(). */
 typedef enum
 {
-  HAL_GPIO_MODE_INPUT,
-  HAL_GPIO_MODE_OUTPUT_PUSH_PULL,
-  HAL_GPIO_MODE_OUTPUT_OPEN_DRAIN,
-  HAL_GPIO_MODE_ANALOG,
+  HAL_GPIO_MODE_INPUT,             /**< High-impedance input. */
+  HAL_GPIO_MODE_OUTPUT_PUSH_PULL,  /**< Push-pull output. */
+  HAL_GPIO_MODE_OUTPUT_OPEN_DRAIN, /**< Open-drain output. */
+  HAL_GPIO_MODE_ANALOG,            /**< Analog mode (ADC/DAC, lowest leakage). */
 } hal_gpio_mode_t;
 
 /** Configures one pin's direction/output-type; pull resistors are left floating.

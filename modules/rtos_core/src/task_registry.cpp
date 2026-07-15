@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file task_registry.cpp
+/// @brief Implements the TaskRegistry validation logic declared in
+/// task_registry.h.
+
 #include "hemerion/rtos_core/task_registry.h"
 
 #include <cstring>

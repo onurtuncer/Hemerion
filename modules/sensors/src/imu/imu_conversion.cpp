@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file imu_conversion.cpp
+/// @brief Implements the raw-count to SI-unit IMU conversion declared in
+/// imu_conversion.h.
+
 #include <numbers>
 
 #include "Hemerion/imu/imu_conversion.h"

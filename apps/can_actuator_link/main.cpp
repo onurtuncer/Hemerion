@@ -3,13 +3,15 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
-// apps/can_actuator_link/main.cpp
-//
-// Minimal consumer of modules/comms: packs actuator setpoints into CAN
-// frames and stages them in a CanFifo. Transmission is stubbed as printing
-// the frame, since cmake/hemerion_hal/can.h and a BSP don't exist yet --
-// replace drain_to_stdout's print with a hal_can_transmit() call once they do.
-// ------------------------------------------------------------------------------
+
+/// @file main.cpp
+/// @brief CAN actuator-link example app: minimal consumer of modules/comms.
+///
+/// Packs actuator setpoints into CAN frames and stages them in a CanFifo.
+/// Transmission is stubbed as printing the frame, since
+/// cmake/hemerion_hal/can.h and a BSP don't exist yet -- replace
+/// drain_to_stdout's print with a hal_can_transmit() call once they do.
+
 #include <array>
 #include <cstdint>
 #include <cstring>

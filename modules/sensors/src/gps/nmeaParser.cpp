@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file nmeaParser.cpp
+/// @brief Implements the streaming NMEA 0183 sentence parser declared in
+/// nmeaParser.hpp.
+
 #include "Hemerion/gps/nmeaParser.hpp"
 
 namespace hemerion::sensors::gps {

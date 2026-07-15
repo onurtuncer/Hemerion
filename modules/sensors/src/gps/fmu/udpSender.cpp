@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file udpSender.cpp
+/// @brief Implements the platform-specific (Winsock/Berkeley) UDP socket
+/// wrapper declared in udpSender.hpp.
+
 #include "Hemerion/gps/fmu/udpSender.hpp"
 
 #if defined(_WIN32)

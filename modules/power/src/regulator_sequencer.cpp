@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file regulator_sequencer.cpp
+/// @brief Implements the RegulatorSequencer state machine declared in
+/// regulator_sequencer.h.
+
 #include "hemerion/power/regulator_sequencer.h"
 
 namespace hemerion::power {

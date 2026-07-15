@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file can_frame.cpp
+/// @brief Implements the CAN frame validation and builder functions declared
+/// in can_frame.h.
+
 #include "hemerion/comms/can_frame.h"
 
 #include <algorithm>

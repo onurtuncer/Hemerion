@@ -3,6 +3,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
+
+/// @file fault_registry.cpp
+/// @brief Implements the FaultRegistry bookkeeping declared in
+/// fault_registry.h.
+
 #include "hemerion/fault/fault_registry.h"
 
 namespace hemerion::fault {

@@ -2,15 +2,20 @@
  * Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
  *
  * SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
- * ------------------------------------------------------------------------------
- * UART HAL for bsp/stm32h743_nucleo. See board.h's header comment: this is
- * the BSP's own copy of the contract documented in cmake/README.md's
- * hemerion_hal/ snippet, since that shared directory doesn't exist yet.
+ * ------------------------------------------------------------------------------ */
+
+/**
+ * @file uart.h
+ * @brief UART HAL for bsp/stm32h743_nucleo.
+ *
+ * See board.h's header comment: this is the BSP's own copy of the contract
+ * documented in cmake/README.md's hemerion_hal/ snippet, since that shared
+ * directory doesn't exist yet.
  *
  * Only `instance == 3` (USART3, the ST-LINK Virtual COM Port on PD8/PD9) is
  * wired up. Other instances are a no-op/false return -- there is no other
  * UART consumer yet to justify building out the rest of the table.
- * ------------------------------------------------------------------------------ */
+ */
 
 #ifndef HEMERION_HAL_UART_H
 #define HEMERION_HAL_UART_H
