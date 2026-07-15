@@ -11,6 +11,7 @@
 #include "Hemerion/gps/fmu/ubxEmitter.hpp"
 
 #include <cmath>
+#include <numbers>
 
 namespace hemerion::sensors::gps::fmu {
 
@@ -20,7 +21,7 @@ constexpr std::uint8_t kSync1Byte = 0xB5;
 constexpr std::uint8_t kSync2Byte = 0x62;
 constexpr std::uint8_t kNavClass = 0x01;
 constexpr std::uint8_t kNavPvtId = 0x07;
-constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+constexpr double kDegToRad = std::numbers::pi / 180.0;
 
 // Fixed placeholder accuracy/quality fields GpsFix has no source data for.
 // UbxParser never reads any of these; they exist only so a hex dump of the

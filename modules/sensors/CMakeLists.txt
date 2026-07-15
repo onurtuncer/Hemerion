@@ -5,13 +5,13 @@
 # ------------------------------------------------------------------------------
 # modules/sensors -- IMU raw-to-SI unit conversion, GPS NMEA/UBX parsing.
 #
-# The IMU raw-count-to-SI-unit conversion and the GPS NMEA/UBX parsers + driver are implemented; the barometer
-# driver is not yet built. include/Hemerion/gps/fmu/ is a GPS-specific UBX hardware simulator FMU (truth state in,
-# noisy UBX-NAV-PVT bytes over UDP out) -- see its CMakeLists.txt; this is not the generic whole-module
-# numeric-variable FMU export package.xml's <artifact type="fmu"> describes, which remains unbuilt. None of this
-# has a hardware dependency, so this target needs no peripheral/bus libraries -- cmake/hemerion_module.cmake (the
-# documented hemerion_add_module() helper) does not exist yet, so this file uses plain CMake rather than the
-# not-yet-built helper. Migrate to hemerion_add_module() once it lands.
+# The IMU raw-count-to-SI-unit conversion and the GPS NMEA/UBX parsers + driver are implemented; the barometer driver is
+# not yet built. include/Hemerion/gps/fmu/ is a GPS-specific UBX hardware simulator FMU (truth state in, noisy
+# UBX-NAV-PVT bytes over UDP out) -- see its CMakeLists.txt; this is not the generic whole-module numeric-variable FMU
+# export package.xml's <artifact type="fmu"> describes, which remains unbuilt. None of this has a hardware dependency,
+# so this target needs no peripheral/bus libraries -- cmake/hemerion_module.cmake (the documented hemerion_add_module()
+# helper) does not exist yet, so this file uses plain CMake rather than the not-yet-built helper. Migrate to
+# hemerion_add_module() once it lands.
 # ------------------------------------------------------------------------------
 
 add_library(hemerion_sensors STATIC src/imu/imu_conversion.cpp src/gps/nmeaParser.cpp src/gps/ubxParser.cpp)

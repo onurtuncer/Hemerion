@@ -59,6 +59,7 @@ jobs:
           TIKZ_BUILD="${REPO}/build/tikz"
           STATIC_OUT="${REPO}/doc/_static"
           mkdir -p "${TIKZ_BUILD}"
+          shopt -s nullglob  # doc/tikz/ has no .tex figures yet; skip cleanly instead of feeding pdflatex a literal glob
           for tex in "${TIKZ_SRC}"/*.tex; do
             fig=$(basename "${tex}" .tex)
             echo "Compiling ${fig}.tex ..."

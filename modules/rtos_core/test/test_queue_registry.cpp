@@ -10,7 +10,9 @@
 // project's test framework) is not yet vendored, so this uses plain asserts
 // and an exit code; switch to Unity test cases once vendor/Unity exists.
 // ------------------------------------------------------------------------------
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 
 #include "hemerion/rtos_core/queue_registry.h"
@@ -69,15 +71,15 @@ void test_register_queue_rejects_when_full() {
   descriptor.element_size_bytes = 4;
   descriptor.depth = 4;
 
-  char names[kMaxQueues + 1][2] = {};
+  std::array<std::array<char, 2>, kMaxQueues + 1> names{};
   for (std::size_t i = 0; i < kMaxQueues; ++i) {
     names[i][0] = static_cast<char>('a' + i);
-    descriptor.name = names[i];
+    descriptor.name = names[i].data();
     assert(registry.register_queue(descriptor) == QueueRegistryError::kNone);
   }
 
   names[kMaxQueues][0] = 'z';
-  descriptor.name = names[kMaxQueues];
+  descriptor.name = names[kMaxQueues].data();
   assert(registry.register_queue(descriptor) == QueueRegistryError::kRegistryFull);
 }
 

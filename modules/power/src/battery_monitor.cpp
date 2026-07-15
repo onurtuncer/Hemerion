@@ -25,7 +25,7 @@ namespace {
 float min_cell_voltage_v(const BatterySample& sample) {
   const std::uint8_t count = clamped_cell_count(sample);
   if (count == 0) {
-    return 0.0f;
+    return 0.0F;
   }
   return *std::min_element(sample.cell_voltages_v.begin(), sample.cell_voltages_v.begin() + count);
 }
@@ -33,13 +33,13 @@ float min_cell_voltage_v(const BatterySample& sample) {
 float max_cell_voltage_v(const BatterySample& sample) {
   const std::uint8_t count = clamped_cell_count(sample);
   if (count == 0) {
-    return 0.0f;
+    return 0.0F;
   }
   return *std::max_element(sample.cell_voltages_v.begin(), sample.cell_voltages_v.begin() + count);
 }
 
 std::uint8_t evaluate_faults(const BatterySample& sample, const BatteryLimits& limits) {
-  std::uint8_t faults = static_cast<std::uint8_t>(BatteryFaultBits::kNone);
+  auto faults = static_cast<std::uint8_t>(BatteryFaultBits::kNone);
 
   if (clamped_cell_count(sample) > 0) {
     if (min_cell_voltage_v(sample) < limits.cell_voltage_min_v) {
