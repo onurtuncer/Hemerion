@@ -261,6 +261,11 @@ cmake --build --preset fmu-native
 cmake --preset test-native
 cmake --build --preset test-native
 ctest --preset test-native
+
+# End-to-end co-simulation examples (fmu-native plus examples/, e.g. the
+# Ecos-coupled rocket -> GPS -> flight-software demo; fetches Ecos from source)
+cmake --preset examples-native
+cmake --build --preset examples-native
 ```
 
 See `CMakePresets.json` for the full list of presets and their toolchain/BSP bindings.

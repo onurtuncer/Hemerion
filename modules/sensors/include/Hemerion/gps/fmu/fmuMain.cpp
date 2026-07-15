@@ -33,6 +33,7 @@
 #include "Hemerion/gps/fmu/ubxEmitter.hpp"
 #include "Hemerion/gps/fmu/udpSender.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -50,9 +51,12 @@ constexpr fmi2ValueReference kVrLongitudeDeg = 1;
 constexpr fmi2ValueReference kVrAltitudeM = 2;
 constexpr fmi2ValueReference kVrGroundSpeedMps = 3;
 constexpr fmi2ValueReference kVrCourseDeg = 4;
+constexpr fmi2ValueReference kVrVNorthMps = 5;
+constexpr fmi2ValueReference kVrVEastMps = 6;
+constexpr fmi2ValueReference kVrVDownMps = 7;
 
 // Must match model_description.xml's <fmiModelDescription guid="...">.
-constexpr char kExpectedGuid[] = "{3F2A1C9E-7B4D-4E8A-9C3F-6A1B2C3D4E5F}";
+constexpr char kExpectedGuid[] = "{8C5D3A1F-2E9B-4D67-A4C8-5B0E9F3D7A21}";
 
 constexpr char kDefaultUdpHost[] = "127.0.0.1";
 constexpr std::uint16_t kDefaultUdpPort = 5762;
@@ -63,6 +67,13 @@ struct GpsFmuInstance {
   GpsTruthSample truth;
   fmi2CallbackFunctions callbacks{};
   bool logging_on = false;
+  // NED truth velocity (v_north_mps/v_east_mps/v_down_mps inputs). Once any component has been
+  // written, speed-over-ground and course are derived from these at every fmi2DoStep and the
+  // ground_speed_mps/course_deg inputs are ignored -- see model_description.xml.
+  double v_north_mps = 0.0;
+  double v_east_mps = 0.0;
+  double v_down_mps = 0.0;
+  bool ned_velocity_set = false;
 };
 
 GpsFmuInstance* to_instance(fmi2Component component) {
@@ -164,7 +175,12 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2Terminate(fmi2Component component) {
 }
 
 HEMERION_FMI2_EXPORT fmi2Status fmi2Reset(fmi2Component component) {
-  to_instance(component)->truth = GpsTruthSample{};
+  GpsFmuInstance* instance = to_instance(component);
+  instance->truth = GpsTruthSample{};
+  instance->v_north_mps = 0.0;
+  instance->v_east_mps = 0.0;
+  instance->v_down_mps = 0.0;
+  instance->ned_velocity_set = false;
   return fmi2OK;
 }
 
@@ -187,6 +203,18 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2SetReal(fmi2Component component, const fmi2V
         break;
       case kVrCourseDeg:
         instance->truth.course_deg = static_cast<float>(value[i]);
+        break;
+      case kVrVNorthMps:
+        instance->v_north_mps = value[i];
+        instance->ned_velocity_set = true;
+        break;
+      case kVrVEastMps:
+        instance->v_east_mps = value[i];
+        instance->ned_velocity_set = true;
+        break;
+      case kVrVDownMps:
+        instance->v_down_mps = value[i];
+        instance->ned_velocity_set = true;
         break;
       default:
         return fmi2Error;  // unknown value reference
@@ -262,6 +290,17 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2DoStep(fmi2Component component, fmi2Real cur
   const fmi2Real step_end_time = currentCommunicationPoint + communicationStepSize;
   instance->truth.timestamp_us = static_cast<std::uint64_t>(step_end_time * 1e6);
 
+  if (instance->ned_velocity_set) {
+    // NED wiring is active: derive speed-over-ground and course from v_north/v_east, overriding
+    // whatever the (unwired) ground_speed_mps/course_deg inputs hold. v_down is accepted but not
+    // encoded -- NAV-PVT velD stays 0 until GpsFix grows a vertical-velocity field.
+    constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
+    instance->truth.ground_speed_mps =
+        static_cast<float>(std::hypot(instance->v_north_mps, instance->v_east_mps));
+    const double course_deg = std::atan2(instance->v_east_mps, instance->v_north_mps) * kRadToDeg;
+    instance->truth.course_deg = static_cast<float>(std::fmod(course_deg + 360.0, 360.0));
+  }
+
   const auto fix = instance->noise_model.apply(instance->truth);
   const auto frame = UbxEmitter::encode_nav_pvt(fix);
   // best-effort: a dropped datagram doesn't fault the co-sim step, so the [[nodiscard]] result is intentionally
@@ -311,4 +350,92 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2GetStringStatus(fmi2Component component, fmi
   (void)status;
   (void)value;
   return fmi2Discard;
+}
+
+// ---------------------------------------------------------------------------
+// State-management and derivative functions. This FMU declares
+// canGetAndSetFMUstate="false", canSerializeFMUstate="false" and
+// providesDirectionalDerivative="false", so a conforming master never calls
+// these -- but importers that resolve the complete FMI 2.0 export table up
+// front (e.g. fmi4c, which Ecos uses) refuse to load a binary that omits any
+// of them. Exported as plain fmi2Error stubs for that reason.
+// ---------------------------------------------------------------------------
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetFMUstate(fmi2Component component, fmi2FMUstate* state) {
+  (void)component;
+  (void)state;
+  return fmi2Error;  // canGetAndSetFMUstate="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetFMUstate(fmi2Component component, fmi2FMUstate state) {
+  (void)component;
+  (void)state;
+  return fmi2Error;  // canGetAndSetFMUstate="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2FreeFMUstate(fmi2Component component, fmi2FMUstate* state) {
+  (void)component;
+  (void)state;
+  return fmi2Error;  // canGetAndSetFMUstate="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2SerializedFMUstateSize(fmi2Component component, fmi2FMUstate state,
+                                                            std::size_t* size) {
+  (void)component;
+  (void)state;
+  (void)size;
+  return fmi2Error;  // canSerializeFMUstate="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2SerializeFMUstate(fmi2Component component, fmi2FMUstate state,
+                                                       fmi2Byte serialized[], std::size_t size) {
+  (void)component;
+  (void)state;
+  (void)serialized;
+  (void)size;
+  return fmi2Error;  // canSerializeFMUstate="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2DeSerializeFMUstate(fmi2Component component, const fmi2Byte serialized[],
+                                                         std::size_t size, fmi2FMUstate* state) {
+  (void)component;
+  (void)serialized;
+  (void)size;
+  (void)state;
+  return fmi2Error;  // canSerializeFMUstate="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetDirectionalDerivative(fmi2Component component,
+                                                              const fmi2ValueReference unknowns[],
+                                                              std::size_t nUnknowns,
+                                                              const fmi2ValueReference knowns[], std::size_t nKnowns,
+                                                              const fmi2Real deltaKnowns[], fmi2Real deltaUnknowns[]) {
+  (void)component;
+  (void)unknowns;
+  (void)nUnknowns;
+  (void)knowns;
+  (void)nKnowns;
+  (void)deltaKnowns;
+  (void)deltaUnknowns;
+  return fmi2Error;  // providesDirectionalDerivative="false"
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetRealInputDerivatives(fmi2Component component, const fmi2ValueReference vr[],
+                                                             std::size_t nvr, const fmi2Integer order[],
+                                                             const fmi2Real value[]) {
+  (void)component;
+  (void)vr;
+  (void)order;
+  (void)value;
+  return (nvr == 0) ? fmi2OK : fmi2Error;  // canInterpolateInputs defaults to false
+}
+
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetRealOutputDerivatives(fmi2Component component, const fmi2ValueReference vr[],
+                                                              std::size_t nvr, const fmi2Integer order[],
+                                                              fmi2Real value[]) {
+  (void)component;
+  (void)vr;
+  (void)order;
+  (void)value;
+  return (nvr == 0) ? fmi2OK : fmi2Error;  // maxOutputDerivativeOrder defaults to 0
 }

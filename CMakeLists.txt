@@ -49,6 +49,7 @@ option(HEMERION_BUILD_APPS "Build firmware app executables (apps/)" ON)
 option(HEMERION_BUILD_FMU "Build modules as x86 FMI 2.0 shared libraries for Aetherion co-simulation" OFF)
 option(HEMERION_BUILD_TESTS "Build native unit/integration tests" OFF)
 option(HEMERION_BUILD_SIM "Build host-side simulation targets (sim/) -- never cross-compiled" OFF)
+option(HEMERION_BUILD_EXAMPLES "Build host-side co-simulation examples (examples/) -- requires HEMERION_BUILD_FMU" OFF)
 option(HEMERION_BUILD_DOCS "Build Doxygen/Sphinx documentation" OFF)
 
 # Must run before any add_subdirectory() that calls add_test() (every module's test/CMakeLists.txt, plus tests/ below)
@@ -66,6 +67,9 @@ if(HEMERION_BUILD_FMU AND CMAKE_CROSSCOMPILING)
 endif()
 if(HEMERION_BUILD_SIM AND CMAKE_CROSSCOMPILING)
   message(FATAL_ERROR "HEMERION_BUILD_SIM requires a native toolchain -- sim/ is host-only")
+endif()
+if(HEMERION_BUILD_EXAMPLES AND CMAKE_CROSSCOMPILING)
+  message(FATAL_ERROR "HEMERION_BUILD_EXAMPLES requires a native toolchain -- examples/ is host-only")
 endif()
 
 # ------------------------------------------------------------------------------
@@ -127,6 +131,13 @@ endif()
 # ------------------------------------------------------------------------------
 if(HEMERION_BUILD_SIM AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sim/CMakeLists.txt")
   add_subdirectory(sim)
+endif()
+
+# ------------------------------------------------------------------------------
+# Examples -- host-only end-to-end demonstrations (e.g. Ecos FMU co-simulation)
+# ------------------------------------------------------------------------------
+if(HEMERION_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+  add_subdirectory(examples)
 endif()
 
 # ------------------------------------------------------------------------------

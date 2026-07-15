@@ -4,15 +4,19 @@
   SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 
   FMI 2.0 model description for the GPS UBX hardware simulator FMU
-  (Hemerion/gps/fmu/fmuMain.cpp). This FMU has no FMI-level outputs -- its
+  (Hemerion/gps/fmu/fmuMain.cpp). This FMU has no FMI-level outputs: its
   only effect is a UDP side channel (a UBX-NAV-PVT frame sent on every
   fmi2DoStep), so <Outputs> in ModelStructure is intentionally empty. The
   guid below must match kExpectedGuid in fmuMain.cpp exactly.
+
+  Note: "double hyphen" sequences are illegal inside XML comments (and make
+  strict parsers such as fmi4c's ezxml reject the whole document), so the
+  repo's usual comment dash style is avoided in this file.
 -->
 <fmiModelDescription
     fmiVersion="2.0"
     modelName="HemerionGpsUbxSimulator"
-    guid="{3F2A1C9E-7B4D-4E8A-9C3F-6A1B2C3D4E5F}"
+    guid="{8C5D3A1F-2E9B-4D67-A4C8-5B0E9F3D7A21}"
     description="Truth-state-to-UBX-NAV-PVT GPS hardware simulator for SWIL/HIL co-simulation"
     generationTool="hand-written (see fmuMain.cpp header comment)"
     variableNamingConvention="flat">
@@ -38,6 +42,22 @@
       <Real start="0.0"/>
     </ScalarVariable>
     <ScalarVariable name="course_deg" valueReference="4" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <!--
+      NED truth velocity, the natural output set of a 6-DoF plant (e.g. Aetherion's TwoStageRocket
+      FMU). Once any of these is written, ground_speed_mps/course_deg above are ignored and the
+      emitted speed-over-ground and course are derived from v_north/v_east instead. v_down_mps is
+      accepted for interface completeness but the NAV-PVT velD field is currently still encoded as 0
+      (GpsFix carries no vertical velocity yet).
+    -->
+    <ScalarVariable name="v_north_mps" valueReference="5" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="v_east_mps" valueReference="6" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="v_down_mps" valueReference="7" causality="input" variability="continuous">
       <Real start="0.0"/>
     </ScalarVariable>
   </ModelVariables>

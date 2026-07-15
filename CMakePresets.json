@@ -66,6 +66,15 @@
       }
     },
     {
+      "name": "examples-native",
+      "inherits": "fmu-native",
+      "displayName": "Examples (native)",
+      "description": "fmu-native plus the host-side end-to-end examples (Ecos co-simulation of Aetherion + Hemerion FMUs)",
+      "cacheVariables": {
+        "HEMERION_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
       "name": "test-native",
       "inherits": "native-base",
       "displayName": "Unit + integration tests (native)",
@@ -93,6 +102,7 @@
     { "name": "renode-h743", "configurePreset": "renode-h743" },
     { "name": "cross-stm32f446", "configurePreset": "cross-stm32f446" },
     { "name": "fmu-native", "configurePreset": "fmu-native" },
+    { "name": "examples-native", "configurePreset": "examples-native" },
     { "name": "test-native", "configurePreset": "test-native" },
     { "name": "test-swil", "configurePreset": "test-swil" }
   ],
