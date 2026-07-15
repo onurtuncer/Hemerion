@@ -8,8 +8,8 @@ convention); no `include/`, `src/`, or `test/` exist yet.
 
 EKF/UKF state estimation and SE(3) control law, per `modules/README.md`'s
 module table. This README fixes the EKF design intent referenced
-elsewhere in the docs — `fpga/ip/ekf_predict/README.md` has a hard
-dependency on it.
+elsewhere in the docs — the `ekf_predict` FPGA IP block (maintained in a
+separate repository) has a hard dependency on it.
 
 ## EKF design intent
 

@@ -80,8 +80,8 @@ No module source changes. No root `CMakeLists.txt` changes beyond `add_subdirect
 ## AMP targets (planned)
 
 `zynq_core0/` and `zynq_core1/` are an **evaluated alternative** to the
-STM32H743 path, explored as part of an optional FPGA mezzanine (see
-`fpga/README.md`). They are not a committed replacement — design work
+STM32H743 path, explored as part of an optional FPGA mezzanine (the PL IP
+lives in a separate repository). They are not a committed replacement — design work
 stopped at the architecture-reference stage, no BSP code exists yet, and
 `stm32h743_nucleo` remains the primary target until a Phase 1 prototype
 (PYNQ-Z2) validates the split.

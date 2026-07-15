@@ -68,10 +68,6 @@ hemerion/
 │   ├── stm32h743_nucleo/
 │   └── template/
 │
-├── fpga/                   # PL IP blocks for the optional Zynq AMP mezzanine (planned)
-│   ├── ip/                 # imu_fir, sensor_sync, pwm_dshot, can_fd, ...
-│   └── verilator/          # Verilator C++ harness pattern for Catch2/CTest
-│
 ├── sim/                    # Host-side simulation targets (never cross-compiled)
 │   ├── renode/
 │   ├── fmi/
@@ -155,11 +151,12 @@ the STM32H743 path — not a committed replacement:
 └────────────┬────────────────┘
              │ AXI / EMIO
 ┌────────────▼────────────────┐
-│  Zynq-7020 PL — FPGA IP     │  ← fpga/ip/*: IMU FIR, sensor sync, ...
+│  Zynq-7020 PL — FPGA IP     │  ← IMU FIR, sensor sync, ... (separate repo)
 └──────────────────────────────┘
 ```
 
-See `fpga/README.md` and the "AMP targets (planned)" section of
+The PL IP blocks and their Verilator test harness are maintained in a
+separate repository. See the "AMP targets (planned)" section of
 `bsp/README.md` for status and open questions. `stm32h743_nucleo` remains
 the primary HWIL/SWIL target until a Phase 1 prototype validates this
 path.
@@ -181,7 +178,6 @@ Firmware is validated in simulation before any hardware contact:
 - Custom STM32H7 / STM32F4 board definitions via Renode `.repl` and `.resc` scripts
 - RISC-V CLINT / PLIC peripheral configuration for mixed-ISA experimentation
 - `pyrenode3` Python bindings for automated SWIL test orchestration
-- Verilator co-simulation support for custom peripheral HDL
 
 ---
 
