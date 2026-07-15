@@ -27,8 +27,15 @@ Flight Dynamics with Spatial Vector Algebra
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents
+   :caption: Getting started
 
-   
+   led_blink_tutorial
+   swil_windows_setup
+
+.. toctree::
+   :maxdepth: 2
+   :caption: BSP internals
+
+   bsp_freertos_wiring
 
 :ref:`genindex`

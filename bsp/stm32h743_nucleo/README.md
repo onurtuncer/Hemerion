@@ -1,10 +1,11 @@
 # bsp/stm32h743_nucleo/
 
-**Status:** Hardware design reference only. No BSP code exists in this
-directory yet — no `CMakeLists.txt`, no `include/hemerion/hal/`
-implementation, no linker script, no startup file. `bsp/README.md`'s
-"BSP internal layout" is the target shape; this README fixes the
-board-level hardware facts ahead of writing it.
+**Status:** Implemented and verified. CMake target `hemerion_bsp_stm32h743_nucleo`
+provides HAL implementations for GPIO, UART, and board init; a FreeRTOS
+port wired for Indirect Routing (see [FreeRTOS wiring notes](../../doc/bsp_freertos_wiring.rst));
+startup, system-init, linker script, and `FreeRTOSConfig.h`. The
+`renode-h743` CMake preset targets this BSP. Smoke-tested end-to-end via
+`apps/led_blink` + `tests/swil/test_led_blink.py` (Renode SWIL).
 
 This is the primary HWIL/SWIL target (see `bsp/README.md`'s "Available
 BSPs" table) — referred to as **FCU-H743** in the hardware design
@@ -81,10 +82,7 @@ older design notes.
 
 ## What's not implemented yet
 
-Per `bsp/README.md`'s layout convention, this directory still needs:
-`CMakeLists.txt`, `include/hemerion/hal/{gpio,uart,spi,i2c,can,timer,board}.h`
-implementations, `src/startup_stm32h743xx.s`, `src/system_stm32h743.c`,
-`linker/stm32h743_flash.ld`, and `FreeRTOSConfig.h`. The `renode-h743`
-preset already references `HEMERION_BSP=stm32h743_nucleo`; until the
-files above exist, the root `CMakeLists.txt`'s `EXISTS` guard skips this
-directory silently rather than failing.
+SPI (ICM-42688-P IMU), I²C (MS5611 barometer), FDCAN (ESC bus), TIM
+(PWM/DShot), UART4 (GPS DMA), UART5 (SBUS/CRSF), ETH (RMII), and their
+corresponding HAL headers. GPIO, UART (USART3), board-init, FreeRTOS
+hooks, startup, and linker script are all done.
