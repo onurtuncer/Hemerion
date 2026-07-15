@@ -11,7 +11,9 @@
 // this uses plain asserts and an exit code; switch to Unity test cases once
 // vendor/Unity exists.
 // ------------------------------------------------------------------------------
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 
 #include "hemerion/rtos_core/task_priority.h"
@@ -36,29 +38,23 @@ namespace {
 
 void noop_entry_point(void*) {}
 
-void test_priority_bands_match_apps_readme_table() {
-  assert(band_of(kPriorityIdle) == TaskPriorityBand::kIdle);
-  assert(band_of(kPriorityLowMin) == TaskPriorityBand::kLow);
-  assert(band_of(kPriorityMidMin) == TaskPriorityBand::kMid);
-  assert(band_of(kPriorityHighMin) == TaskPriorityBand::kHigh);
-  assert(band_of(kPriorityCritical) == TaskPriorityBand::kCritical);
-}
+// Priority bands, validity, and tick conversion are constexpr and verified at
+// compile time.
+static_assert(band_of(kPriorityIdle) == TaskPriorityBand::kIdle);
+static_assert(band_of(kPriorityLowMin) == TaskPriorityBand::kLow);
+static_assert(band_of(kPriorityMidMin) == TaskPriorityBand::kMid);
+static_assert(band_of(kPriorityHighMin) == TaskPriorityBand::kHigh);
+static_assert(band_of(kPriorityCritical) == TaskPriorityBand::kCritical);
 
-void test_priority_validity() {
-  assert(is_valid_priority(kPriorityCritical));
-  assert(!is_valid_priority(kPriorityCritical + 1));
-}
+static_assert(is_valid_priority(kPriorityCritical));
+static_assert(!is_valid_priority(kPriorityCritical + 1));
 
-void test_tick_conversion_round_trip_at_default_rate() {
-  assert(ms_to_ticks(1000) == 1000);
-  assert(ticks_to_ms(1000) == 1000);
-  assert(ms_to_ticks(0) == 0);
-}
+static_assert(ms_to_ticks(1000) == 1000);
+static_assert(ticks_to_ms(1000) == 1000);
+static_assert(ms_to_ticks(0) == 0);
 
-void test_tick_conversion_at_custom_rate() {
-  assert(ms_to_ticks(10, 100) == 1);   // 10ms @ 100Hz tick rate -> 1 tick
-  assert(ticks_to_ms(1, 100) == 10);   // 1 tick @ 100Hz tick rate -> 10ms
-}
+static_assert(ms_to_ticks(10, 100) == 1);  // 10ms @ 100Hz tick rate -> 1 tick
+static_assert(ticks_to_ms(1, 100) == 10);  // 1 tick @ 100Hz tick rate -> 10ms
 
 void test_register_task_accepts_valid_descriptor() {
   TaskRegistry registry;
@@ -107,25 +103,21 @@ void test_register_task_rejects_when_full() {
   descriptor.entry_point = &noop_entry_point;
   descriptor.stack_words = 256;
 
-  char names[hemerion::rtos_core::kMaxTasks + 1][2] = {};
+  std::array<std::array<char, 2>, hemerion::rtos_core::kMaxTasks + 1> names{};
   for (std::size_t i = 0; i < hemerion::rtos_core::kMaxTasks; ++i) {
     names[i][0] = static_cast<char>('a' + i);
-    descriptor.name = names[i];
+    descriptor.name = names[i].data();
     assert(registry.register_task(descriptor) == TaskRegistryError::kNone);
   }
 
   names[hemerion::rtos_core::kMaxTasks][0] = 'z';
-  descriptor.name = names[hemerion::rtos_core::kMaxTasks];
+  descriptor.name = names[hemerion::rtos_core::kMaxTasks].data();
   assert(registry.register_task(descriptor) == TaskRegistryError::kRegistryFull);
 }
 
 }  // namespace
 
 int main() {
-  test_priority_bands_match_apps_readme_table();
-  test_priority_validity();
-  test_tick_conversion_round_trip_at_default_rate();
-  test_tick_conversion_at_custom_rate();
   test_register_task_accepts_valid_descriptor();
   test_register_task_rejects_invalid_descriptors();
   test_register_task_rejects_duplicate_name();

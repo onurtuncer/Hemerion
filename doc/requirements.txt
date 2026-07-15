@@ -1,0 +1,7 @@
+# Python dependencies for building the Sphinx documentation.
+# Consumed by .github/workflows/deploy-docs.yml; the extensions listed
+# here must match doc/conf.py.
+sphinx
+sphinx-rtd-theme
+breathe
+sphinxcontrib-bibtex

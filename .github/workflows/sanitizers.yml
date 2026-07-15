@@ -8,7 +8,7 @@ on:
 jobs:
   asan-ubsan:
     name: ASan + UBSan (test-native)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       ASAN_OPTIONS: check_initialization_order=1:detect_stack_use_after_return=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
@@ -19,18 +19,17 @@ jobs:
       with:
         submodules: recursive
 
+    # g++-14 is required for <print> — see README.md (native builds).
     - name: Install dependencies
-      run: sudo apt update && sudo apt install -y gcc-13 g++-13
-
-    - name: Configure compiler alternatives
-      run: |
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+      run: sudo apt update && sudo apt install -y g++-14
 
     # cmake/sanitizers.cmake enables ASan + UBSan for the test-native preset
     # on supported compilers — see cmake/README.md.
     - name: Configure
       run: cmake --preset=test-native
+      env:
+        CC: gcc-14
+        CXX: g++-14
 
     - name: Build
       run: cmake --build --preset=test-native
