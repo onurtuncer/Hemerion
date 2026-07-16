@@ -5,22 +5,26 @@
 # ------------------------------------------------------------------------------
 """Plots the rocket_gps_ecos co-simulation results for the Sphinx docs.
 
-Reads the two CSVs the example produces (Ecos' rocket-truth log and the
-flight computer's decoded-fix log), joins them on simulation time, and
-renders the figures embedded in doc/rocket_gps_ecos_cosim.rst:
+Reads the three CSVs the example produces (Ecos' rocket-truth log and the
+flight computer's decoded-fix and decoded-IMU-sample logs), joins them on
+simulation time, and renders the figures embedded in
+doc/rocket_gps_ecos_cosim.rst:
 
-    altitude_vs_time.png   truth altitude + decoded GPS fixes + staging/apogee
-    ground_track.png       truth ground track + decoded GPS fixes
-    velocity_vs_time.png   truth speed over ground + GPS-reported speed
-    gps_error.png          horizontal/vertical decoded-fix error vs truth
+    altitude_vs_time.png     truth altitude + decoded GPS fixes + staging/apogee
+    ground_track.png         truth ground track + decoded GPS fixes
+    velocity_vs_time.png     truth speed over ground + GPS-reported speed
+    gps_error.png            horizontal/vertical decoded-fix error vs truth
+    imu_specific_force.png   truth specific force + decoded accelerometer samples
+    imu_body_rates.png       truth body rates + decoded gyroscope samples
 
 Usage (from the co-simulation working directory, after a run):
 
     python plot_results.py [--truth results/rocket_truth.csv]
-                           [--fixes results/gps_fixes.csv] [--out plots/]
+                           [--fixes results/gps_fixes.csv]
+                           [--imu results/imu_samples.csv] [--out plots/]
 
 Only matplotlib is required. The truth CSV is Ecos csv_writer output
-(", "-separated, "name[TYPE]" headers); the fix CSV is written by
+(", "-separated, "name[TYPE]" headers); the fix and IMU CSVs are written by
 gps_flight_computer.
 """
 
@@ -222,10 +226,55 @@ def plot_gps_error(truth, fixes, out: Path) -> None:
     plt.close(fig)
 
 
+def plot_imu_specific_force(truth, imu, out: Path) -> None:
+    # The truth CSV's f_x/f_y/f_z columns are the imu:: input variables --
+    # exactly the zero-order-held value the IMU FMU sampled (already one
+    # communication step behind rocket truth, like every connection), so no
+    # realignment is needed here.
+    fig, ax = new_figure()
+    ax.plot(imu["sim_time_s"], imu["accel_x_mps2"],
+            linestyle="none", marker=".", markersize=2, alpha=0.25, color=GPS,
+            label="accelerometer X samples decoded by flight computer")
+    ax.plot(truth["time"], truth["f_x_mps2"], color=TRUTH, linewidth=1.4,
+            label="true specific force X (thrust + aero) / mass")
+    t_stage = staging_time(truth)
+    if t_stage is not None:
+        annotate_event(ax, t_stage, f"stage 1 separation\n t = {t_stage:.1f} s")
+    ax.annotate("burnout: free fall reads 0 m/s²",
+                xy=(0.98, 0.35), xycoords="axes fraction",
+                ha="right", fontsize=8, color=INK_2)
+    ax.set_xlabel("simulation time [s]")
+    ax.set_ylabel("body-X specific force [m/s²]")
+    ax.set_title("Boost-phase acceleration: truth vs. decoded IMU counts")
+    legend(ax)
+    fig.tight_layout()
+    fig.savefig(out / "imu_specific_force.png", facecolor=SURFACE)
+    plt.close(fig)
+
+
+def plot_imu_body_rates(truth, imu, out: Path) -> None:
+    fig, ax = new_figure()
+    for axis, color, marker_alpha in (("x", TRUTH, 0.2), ("y", GPS, 0.2), ("z", INK_2, 0.2)):
+        ax.plot(imu["sim_time_s"], imu[f"gyro_{axis}_rad_s"],
+                linestyle="none", marker=".", markersize=2, alpha=marker_alpha, color=color,
+                label=f"gyro {axis.upper()} samples")
+    for name, axis, color in (("p_rad_s", "p (roll)", TRUTH), ("q_rad_s", "q (pitch)", GPS),
+                              ("r_rad_s", "r (yaw)", INK_2)):
+        ax.plot(truth["time"], truth[name], color=color, linewidth=1.2, label=f"truth {axis}")
+    ax.set_xlabel("simulation time [s]")
+    ax.set_ylabel("body angular rate [rad/s]")
+    ax.set_title("Body rates: truth p/q/r vs. decoded gyroscope samples")
+    legend(ax)
+    fig.tight_layout()
+    fig.savefig(out / "imu_body_rates.png", facecolor=SURFACE)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--truth", type=Path, default=Path("results/rocket_truth.csv"))
     parser.add_argument("--fixes", type=Path, default=Path("results/gps_fixes.csv"))
+    parser.add_argument("--imu", type=Path, default=Path("results/imu_samples.csv"))
     parser.add_argument("--out", type=Path, default=Path("plots"))
     args = parser.parse_args()
 
@@ -237,7 +286,14 @@ def main() -> None:
     plot_ground_track(truth, fixes, args.out)
     plot_velocity(truth, fixes, args.out)
     plot_gps_error(truth, fixes, args.out)
-    print(f"wrote 4 figures to {args.out}/")
+
+    figures = 4
+    if args.imu.exists():
+        imu = read_fixes(args.imu)  # same plain-CSV shape as the fix log
+        plot_imu_specific_force(truth, imu, args.out)
+        plot_imu_body_rates(truth, imu, args.out)
+        figures += 2
+    print(f"wrote {figures} figures to {args.out}/")
 
 
 if __name__ == "__main__":

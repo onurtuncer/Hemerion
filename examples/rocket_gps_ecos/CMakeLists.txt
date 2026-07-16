@@ -15,8 +15,8 @@
 # only the C++ library target `libecos` is consumed.
 # ------------------------------------------------------------------------------
 
-if(NOT TARGET hemerion_gps_fmu_package)
-  message(FATAL_ERROR "examples/rocket_gps_ecos requires the GPS FMU package target -- configure with "
+if(NOT TARGET hemerion_gps_fmu_package OR NOT TARGET hemerion_imu_fmu_package)
+  message(FATAL_ERROR "examples/rocket_gps_ecos requires the GPS and IMU FMU package targets -- configure with "
                       "HEMERION_BUILD_FMU=ON (use the examples-native preset)")
 endif()
 
@@ -71,13 +71,15 @@ endif()
 add_executable(rocket_gps_cosim cosim_host_main.cpp)
 target_link_libraries(rocket_gps_cosim PRIVATE libecos)
 target_compile_features(rocket_gps_cosim PRIVATE cxx_std_23)
-target_compile_definitions(rocket_gps_cosim PRIVATE HEMERION_ROCKET_FMU_PATH="${HEMERION_TWO_STAGE_ROCKET_FMU}"
-                                                    HEMERION_GPS_FMU_PATH="${HEMERION_GPS_FMU_ARCHIVE}")
+target_compile_definitions(
+  rocket_gps_cosim
+  PRIVATE HEMERION_ROCKET_FMU_PATH="${HEMERION_TWO_STAGE_ROCKET_FMU}"
+          HEMERION_GPS_FMU_PATH="${HEMERION_GPS_FMU_ARCHIVE}" HEMERION_IMU_FMU_PATH="${HEMERION_IMU_FMU_ARCHIVE}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # ecos/logger/logger.hpp pulls the bundled fmt into consumers too -- same consteval workaround as above.
   target_compile_definitions(rocket_gps_cosim PRIVATE FMT_CONSTEVAL=)
 endif()
-add_dependencies(rocket_gps_cosim hemerion_gps_fmu_package)
+add_dependencies(rocket_gps_cosim hemerion_gps_fmu_package hemerion_imu_fmu_package)
 
 add_executable(gps_flight_computer flight_computer_main.cpp udpReceiver.cpp)
 target_link_libraries(gps_flight_computer PRIVATE hemerion_sensors)
