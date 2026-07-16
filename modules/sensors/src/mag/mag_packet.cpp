@@ -148,10 +148,7 @@ std::uint32_t MagPacketParser::read_u32(std::size_t offset) const
          (static_cast<std::uint32_t>(payload_[offset + 3]) << 24);
 }
 
-std::int32_t MagPacketParser::read_i32(std::size_t offset) const
-{
-  return static_cast<std::int32_t>(read_u32(offset));
-}
+std::int32_t MagPacketParser::read_i32(std::size_t offset) const { return static_cast<std::int32_t>(read_u32(offset)); }
 
 std::uint64_t MagPacketParser::read_u64(std::size_t offset) const
 {

@@ -39,8 +39,8 @@ struct BaroSample
 /// Sensitivity of a specific barometer's compensated output words.
 struct BaroScale
 {
-  float pressure_lsb_per_pa = 0.0F;   ///< Pressure sensitivity [LSB per Pa].
-  float temperature_lsb_per_c = 0.0F; ///< Temperature sensitivity [LSB per degree Celsius].
+  float pressure_lsb_per_pa = 0.0F;    ///< Pressure sensitivity [LSB per Pa].
+  float temperature_lsb_per_c = 0.0F;  ///< Temperature sensitivity [LSB per degree Celsius].
 };
 
 /// Result of convert_raw_to_si().

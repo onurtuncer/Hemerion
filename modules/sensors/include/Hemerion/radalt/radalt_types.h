@@ -19,7 +19,7 @@ namespace hemerion::sensors::radalt
 
 /// Track status values carried in RadAltRawSample::status. Values above
 /// kTrackValid are reserved for future use and must be treated as invalid.
-inline constexpr std::uint32_t kRadAltStatusNoReturn = 0;  ///< No ground return (out of range or loss of track).
+inline constexpr std::uint32_t kRadAltStatusNoReturn = 0;    ///< No ground return (out of range or loss of track).
 inline constexpr std::uint32_t kRadAltStatusTrackValid = 1;  ///< Range word carries a valid ground return.
 
 /// Raw slant-range counts as read off a radar altimeter's range register, in

@@ -91,10 +91,10 @@ void test_noiseless_quantization_round_trips_through_conversion()
   config.gyro_bias_sigma_rad_s = 0.0F;
 
   ImuTruthSample truth;
-  truth.specific_force_x_mps2 = 42.5;   // boost-phase thrust acceleration
+  truth.specific_force_x_mps2 = 42.5;  // boost-phase thrust acceleration
   truth.specific_force_y_mps2 = -0.75;
   truth.specific_force_z_mps2 = 9.80665;
-  truth.angular_rate_x_rad_s = 1.5;     // spinning airframe
+  truth.angular_rate_x_rad_s = 1.5;  // spinning airframe
   truth.angular_rate_y_rad_s = -0.02;
   truth.angular_rate_z_rad_s = 0.001;
   truth.timestamp_us = 250000;
@@ -163,8 +163,8 @@ void test_out_of_range_truth_saturates()
   config.gyro_bias_sigma_rad_s = 0.0F;
 
   ImuTruthSample truth;
-  truth.specific_force_x_mps2 = 10000.0;   // ~1000 g, far past +/-40 g full scale
-  truth.angular_rate_x_rad_s = -1000.0;    // far past -2000 deg/s full scale
+  truth.specific_force_x_mps2 = 10000.0;  // ~1000 g, far past +/-40 g full scale
+  truth.angular_rate_x_rad_s = -1000.0;   // far past -2000 deg/s full scale
 
   ImuNoiseModel model(config, /*seed=*/1);
   const ImuRawSample raw = model.apply(truth);

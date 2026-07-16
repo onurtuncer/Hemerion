@@ -55,9 +55,9 @@ struct MagTruthSample
 /// ~25-65 uT field plus installation offsets).
 struct MagNoiseConfig
 {
-  float mag_noise_ut = 0.2F;        ///< Magnetometer white noise, 1-sigma per axis [uT].
-  float mag_bias_sigma_ut = 1.0F;   ///< Turn-on (hard-iron-like) bias 1-sigma per axis, drawn once per run [uT].
-  MagScale scale{ 100.0F };         ///< Register sensitivity; the driver must convert with the same value.
+  float mag_noise_ut = 0.2F;       ///< Magnetometer white noise, 1-sigma per axis [uT].
+  float mag_bias_sigma_ut = 1.0F;  ///< Turn-on (hard-iron-like) bias 1-sigma per axis, drawn once per run [uT].
+  MagScale scale{ 100.0F };        ///< Register sensitivity; the driver must convert with the same value.
 };
 
 /// @brief Applies turn-on bias + white noise to truth fields and quantizes

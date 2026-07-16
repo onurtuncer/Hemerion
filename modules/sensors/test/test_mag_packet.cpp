@@ -140,7 +140,7 @@ void test_out_of_range_truth_saturates()
   config.mag_bias_sigma_ut = 0.0F;
 
   MagTruthSample truth;
-  truth.mag_x_ut = 100000.0;   // far past the +/-327 uT full scale
+  truth.mag_x_ut = 100000.0;  // far past the +/-327 uT full scale
   truth.mag_y_ut = -100000.0;
 
   MagNoiseModel model(config, /*seed=*/1);

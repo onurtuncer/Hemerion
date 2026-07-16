@@ -65,10 +65,10 @@ inline constexpr std::size_t kImuPacketRawSampleFrameLength = 5 + kImuPacketRawS
 /// Result of ImuPacketParser::parse_byte().
 enum class ImuPacketError : std::uint8_t
 {
-  kNone,                 ///< A raw-sample message completed and verified; `out` was overwritten.
-  kIncomplete,           ///< Mid-frame; keep feeding bytes.
-  kChecksumMismatch,     ///< A completed frame failed checksum verification.
-  kUnsupportedMessage,   ///< A frame completed and verified but carries an unknown message id.
+  kNone,                ///< A raw-sample message completed and verified; `out` was overwritten.
+  kIncomplete,          ///< Mid-frame; keep feeding bytes.
+  kChecksumMismatch,    ///< A completed frame failed checksum verification.
+  kUnsupportedMessage,  ///< A frame completed and verified but carries an unknown message id.
 };
 
 /// @brief Byte-at-a-time parser for the Hemerion IMU wire protocol; see

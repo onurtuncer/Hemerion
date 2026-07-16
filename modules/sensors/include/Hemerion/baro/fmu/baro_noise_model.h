@@ -57,11 +57,11 @@ struct BaroTruthSample
 /// within the +/-1.5 mbar datasheet band.
 struct BaroNoiseConfig
 {
-  float pressure_noise_pa = 3.0F;        ///< Pressure white noise, 1-sigma [Pa].
-  float temperature_noise_c = 0.05F;     ///< Temperature white noise, 1-sigma [degrees Celsius].
-  float pressure_bias_sigma_pa = 50.0F;  ///< Turn-on pressure bias 1-sigma, drawn once per run [Pa].
-  float temperature_bias_sigma_c = 0.5F; ///< Turn-on temperature bias 1-sigma, drawn once per run [degrees Celsius].
-  BaroScale scale{ 1.0F, 100.0F };       ///< Output sensitivity; the driver must convert with the same values.
+  float pressure_noise_pa = 3.0F;         ///< Pressure white noise, 1-sigma [Pa].
+  float temperature_noise_c = 0.05F;      ///< Temperature white noise, 1-sigma [degrees Celsius].
+  float pressure_bias_sigma_pa = 50.0F;   ///< Turn-on pressure bias 1-sigma, drawn once per run [Pa].
+  float temperature_bias_sigma_c = 0.5F;  ///< Turn-on temperature bias 1-sigma, drawn once per run [degrees Celsius].
+  BaroScale scale{ 1.0F, 100.0F };        ///< Output sensitivity; the driver must convert with the same values.
 };
 
 /// @brief Maps truth altitude through the ICAO Standard Atmosphere, applies
@@ -105,8 +105,8 @@ public:
       return kSeaLevelPressurePa *
              std::pow(1.0 - kTemperatureLapseKPerM * altitude_m / kSeaLevelTemperatureK, kGravityOverLapseR);
     }
-    return kTropopausePressurePa *
-           std::exp(-kStandardGravityMps2 * (altitude_m - kTropopauseAltitudeM) / (kAirGasConstant * kTropopauseTemperatureK));
+    return kTropopausePressurePa * std::exp(-kStandardGravityMps2 * (altitude_m - kTropopauseAltitudeM) /
+                                            (kAirGasConstant * kTropopauseTemperatureK));
   }
 
   /// @brief Ambient temperature of the ICAO Standard Atmosphere at
@@ -114,9 +114,9 @@ public:
   /// Reported as the die temperature -- a small sensor tracks ambient.
   [[nodiscard]] static double isa_temperature_c(double altitude_m)
   {
-    const double kelvin = (altitude_m <= kTropopauseAltitudeM)
-                              ? kSeaLevelTemperatureK - kTemperatureLapseKPerM * altitude_m
-                              : kTropopauseTemperatureK;
+    const double kelvin = (altitude_m <= kTropopauseAltitudeM) ?
+                              kSeaLevelTemperatureK - kTemperatureLapseKPerM * altitude_m :
+                              kTropopauseTemperatureK;
     return kelvin - 273.15;
   }
 

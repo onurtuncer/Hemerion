@@ -57,11 +57,11 @@ struct ImuTruthSample
 /// registers.
 struct ImuNoiseConfig
 {
-  float accel_noise_mps2 = 0.05F;         ///< Accelerometer white noise, 1-sigma per axis [m/s^2].
-  float gyro_noise_rad_s = 0.002F;        ///< Gyroscope white noise, 1-sigma per axis [rad/s].
-  float accel_bias_sigma_mps2 = 0.02F;    ///< Turn-on bias 1-sigma per axis, drawn once per run [m/s^2].
-  float gyro_bias_sigma_rad_s = 0.001F;   ///< Turn-on bias 1-sigma per axis, drawn once per run [rad/s].
-  ImuScale scale{ 800.0F, 16.4F };        ///< Register sensitivity; the driver must convert with the same values.
+  float accel_noise_mps2 = 0.05F;        ///< Accelerometer white noise, 1-sigma per axis [m/s^2].
+  float gyro_noise_rad_s = 0.002F;       ///< Gyroscope white noise, 1-sigma per axis [rad/s].
+  float accel_bias_sigma_mps2 = 0.02F;   ///< Turn-on bias 1-sigma per axis, drawn once per run [m/s^2].
+  float gyro_bias_sigma_rad_s = 0.001F;  ///< Turn-on bias 1-sigma per axis, drawn once per run [rad/s].
+  ImuScale scale{ 800.0F, 16.4F };       ///< Register sensitivity; the driver must convert with the same values.
 };
 
 /// @brief Applies turn-on bias + white noise to truth samples and quantizes
