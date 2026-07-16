@@ -10,31 +10,41 @@
 
 #include "hemerion/fault/watchdog.h"
 
-namespace hemerion::fault {
+namespace hemerion::fault
+{
 
-WatchdogSupervisor::Channel* WatchdogSupervisor::find(std::uint8_t id) {
-  for (auto& channel : channels_) {
-    if (channel.registered && channel.id == id) {
+WatchdogSupervisor::Channel* WatchdogSupervisor::find(std::uint8_t id)
+{
+  for (auto& channel : channels_)
+  {
+    if (channel.registered && channel.id == id)
+    {
       return &channel;
     }
   }
   return nullptr;
 }
 
-const WatchdogSupervisor::Channel* WatchdogSupervisor::find(std::uint8_t id) const {
-  for (const auto& channel : channels_) {
-    if (channel.registered && channel.id == id) {
+const WatchdogSupervisor::Channel* WatchdogSupervisor::find(std::uint8_t id) const
+{
+  for (const auto& channel : channels_)
+  {
+    if (channel.registered && channel.id == id)
+    {
       return &channel;
     }
   }
   return nullptr;
 }
 
-WatchdogError WatchdogSupervisor::register_channel(std::uint8_t id, std::uint32_t timeout_ms) {
-  if (find(id) != nullptr) {
+WatchdogError WatchdogSupervisor::register_channel(std::uint8_t id, std::uint32_t timeout_ms)
+{
+  if (find(id) != nullptr)
+  {
     return WatchdogError::kDuplicateId;
   }
-  if (registered_count_ >= kMaxWatchdogChannels) {
+  if (registered_count_ >= kMaxWatchdogChannels)
+  {
     return WatchdogError::kRegistryFull;
   }
   Channel& channel = channels_[registered_count_];
@@ -47,9 +57,11 @@ WatchdogError WatchdogSupervisor::register_channel(std::uint8_t id, std::uint32_
   return WatchdogError::kNone;
 }
 
-WatchdogError WatchdogSupervisor::kick(std::uint8_t id) {
+WatchdogError WatchdogSupervisor::kick(std::uint8_t id)
+{
   Channel* channel = find(id);
-  if (channel == nullptr) {
+  if (channel == nullptr)
+  {
     return WatchdogError::kUnknownId;
   }
   channel->elapsed_ms = 0;
@@ -57,24 +69,30 @@ WatchdogError WatchdogSupervisor::kick(std::uint8_t id) {
   return WatchdogError::kNone;
 }
 
-WatchdogStatus WatchdogSupervisor::step(std::uint32_t elapsed_ms) {
+WatchdogStatus WatchdogSupervisor::step(std::uint32_t elapsed_ms)
+{
   WatchdogStatus status = WatchdogStatus::kOk;
-  for (auto& channel : channels_) {
-    if (!channel.registered) {
+  for (auto& channel : channels_)
+  {
+    if (!channel.registered)
+    {
       continue;
     }
     channel.elapsed_ms += elapsed_ms;
-    if (channel.elapsed_ms >= channel.timeout_ms) {
+    if (channel.elapsed_ms >= channel.timeout_ms)
+    {
       channel.expired = true;
     }
-    if (channel.expired) {
+    if (channel.expired)
+    {
       status = WatchdogStatus::kExpired;
     }
   }
   return status;
 }
 
-bool WatchdogSupervisor::is_expired(std::uint8_t id) const {
+bool WatchdogSupervisor::is_expired(std::uint8_t id) const
+{
   const Channel* channel = find(id);
   return channel != nullptr && channel->expired;
 }

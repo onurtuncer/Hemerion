@@ -44,7 +44,8 @@
 #include <string>
 #include <thread>
 
-namespace {
+namespace
+{
 
 // Compile-time defaults injected by CMakeLists.txt; both can be overridden on
 // the command line, so an empty default (FMU not found at configure time) is
@@ -56,18 +57,20 @@ namespace {
 #define HEMERION_GPS_FMU_PATH ""
 #endif
 
-struct Options {
+struct Options
+{
   std::filesystem::path rocket_fmu = HEMERION_ROCKET_FMU_PATH;
   std::filesystem::path gps_fmu = HEMERION_GPS_FMU_PATH;
   std::filesystem::path csv_path = "results/rocket_truth.csv";
   // The TwoStageRocket FMU (NASA TM-2015-218675 Scenario 17) reaches apogee around t = 232 s and holds its
   // state constant from there on, so 240 s covers the whole interesting flight.
   double stop_s = 240.0;
-  double step_s = 0.1;       // communication step == GPS output period (10 Hz)
+  double step_s = 0.1;           // communication step == GPS output period (10 Hz)
   double realtime_factor = 0.0;  // 0 = run as fast as possible
 };
 
-void print_usage() {
+void print_usage()
+{
   std::cout << "usage: rocket_gps_cosim [--rocket <TwoStageRocket.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
                "                        [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
                "\n"
@@ -79,28 +82,44 @@ void print_usage() {
                "  --rtf     real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
 }
 
-bool parse_args(int argc, char** argv, Options& options) {
-  for (int i = 1; i < argc; ++i) {
+bool parse_args(int argc, char** argv, Options& options)
+{
+  for (int i = 1; i < argc; ++i)
+  {
     const std::string arg = argv[i];
     auto next = [&]() -> const char* { return (i + 1 < argc) ? argv[++i] : nullptr; };
-    if (arg == "--help" || arg == "-h") {
+    if (arg == "--help" || arg == "-h")
+    {
       print_usage();
       return false;
     }
     const char* value = nullptr;
-    if (arg == "--rocket" && (value = next())) {
+    if (arg == "--rocket" && (value = next()))
+    {
       options.rocket_fmu = value;
-    } else if (arg == "--gps" && (value = next())) {
+    }
+    else if (arg == "--gps" && (value = next()))
+    {
       options.gps_fmu = value;
-    } else if (arg == "--stop" && (value = next())) {
+    }
+    else if (arg == "--stop" && (value = next()))
+    {
       options.stop_s = std::stod(value);
-    } else if (arg == "--step" && (value = next())) {
+    }
+    else if (arg == "--step" && (value = next()))
+    {
       options.step_s = std::stod(value);
-    } else if (arg == "--csv" && (value = next())) {
+    }
+    else if (arg == "--csv" && (value = next()))
+    {
       options.csv_path = value;
-    } else if (arg == "--rtf" && (value = next())) {
+    }
+    else if (arg == "--rtf" && (value = next()))
+    {
       options.realtime_factor = std::stod(value);
-    } else {
+    }
+    else
+    {
       std::cerr << "unknown or incomplete argument: " << arg << "\n";
       print_usage();
       return false;
@@ -111,14 +130,18 @@ bool parse_args(int argc, char** argv, Options& options) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   Options options;
-  if (!parse_args(argc, argv, options)) {
+  if (!parse_args(argc, argv, options))
+  {
     return EXIT_FAILURE;
   }
 
-  for (const auto& [label, path] : {std::pair{"rocket", options.rocket_fmu}, std::pair{"gps", options.gps_fmu}}) {
-    if (path.empty() || !std::filesystem::exists(path)) {
+  for (const auto& [label, path] : { std::pair{ "rocket", options.rocket_fmu }, std::pair{ "gps", options.gps_fmu } })
+  {
+    if (path.empty() || !std::filesystem::exists(path))
+    {
       std::cerr << "error: " << label << " FMU not found at '" << path.string() << "' -- pass --" << label << "\n";
       return EXIT_FAILURE;
     }
@@ -126,7 +149,8 @@ int main(int argc, char** argv) {
 
   ecos::log::set_logging_level(ecos::log::level::info);
 
-  try {
+  try
+  {
     ecos::simulation_structure ss;
     // Deliberately the string-URI overload: ecos' std::filesystem::path overload runs the path through
     // std::filesystem::relative(), which yields an empty path on Windows when the FMU sits on a different
@@ -163,10 +187,18 @@ int main(int argc, char** argv) {
 
     auto csv = std::make_unique<ecos::csv_writer>(options.csv_path);
     ecos::csv_config& csv_config = csv->config();
-    for (const char* variable : {"rocket::out.alt_m", "rocket::out.lat_rad", "rocket::out.lon_rad",
-                                 "rocket::out.v_north_m_s", "rocket::out.v_east_m_s", "rocket::out.v_down_m_s",
-                                 "rocket::out.mach", "rocket::out.qbar_Pa", "rocket::out.thrust_N",
-                                 "rocket::out.mass_kg", "rocket::out.staged"}) {
+    for (const char* variable : { "rocket::out.alt_m",
+                                  "rocket::out.lat_rad",
+                                  "rocket::out.lon_rad",
+                                  "rocket::out.v_north_m_s",
+                                  "rocket::out.v_east_m_s",
+                                  "rocket::out.v_down_m_s",
+                                  "rocket::out.mach",
+                                  "rocket::out.qbar_Pa",
+                                  "rocket::out.thrust_N",
+                                  "rocket::out.mass_kg",
+                                  "rocket::out.staged" })
+    {
       csv_config.register_variable(variable);
     }
     sim->add_listener("csv_writer", std::move(csv));
@@ -190,23 +222,28 @@ int main(int argc, char** argv) {
 
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time
-    while (sim->time() < options.stop_s) {
+    while (sim->time() < options.stop_s)
+    {
       sim->step();
 
       const double altitude_m = altitude->get_value();
-      if (altitude_m > apogee_m) {
+      if (altitude_m > apogee_m)
+      {
         apogee_m = altitude_m;
         apogee_time_s = sim->time();
       }
-      if (staging_time_s < 0.0 && staged->get_value()) {
+      if (staging_time_s < 0.0 && staged->get_value())
+      {
         staging_time_s = sim->time();
         std::cout << "[cosim] t=" << sim->time() << " s  stage 1 separated\n";
       }
-      if (++print_counter % print_period == 0) {
+      if (++print_counter % print_period == 0)
+      {
         std::cout << "[cosim] t=" << sim->time() << " s  alt=" << altitude_m << " m  mach=" << mach->get_value()
                   << "  mass=" << mass->get_value() << " kg\n";
       }
-      if (options.realtime_factor > 0.0) {
+      if (options.realtime_factor > 0.0)
+      {
         const auto target = wall_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                              std::chrono::duration<double>(sim->time() / options.realtime_factor));
         std::this_thread::sleep_until(target);
@@ -218,11 +255,14 @@ int main(int argc, char** argv) {
     std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
               << " UBX-NAV-PVT frames emitted\n"
               << "[cosim] apogee " << apogee_m << " m at t=" << apogee_time_s << " s";
-    if (staging_time_s >= 0.0) {
+    if (staging_time_s >= 0.0)
+    {
       std::cout << ", staging at t=" << staging_time_s << " s";
     }
     std::cout << "\n[cosim] rocket truth written to " << options.csv_path.string() << "\n";
-  } catch (const std::exception& ex) {
+  }
+  catch (const std::exception& ex)
+  {
     std::cerr << "error: " << ex.what() << "\n";
     return EXIT_FAILURE;
   }

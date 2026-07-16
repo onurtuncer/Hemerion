@@ -28,26 +28,26 @@
 
 #include <utility>
 
-namespace hemerion::sensors::gps::fmu {
+namespace hemerion::sensors::gps::fmu
+{
 
-namespace {
+namespace
+{
 
 #if defined(_WIN32)
 constexpr std::uintptr_t kInvalidHandle = static_cast<std::uintptr_t>(~0ULL);  // INVALID_SOCKET
 
-SOCKET to_native(std::uintptr_t handle) {
-  return static_cast<SOCKET>(handle);
-}
-std::uintptr_t from_native(SOCKET handle) {
-  return static_cast<std::uintptr_t>(handle);
-}
+SOCKET to_native(std::uintptr_t handle) { return static_cast<SOCKET>(handle); }
+std::uintptr_t from_native(SOCKET handle) { return static_cast<std::uintptr_t>(handle); }
 
 // One WSAStartup/WSACleanup pair for the process lifetime -- see
 // sim/udp_bridge/udp_socket.cpp's WinsockInit for the same pattern and
 // rationale; duplicated here rather than shared because this header tree
 // must not depend on sim/.
-struct WinsockInit {
-  WinsockInit() {
+struct WinsockInit
+{
+  WinsockInit()
+  {
     WSADATA wsa_data;
     WSAStartup(MAKEWORD(2, 2), &wsa_data);
   }
@@ -58,14 +58,13 @@ struct WinsockInit {
   ~WinsockInit() { WSACleanup(); }
 };
 
-void ensure_winsock_ready() {
-  static WinsockInit init;
-}
+void ensure_winsock_ready() { static WinsockInit init; }
 #else
 constexpr int kInvalidHandle = -1;
 #endif
 
-bool parse_ipv4(const std::string& address, std::uint16_t port, sockaddr_in& out) {
+bool parse_ipv4(const std::string& address, std::uint16_t port, sockaddr_in& out)
+{
   out = {};
   out.sin_family = AF_INET;
   out.sin_port = htons(port);
@@ -74,23 +73,27 @@ bool parse_ipv4(const std::string& address, std::uint16_t port, sockaddr_in& out
 
 }  // namespace
 
-std::optional<UdpSender> UdpSender::create(const std::string& peer_address, std::uint16_t peer_port) {
+std::optional<UdpSender> UdpSender::create(const std::string& peer_address, std::uint16_t peer_port)
+{
 #if defined(_WIN32)
   ensure_winsock_ready();
 #endif
 
   sockaddr_in peer_addr{};
-  if (!parse_ipv4(peer_address, peer_port, peer_addr)) {
+  if (!parse_ipv4(peer_address, peer_port, peer_addr))
+  {
     return std::nullopt;
   }
 
 #if defined(_WIN32)
   SOCKET native = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (native == INVALID_SOCKET) {  // NOLINT(modernize-use-integer-sign-comparison)
+  if (native == INVALID_SOCKET)
+  {  // NOLINT(modernize-use-integer-sign-comparison)
     return std::nullopt;
   }
   if (connect(native, reinterpret_cast<sockaddr*>(&peer_addr), sizeof(peer_addr)) ==  // NOLINT(*-reinterpret-cast)
-      SOCKET_ERROR) {
+      SOCKET_ERROR)
+  {
     closesocket(native);
     return std::nullopt;
   }
@@ -100,10 +103,12 @@ std::optional<UdpSender> UdpSender::create(const std::string& peer_address, std:
   return result;
 #else
   int native = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (native < 0) {
+  if (native < 0)
+  {
     return std::nullopt;
   }
-  if (connect(native, reinterpret_cast<sockaddr*>(&peer_addr), sizeof(peer_addr)) != 0) {
+  if (connect(native, reinterpret_cast<sockaddr*>(&peer_addr), sizeof(peer_addr)) != 0)
+  {
     close(native);
     return std::nullopt;
   }
@@ -114,12 +119,12 @@ std::optional<UdpSender> UdpSender::create(const std::string& peer_address, std:
 #endif
 }
 
-UdpSender::UdpSender(UdpSender&& other) noexcept {
-  *this = std::move(other);
-}
+UdpSender::UdpSender(UdpSender&& other) noexcept { *this = std::move(other); }
 
-UdpSender& UdpSender::operator=(UdpSender&& other) noexcept {
-  if (this != &other) {
+UdpSender& UdpSender::operator=(UdpSender&& other) noexcept
+{
+  if (this != &other)
+  {
     reset();
     handle_ = other.handle_;
     other.handle_ = kInvalidHandle;
@@ -127,12 +132,12 @@ UdpSender& UdpSender::operator=(UdpSender&& other) noexcept {
   return *this;
 }
 
-UdpSender::~UdpSender() {
-  reset();
-}
+UdpSender::~UdpSender() { reset(); }
 
-void UdpSender::reset() noexcept {
-  if (handle_ != kInvalidHandle) {
+void UdpSender::reset() noexcept
+{
+  if (handle_ != kInvalidHandle)
+  {
 #if defined(_WIN32)
     closesocket(to_native(handle_));
 #else
@@ -142,7 +147,8 @@ void UdpSender::reset() noexcept {
   }
 }
 
-bool UdpSender::send(const void* data, std::size_t size) const {
+bool UdpSender::send(const void* data, std::size_t size) const
+{
 #if defined(_WIN32)
   const int sent = ::send(to_native(handle_), static_cast<const char*>(data), static_cast<int>(size), 0);
   return sent >= 0 && static_cast<std::size_t>(sent) == size;

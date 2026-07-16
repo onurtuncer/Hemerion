@@ -24,16 +24,19 @@
 #include "hemerion/sim/shm_bridge/bridge_protocol.h"
 #include "hemerion/sim/shm_bridge/shm_segment.h"
 
-namespace hemerion::sim::shm_bridge {
+namespace hemerion::sim::shm_bridge
+{
 
-enum class WaitResult {
+enum class WaitResult
+{
   kReady,
   kShutdown,
   kTimedOut,
 };
 
-class ShmBridge {
- public:
+class ShmBridge
+{
+public:
   // Creates the segment; called once per simulation run by the FMI master.
   [[nodiscard]] static std::optional<ShmBridge> create_master(const std::string& name);
 
@@ -63,15 +66,15 @@ class ShmBridge {
   // -- peer side -----------------------------------------------------------
   // Blocks until the master posts inputs (kInputsPosted), a shutdown is
   // observed, or `timeout` elapses.
-  [[nodiscard]] WaitResult wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, double& dt_s,
-                                            std::chrono::milliseconds timeout);
+  [[nodiscard]] WaitResult
+  wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, double& dt_s, std::chrono::milliseconds timeout);
   // Posts this step's outputs and advances kInputsPosted -> kOutputsPosted.
   void post_outputs(const ChannelFrame& outputs);
 
   // Number of post_inputs() calls so far this run. Visible from either side.
   [[nodiscard]] std::uint64_t step_index() const;
 
- private:
+private:
   explicit ShmBridge(ShmSegment segment);
 
   [[nodiscard]] BridgeRegion& region() noexcept;

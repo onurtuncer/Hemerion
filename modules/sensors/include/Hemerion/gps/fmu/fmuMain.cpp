@@ -39,7 +39,8 @@
 #include <string>
 #include <utility>
 
-namespace {
+namespace
+{
 
 using hemerion::sensors::gps::fmu::GpsNoiseModel;
 using hemerion::sensors::gps::fmu::GpsTruthSample;
@@ -61,7 +62,8 @@ constexpr char kExpectedGuid[] = "{8C5D3A1F-2E9B-4D67-A4C8-5B0E9F3D7A21}";
 constexpr char kDefaultUdpHost[] = "127.0.0.1";
 constexpr std::uint16_t kDefaultUdpPort = 5762;
 
-struct GpsFmuInstance {
+struct GpsFmuInstance
+{
   GpsNoiseModel noise_model;
   UdpSender sender;
   GpsTruthSample truth;
@@ -76,40 +78,43 @@ struct GpsFmuInstance {
   bool ned_velocity_set = false;
 };
 
-GpsFmuInstance* to_instance(fmi2Component component) {
-  return static_cast<GpsFmuInstance*>(component);
-}
+GpsFmuInstance* to_instance(fmi2Component component) { return static_cast<GpsFmuInstance*>(component); }
 
 }  // namespace
 
-HEMERION_FMI2_EXPORT const char* fmi2GetTypesPlatform() {
-  return "default";
-}
+HEMERION_FMI2_EXPORT const char* fmi2GetTypesPlatform() { return "default"; }
 
-HEMERION_FMI2_EXPORT const char* fmi2GetVersion() {
-  return "2.0";
-}
+HEMERION_FMI2_EXPORT const char* fmi2GetVersion() { return "2.0"; }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetDebugLogging(fmi2Component component, fmi2Boolean loggingOn,
-                                                     std::size_t nCategories, const fmi2String categories[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetDebugLogging(fmi2Component component,
+                                                    fmi2Boolean loggingOn,
+                                                    std::size_t nCategories,
+                                                    const fmi2String categories[])
+{
   (void)nCategories;
   (void)categories;
   to_instance(component)->logging_on = (loggingOn != 0);
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Component fmi2Instantiate(fmi2String instanceName, fmi2Type fmuType, fmi2String fmuGUID,
-                                                    fmi2String fmuResourceLocation,
-                                                    const fmi2CallbackFunctions* functions, fmi2Boolean visible,
-                                                    fmi2Boolean loggingOn) {
+HEMERION_FMI2_EXPORT fmi2Component fmi2Instantiate(fmi2String instanceName,
+                                                   fmi2Type fmuType,
+                                                   fmi2String fmuGUID,
+                                                   fmi2String fmuResourceLocation,
+                                                   const fmi2CallbackFunctions* functions,
+                                                   fmi2Boolean visible,
+                                                   fmi2Boolean loggingOn)
+{
   (void)instanceName;
   (void)fmuResourceLocation;
   (void)visible;
 
-  if (fmuType != fmi2CoSimulation) {
+  if (fmuType != fmi2CoSimulation)
+  {
     return nullptr;  // this FMU only implements the Co-Simulation interface
   }
-  if (fmuGUID == nullptr || std::strcmp(fmuGUID, kExpectedGuid) != 0) {
+  if (fmuGUID == nullptr || std::strcmp(fmuGUID, kExpectedGuid) != 0)
+  {
     return nullptr;  // master is loading a model_description.xml this binary doesn't match
   }
 
@@ -130,26 +135,31 @@ HEMERION_FMI2_EXPORT fmi2Component fmi2Instantiate(fmi2String instanceName, fmi2
 #pragma warning(pop)
 #endif
   const std::string host = (host_env != nullptr) ? host_env : kDefaultUdpHost;
-  const std::uint16_t port =
-      (port_env != nullptr) ? static_cast<std::uint16_t>(std::atoi(port_env)) : kDefaultUdpPort;
+  const std::uint16_t port = (port_env != nullptr) ? static_cast<std::uint16_t>(std::atoi(port_env)) : kDefaultUdpPort;
 
   auto sender = UdpSender::create(host, port);
-  if (!sender.has_value()) {
+  if (!sender.has_value())
+  {
     return nullptr;
   }
 
-  auto* instance = new GpsFmuInstance{GpsNoiseModel{}, std::move(*sender), GpsTruthSample{},
-                                       functions != nullptr ? *functions : fmi2CallbackFunctions{}, loggingOn != 0};
+  auto* instance = new GpsFmuInstance{ GpsNoiseModel{},
+                                       std::move(*sender),
+                                       GpsTruthSample{},
+                                       functions != nullptr ? *functions : fmi2CallbackFunctions{},
+                                       loggingOn != 0 };
   return instance;
 }
 
-HEMERION_FMI2_EXPORT void fmi2FreeInstance(fmi2Component component) {
-  delete to_instance(component);
-}
+HEMERION_FMI2_EXPORT void fmi2FreeInstance(fmi2Component component) { delete to_instance(component); }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetupExperiment(fmi2Component component, fmi2Boolean toleranceDefined,
-                                                     fmi2Real tolerance, fmi2Real startTime,
-                                                     fmi2Boolean stopTimeDefined, fmi2Real stopTime) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetupExperiment(fmi2Component component,
+                                                    fmi2Boolean toleranceDefined,
+                                                    fmi2Real tolerance,
+                                                    fmi2Real startTime,
+                                                    fmi2Boolean stopTimeDefined,
+                                                    fmi2Real stopTime)
+{
   (void)component;
   (void)toleranceDefined;
   (void)tolerance;
@@ -159,22 +169,26 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2SetupExperiment(fmi2Component component, fmi
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2EnterInitializationMode(fmi2Component component) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2EnterInitializationMode(fmi2Component component)
+{
   (void)component;
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2ExitInitializationMode(fmi2Component component) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2ExitInitializationMode(fmi2Component component)
+{
   (void)component;
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2Terminate(fmi2Component component) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2Terminate(fmi2Component component)
+{
   (void)component;
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2Reset(fmi2Component component) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2Reset(fmi2Component component)
+{
   GpsFmuInstance* instance = to_instance(component);
   instance->truth = GpsTruthSample{};
   instance->v_north_mps = 0.0;
@@ -184,11 +198,16 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2Reset(fmi2Component component) {
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetReal(fmi2Component component, const fmi2ValueReference vr[], std::size_t nvr,
-                                             const fmi2Real value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetReal(fmi2Component component,
+                                            const fmi2ValueReference vr[],
+                                            std::size_t nvr,
+                                            const fmi2Real value[])
+{
   GpsFmuInstance* instance = to_instance(component);
-  for (std::size_t i = 0; i < nvr; ++i) {
-    switch (vr[i]) {
+  for (std::size_t i = 0; i < nvr; ++i)
+  {
+    switch (vr[i])
+    {
       case kVrLatitudeDeg:
         instance->truth.latitude_deg = value[i];
         break;
@@ -223,8 +242,11 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2SetReal(fmi2Component component, const fmi2V
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetReal(fmi2Component component, const fmi2ValueReference vr[], std::size_t nvr,
-                                             fmi2Real value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetReal(fmi2Component component,
+                                            const fmi2ValueReference vr[],
+                                            std::size_t nvr,
+                                            fmi2Real value[])
+{
   (void)component;
   (void)vr;
   (void)value;
@@ -233,70 +255,90 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2GetReal(fmi2Component component, const fmi2V
   return (nvr == 0) ? fmi2OK : fmi2Error;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetInteger(fmi2Component component, const fmi2ValueReference vr[],
-                                                std::size_t nvr, const fmi2Integer value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetInteger(fmi2Component component,
+                                               const fmi2ValueReference vr[],
+                                               std::size_t nvr,
+                                               const fmi2Integer value[])
+{
   (void)component;
   (void)vr;
   (void)value;
   return (nvr == 0) ? fmi2OK : fmi2Error;  // no Integer-typed variables
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetInteger(fmi2Component component, const fmi2ValueReference vr[],
-                                                std::size_t nvr, fmi2Integer value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetInteger(fmi2Component component,
+                                               const fmi2ValueReference vr[],
+                                               std::size_t nvr,
+                                               fmi2Integer value[])
+{
   (void)component;
   (void)vr;
   (void)value;
   return (nvr == 0) ? fmi2OK : fmi2Error;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetBoolean(fmi2Component component, const fmi2ValueReference vr[],
-                                                std::size_t nvr, const fmi2Boolean value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetBoolean(fmi2Component component,
+                                               const fmi2ValueReference vr[],
+                                               std::size_t nvr,
+                                               const fmi2Boolean value[])
+{
   (void)component;
   (void)vr;
   (void)value;
   return (nvr == 0) ? fmi2OK : fmi2Error;  // no Boolean-typed variables
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetBoolean(fmi2Component component, const fmi2ValueReference vr[],
-                                                std::size_t nvr, fmi2Boolean value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetBoolean(fmi2Component component,
+                                               const fmi2ValueReference vr[],
+                                               std::size_t nvr,
+                                               fmi2Boolean value[])
+{
   (void)component;
   (void)vr;
   (void)value;
   return (nvr == 0) ? fmi2OK : fmi2Error;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetString(fmi2Component component, const fmi2ValueReference vr[],
-                                               std::size_t nvr, const fmi2String value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetString(fmi2Component component,
+                                              const fmi2ValueReference vr[],
+                                              std::size_t nvr,
+                                              const fmi2String value[])
+{
   (void)component;
   (void)vr;
   (void)value;
   return (nvr == 0) ? fmi2OK : fmi2Error;  // no String-typed variables
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetString(fmi2Component component, const fmi2ValueReference vr[],
-                                               std::size_t nvr, fmi2String value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetString(fmi2Component component,
+                                              const fmi2ValueReference vr[],
+                                              std::size_t nvr,
+                                              fmi2String value[])
+{
   (void)component;
   (void)vr;
   (void)value;
   return (nvr == 0) ? fmi2OK : fmi2Error;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2DoStep(fmi2Component component, fmi2Real currentCommunicationPoint,
-                                            fmi2Real communicationStepSize,
-                                            fmi2Boolean noSetFMUStatePriorToCurrentPoint) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2DoStep(fmi2Component component,
+                                           fmi2Real currentCommunicationPoint,
+                                           fmi2Real communicationStepSize,
+                                           fmi2Boolean noSetFMUStatePriorToCurrentPoint)
+{
   (void)noSetFMUStatePriorToCurrentPoint;
   GpsFmuInstance* instance = to_instance(component);
 
   const fmi2Real step_end_time = currentCommunicationPoint + communicationStepSize;
   instance->truth.timestamp_us = static_cast<std::uint64_t>(step_end_time * 1e6);
 
-  if (instance->ned_velocity_set) {
+  if (instance->ned_velocity_set)
+  {
     // NED wiring is active: derive speed-over-ground and course from v_north/v_east, overriding
     // whatever the (unwired) ground_speed_mps/course_deg inputs hold. v_down is accepted but not
     // encoded -- NAV-PVT velD stays 0 until GpsFix grows a vertical-velocity field.
     constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
-    instance->truth.ground_speed_mps =
-        static_cast<float>(std::hypot(instance->v_north_mps, instance->v_east_mps));
+    instance->truth.ground_speed_mps = static_cast<float>(std::hypot(instance->v_north_mps, instance->v_east_mps));
     const double course_deg = std::atan2(instance->v_east_mps, instance->v_north_mps) * kRadToDeg;
     instance->truth.course_deg = static_cast<float>(std::fmod(course_deg + 360.0, 360.0));
   }
@@ -309,43 +351,46 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2DoStep(fmi2Component component, fmi2Real cur
   return fmi2OK;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2CancelStep(fmi2Component component) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2CancelStep(fmi2Component component)
+{
   (void)component;
   return fmi2OK;  // fmi2DoStep here is always synchronous; there is never a step in flight to cancel
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetStatus(fmi2Component component, fmi2StatusKind status, fmi2Status* value) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetStatus(fmi2Component component, fmi2StatusKind status, fmi2Status* value)
+{
   (void)component;
   (void)status;
   (void)value;
   return fmi2Discard;  // fmi2DoStep never returns fmi2Pending, so a master should never call this
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetRealStatus(fmi2Component component, fmi2StatusKind status, fmi2Real* value) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetRealStatus(fmi2Component component, fmi2StatusKind status, fmi2Real* value)
+{
   (void)component;
   (void)status;
   (void)value;
   return fmi2Discard;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetIntegerStatus(fmi2Component component, fmi2StatusKind status,
-                                                      fmi2Integer* value) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetIntegerStatus(fmi2Component component, fmi2StatusKind status, fmi2Integer* value)
+{
   (void)component;
   (void)status;
   (void)value;
   return fmi2Discard;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetBooleanStatus(fmi2Component component, fmi2StatusKind status,
-                                                      fmi2Boolean* value) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetBooleanStatus(fmi2Component component, fmi2StatusKind status, fmi2Boolean* value)
+{
   (void)component;
   (void)status;
   (void)value;
   return fmi2Discard;
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetStringStatus(fmi2Component component, fmi2StatusKind status,
-                                                     fmi2String* value) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetStringStatus(fmi2Component component, fmi2StatusKind status, fmi2String* value)
+{
   (void)component;
   (void)status;
   (void)value;
@@ -361,34 +406,42 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2GetStringStatus(fmi2Component component, fmi
 // of them. Exported as plain fmi2Error stubs for that reason.
 // ---------------------------------------------------------------------------
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetFMUstate(fmi2Component component, fmi2FMUstate* state) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetFMUstate(fmi2Component component, fmi2FMUstate* state)
+{
   (void)component;
   (void)state;
   return fmi2Error;  // canGetAndSetFMUstate="false"
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetFMUstate(fmi2Component component, fmi2FMUstate state) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetFMUstate(fmi2Component component, fmi2FMUstate state)
+{
   (void)component;
   (void)state;
   return fmi2Error;  // canGetAndSetFMUstate="false"
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2FreeFMUstate(fmi2Component component, fmi2FMUstate* state) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2FreeFMUstate(fmi2Component component, fmi2FMUstate* state)
+{
   (void)component;
   (void)state;
   return fmi2Error;  // canGetAndSetFMUstate="false"
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SerializedFMUstateSize(fmi2Component component, fmi2FMUstate state,
-                                                            std::size_t* size) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SerializedFMUstateSize(fmi2Component component,
+                                                           fmi2FMUstate state,
+                                                           std::size_t* size)
+{
   (void)component;
   (void)state;
   (void)size;
   return fmi2Error;  // canSerializeFMUstate="false"
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SerializeFMUstate(fmi2Component component, fmi2FMUstate state,
-                                                       fmi2Byte serialized[], std::size_t size) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SerializeFMUstate(fmi2Component component,
+                                                      fmi2FMUstate state,
+                                                      fmi2Byte serialized[],
+                                                      std::size_t size)
+{
   (void)component;
   (void)state;
   (void)serialized;
@@ -396,8 +449,11 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2SerializeFMUstate(fmi2Component component, f
   return fmi2Error;  // canSerializeFMUstate="false"
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2DeSerializeFMUstate(fmi2Component component, const fmi2Byte serialized[],
-                                                         std::size_t size, fmi2FMUstate* state) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2DeSerializeFMUstate(fmi2Component component,
+                                                        const fmi2Byte serialized[],
+                                                        std::size_t size,
+                                                        fmi2FMUstate* state)
+{
   (void)component;
   (void)serialized;
   (void)size;
@@ -406,10 +462,13 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2DeSerializeFMUstate(fmi2Component component,
 }
 
 HEMERION_FMI2_EXPORT fmi2Status fmi2GetDirectionalDerivative(fmi2Component component,
-                                                              const fmi2ValueReference unknowns[],
-                                                              std::size_t nUnknowns,
-                                                              const fmi2ValueReference knowns[], std::size_t nKnowns,
-                                                              const fmi2Real deltaKnowns[], fmi2Real deltaUnknowns[]) {
+                                                             const fmi2ValueReference unknowns[],
+                                                             std::size_t nUnknowns,
+                                                             const fmi2ValueReference knowns[],
+                                                             std::size_t nKnowns,
+                                                             const fmi2Real deltaKnowns[],
+                                                             fmi2Real deltaUnknowns[])
+{
   (void)component;
   (void)unknowns;
   (void)nUnknowns;
@@ -420,9 +479,12 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2GetDirectionalDerivative(fmi2Component compo
   return fmi2Error;  // providesDirectionalDerivative="false"
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2SetRealInputDerivatives(fmi2Component component, const fmi2ValueReference vr[],
-                                                             std::size_t nvr, const fmi2Integer order[],
-                                                             const fmi2Real value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2SetRealInputDerivatives(fmi2Component component,
+                                                            const fmi2ValueReference vr[],
+                                                            std::size_t nvr,
+                                                            const fmi2Integer order[],
+                                                            const fmi2Real value[])
+{
   (void)component;
   (void)vr;
   (void)order;
@@ -430,9 +492,12 @@ HEMERION_FMI2_EXPORT fmi2Status fmi2SetRealInputDerivatives(fmi2Component compon
   return (nvr == 0) ? fmi2OK : fmi2Error;  // canInterpolateInputs defaults to false
 }
 
-HEMERION_FMI2_EXPORT fmi2Status fmi2GetRealOutputDerivatives(fmi2Component component, const fmi2ValueReference vr[],
-                                                              std::size_t nvr, const fmi2Integer order[],
-                                                              fmi2Real value[]) {
+HEMERION_FMI2_EXPORT fmi2Status fmi2GetRealOutputDerivatives(fmi2Component component,
+                                                             const fmi2ValueReference vr[],
+                                                             std::size_t nvr,
+                                                             const fmi2Integer order[],
+                                                             fmi2Real value[])
+{
   (void)component;
   (void)vr;
   (void)order;

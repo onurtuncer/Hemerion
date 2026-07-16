@@ -21,13 +21,15 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace hemerion::rtos_core {
+namespace hemerion::rtos_core
+{
 
 /// Maximum number of queues a QueueRegistry can hold.
 inline constexpr std::size_t kMaxQueues = 16;
 
 /// Result of QueueRegistry::register_queue().
-enum class QueueRegistryError : std::uint8_t {
+enum class QueueRegistryError : std::uint8_t
+{
   kNone,             ///< Descriptor accepted.
   kRegistryFull,     ///< Registry already holds kMaxQueues descriptors.
   kDuplicateName,    ///< A descriptor with the same name is already registered.
@@ -37,7 +39,8 @@ enum class QueueRegistryError : std::uint8_t {
 };
 
 /// Everything needed to later create one FreeRTOS queue.
-struct QueueDescriptor {
+struct QueueDescriptor
+{
   const char* name = nullptr;          ///< Unique, non-null queue name; not copied -- must outlive the registry.
   std::size_t element_size_bytes = 0;  ///< Size of one queued element [bytes].
   std::size_t depth = 0;               ///< Maximum number of elements the queue holds.
@@ -45,8 +48,9 @@ struct QueueDescriptor {
 
 /// @brief Fixed-capacity, statically-allocated table of QueueDescriptor
 /// entries, validated as they are registered.
-class QueueRegistry {
- public:
+class QueueRegistry
+{
+public:
   /// @brief Validates and stores `descriptor`.
   ///
   /// Rejects the descriptor (without modifying the registry) if its name is
@@ -70,7 +74,7 @@ class QueueRegistry {
   /// Removes every registered descriptor.
   void clear() { count_ = 0; }
 
- private:
+private:
   std::array<QueueDescriptor, kMaxQueues> queues_{};
   std::size_t count_ = 0;
 };

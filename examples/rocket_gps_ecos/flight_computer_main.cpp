@@ -33,7 +33,8 @@
 #include <iostream>
 #include <string>
 
-namespace {
+namespace
+{
 
 using hemerion::examples::rocket_gps_ecos::UdpReceiver;
 using hemerion::sensors::gps::GpsDriver;
@@ -41,7 +42,8 @@ using hemerion::sensors::gps::GpsFix;
 using hemerion::sensors::gps::GpsParseError;
 using hemerion::sensors::gps::GpsProtocol;
 
-struct Options {
+struct Options
+{
   std::uint16_t port = 5762;  // GPS FMU default UDP destination
   std::filesystem::path csv_path = "results/gps_fixes.csv";
   double fix_period_s = 0.1;  // co-sim communication step; maps fix index -> sim time for the CSV
@@ -50,33 +52,50 @@ struct Options {
   long max_wall_s = 900;      // hard wall-clock cap
 };
 
-void print_usage() {
+void print_usage()
+{
   std::cout << "usage: gps_flight_computer [--port <udp port>] [--csv <file>] [--fix-period <s>]\n"
                "                           [--print-every <n>] [--quiet-ms <ms>] [--max-wall-s <s>]\n";
 }
 
-bool parse_args(int argc, char** argv, Options& options) {
-  for (int i = 1; i < argc; ++i) {
+bool parse_args(int argc, char** argv, Options& options)
+{
+  for (int i = 1; i < argc; ++i)
+  {
     const std::string arg = argv[i];
     auto next = [&]() -> const char* { return (i + 1 < argc) ? argv[++i] : nullptr; };
-    if (arg == "--help" || arg == "-h") {
+    if (arg == "--help" || arg == "-h")
+    {
       print_usage();
       return false;
     }
     const char* value = nullptr;
-    if (arg == "--port" && (value = next())) {
+    if (arg == "--port" && (value = next()))
+    {
       options.port = static_cast<std::uint16_t>(std::stoi(value));
-    } else if (arg == "--csv" && (value = next())) {
+    }
+    else if (arg == "--csv" && (value = next()))
+    {
       options.csv_path = value;
-    } else if (arg == "--fix-period" && (value = next())) {
+    }
+    else if (arg == "--fix-period" && (value = next()))
+    {
       options.fix_period_s = std::stod(value);
-    } else if (arg == "--print-every" && (value = next())) {
+    }
+    else if (arg == "--print-every" && (value = next()))
+    {
       options.print_every = std::stoi(value);
-    } else if (arg == "--quiet-ms" && (value = next())) {
+    }
+    else if (arg == "--quiet-ms" && (value = next()))
+    {
       options.quiet_ms = std::stol(value);
-    } else if (arg == "--max-wall-s" && (value = next())) {
+    }
+    else if (arg == "--max-wall-s" && (value = next()))
+    {
       options.max_wall_s = std::stol(value);
-    } else {
+    }
+    else
+    {
       std::cerr << "unknown or incomplete argument: " << arg << "\n";
       print_usage();
       return false;
@@ -85,32 +104,43 @@ bool parse_args(int argc, char** argv, Options& options) {
   return true;
 }
 
-void print_fix(long index, double sim_time_s, const GpsFix& fix) {
+void print_fix(long index, double sim_time_s, const GpsFix& fix)
+{
   std::printf("[fc] fix %5ld  t=%7.1f s  lat=%11.7f  lon=%12.7f  alt=%9.1f m  vel=%7.1f m/s  crs=%5.1f deg  sats=%u\n",
-              index, sim_time_s, fix.latitude_deg, fix.longitude_deg, static_cast<double>(fix.altitude_m),
-              static_cast<double>(fix.ground_speed_mps), static_cast<double>(fix.course_deg),
+              index,
+              sim_time_s,
+              fix.latitude_deg,
+              fix.longitude_deg,
+              static_cast<double>(fix.altitude_m),
+              static_cast<double>(fix.ground_speed_mps),
+              static_cast<double>(fix.course_deg),
               static_cast<unsigned>(fix.num_satellites));
 }
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   Options options;
-  if (!parse_args(argc, argv, options)) {
+  if (!parse_args(argc, argv, options))
+  {
     return EXIT_FAILURE;
   }
 
   auto receiver = UdpReceiver::create(options.port);
-  if (!receiver.has_value()) {
+  if (!receiver.has_value())
+  {
     std::cerr << "error: could not bind UDP port " << options.port << " (already in use?)\n";
     return EXIT_FAILURE;
   }
 
-  if (options.csv_path.has_parent_path()) {
+  if (options.csv_path.has_parent_path())
+  {
     std::filesystem::create_directories(options.csv_path.parent_path());
   }
   std::ofstream csv(options.csv_path);
-  if (!csv) {
+  if (!csv)
+  {
     std::cerr << "error: cannot open " << options.csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
@@ -131,29 +161,35 @@ int main(int argc, char** argv) {
   auto last_datagram = wall_start;
   bool any_fix = false;
 
-  while (true) {
+  while (true)
+  {
     const auto now = std::chrono::steady_clock::now();
-    if (now - wall_start > std::chrono::seconds(options.max_wall_s)) {
+    if (now - wall_start > std::chrono::seconds(options.max_wall_s))
+    {
       std::cout << "[fc] wall-clock cap reached\n";
       break;
     }
-    if (any_fix && now - last_datagram > std::chrono::milliseconds(options.quiet_ms)) {
+    if (any_fix && now - last_datagram > std::chrono::milliseconds(options.quiet_ms))
+    {
       std::cout << "[fc] UBX stream quiet for " << options.quiet_ms << " ms -- co-simulation finished\n";
       break;
     }
 
     const auto received = receiver->receive(datagram.data(), datagram.size(), std::chrono::milliseconds(250));
-    if (!received.has_value()) {
+    if (!received.has_value())
+    {
       continue;
     }
     last_datagram = std::chrono::steady_clock::now();
 
     // Same per-byte feed the firmware's GPS task performs on UART RX data.
-    for (std::size_t i = 0; i < *received; ++i) {
+    for (std::size_t i = 0; i < *received; ++i)
+    {
       const auto local_clock_us = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::microseconds>(last_datagram - wall_start).count());
       const GpsParseError result = driver.feed(datagram[i], local_clock_us, fix);
-      if (result == GpsParseError::kNone) {
+      if (result == GpsParseError::kNone)
+      {
         ++fix_count;
         any_fix = true;
         // One NAV-PVT frame is emitted per communication step, so the fix
@@ -165,10 +201,13 @@ int main(int argc, char** argv) {
             << fix.altitude_m << ',' << fix.ground_speed_mps << ',' << fix.course_deg << ','
             << fix.horizontal_accuracy_m << ',' << fix.vertical_accuracy_m << ','
             << static_cast<unsigned>(fix.num_satellites) << ',' << static_cast<unsigned>(fix.fix_type) << '\n';
-        if (fix_count == 1 || fix_count % options.print_every == 0) {
+        if (fix_count == 1 || fix_count % options.print_every == 0)
+        {
           print_fix(fix_count, sim_time_s, fix);
         }
-      } else if (result == GpsParseError::kChecksumMismatch) {
+      }
+      else if (result == GpsParseError::kChecksumMismatch)
+      {
         ++checksum_errors;
       }
     }

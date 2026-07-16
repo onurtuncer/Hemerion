@@ -10,31 +10,39 @@
 
 #include "Hemerion/gps/ubxParser.hpp"
 
-namespace hemerion::sensors::gps {
+namespace hemerion::sensors::gps
+{
 
-void UbxParser::update_checksum(std::uint8_t byte) {
+void UbxParser::update_checksum(std::uint8_t byte)
+{
   ck_a_ = static_cast<std::uint8_t>(ck_a_ + byte);
   ck_b_ = static_cast<std::uint8_t>(ck_b_ + ck_a_);
 }
 
-void UbxParser::reset() {
+void UbxParser::reset()
+{
   state_ = State::kSync1;
   length_ = 0;
   payload_index_ = 0;
 }
 
-GpsParseError UbxParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out) {
-  switch (state_) {
+GpsParseError UbxParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out)
+{
+  switch (state_)
+  {
     case State::kSync1:
       state_ = (byte == kSync1Byte) ? State::kSync2 : State::kSync1;
       return GpsParseError::kIncomplete;
 
     case State::kSync2:
-      if (byte == kSync2Byte) {
+      if (byte == kSync2Byte)
+      {
         ck_a_ = 0;
         ck_b_ = 0;
         state_ = State::kClass;
-      } else {
+      }
+      else
+      {
         state_ = State::kSync1;
       }
       return GpsParseError::kIncomplete;
@@ -66,34 +74,40 @@ GpsParseError UbxParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_u
 
     case State::kPayload:
       update_checksum(byte);
-      if (payload_index_ < payload_.size()) {
+      if (payload_index_ < payload_.size())
+      {
         payload_[payload_index_] = byte;
       }
       ++payload_index_;
-      if (payload_index_ >= length_) {
+      if (payload_index_ >= length_)
+      {
         state_ = State::kChecksumA;
       }
       return GpsParseError::kIncomplete;
 
     case State::kChecksumA:
-      if (byte != ck_a_) {
+      if (byte != ck_a_)
+      {
         reset();
         return GpsParseError::kChecksumMismatch;
       }
       state_ = State::kChecksumB;
       return GpsParseError::kIncomplete;
 
-    case State::kChecksumB: {
+    case State::kChecksumB:
+    {
       const bool checksum_ok = (byte == ck_b_);
       const std::uint8_t msg_class = msg_class_;
       const std::uint8_t msg_id = msg_id_;
       const std::uint16_t payload_length = length_;
       reset();
 
-      if (!checksum_ok) {
+      if (!checksum_ok)
+      {
         return GpsParseError::kChecksumMismatch;
       }
-      if (msg_class != kNavClass || msg_id != kNavPvtId) {
+      if (msg_class != kNavClass || msg_id != kNavPvtId)
+      {
         return GpsParseError::kUnsupportedMessage;
       }
       return decode_nav_pvt(payload_length, timestamp_us, out);
@@ -103,18 +117,19 @@ GpsParseError UbxParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_u
   return GpsParseError::kIncomplete;
 }
 
-std::uint32_t UbxParser::read_u32(std::size_t offset) const {
+std::uint32_t UbxParser::read_u32(std::size_t offset) const
+{
   return static_cast<std::uint32_t>(payload_[offset]) | (static_cast<std::uint32_t>(payload_[offset + 1]) << 8U) |
          (static_cast<std::uint32_t>(payload_[offset + 2]) << 16U) |
          (static_cast<std::uint32_t>(payload_[offset + 3]) << 24U);
 }
 
-std::int32_t UbxParser::read_i32(std::size_t offset) const {
-  return static_cast<std::int32_t>(read_u32(offset));
-}
+std::int32_t UbxParser::read_i32(std::size_t offset) const { return static_cast<std::int32_t>(read_u32(offset)); }
 
-GpsFixType UbxParser::to_fix_type(std::uint8_t ubx_fix_type) {
-  switch (ubx_fix_type) {
+GpsFixType UbxParser::to_fix_type(std::uint8_t ubx_fix_type)
+{
+  switch (ubx_fix_type)
+  {
     case 2:
       return GpsFixType::kFix2D;
     case 3:
@@ -125,9 +140,10 @@ GpsFixType UbxParser::to_fix_type(std::uint8_t ubx_fix_type) {
   }
 }
 
-GpsParseError UbxParser::decode_nav_pvt(std::uint16_t payload_length, std::uint64_t timestamp_us,
-                                         GpsFix& out) const {
-  if (payload_length < kNavPvtMinPayloadLength || payload_length > kMaxPayloadLength) {
+GpsParseError UbxParser::decode_nav_pvt(std::uint16_t payload_length, std::uint64_t timestamp_us, GpsFix& out) const
+{
+  if (payload_length < kNavPvtMinPayloadLength || payload_length > kMaxPayloadLength)
+  {
     return GpsParseError::kMalformed;
   }
 

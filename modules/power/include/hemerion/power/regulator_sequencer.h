@@ -20,13 +20,15 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace hemerion::power {
+namespace hemerion::power
+{
 
 /// Maximum number of rails a RegulatorSequencer can be configured with.
 inline constexpr std::size_t kMaxRails = 8;
 
 /// Result of RegulatorSequencer::configure() / start().
-enum class RegulatorSequencerError : std::uint8_t {
+enum class RegulatorSequencerError : std::uint8_t
+{
   kNone,            ///< Accepted.
   kNoRails,         ///< configure() called with rail_count == 0 or null rail_ids.
   kTooManyRails,    ///< configure() called with rail_count > kMaxRails.
@@ -34,7 +36,8 @@ enum class RegulatorSequencerError : std::uint8_t {
 };
 
 /// Lifecycle state of a RegulatorSequencer, as returned by state() / step().
-enum class RegulatorSequencerState : std::uint8_t {
+enum class RegulatorSequencerState : std::uint8_t
+{
   kIdle,      ///< Configured (or freshly constructed) but not started.
   kEnabling,  ///< A rail is being enabled; awaiting its power-good confirmation.
   kComplete,  ///< Every configured rail confirmed power-good in order.
@@ -44,8 +47,9 @@ enum class RegulatorSequencerState : std::uint8_t {
 /// @brief Sequences a fixed, ordered list of regulator rail IDs, enabling one
 /// rail at a time and waiting for its power-good confirmation (within a
 /// configured timeout) before moving on to the next.
-class RegulatorSequencer {
- public:
+class RegulatorSequencer
+{
+public:
   /// @brief Configures the ordered rail IDs to sequence and the per-rail
   /// power-good confirmation timeout.
   ///
@@ -55,8 +59,9 @@ class RegulatorSequencer {
   /// @param rail_count         Number of entries in `rail_ids`, 1..kMaxRails.
   /// @param confirm_timeout_ms Per-rail power-good confirmation timeout [ms].
   /// @return RegulatorSequencerError::kNone on success.
-  [[nodiscard]] RegulatorSequencerError configure(const std::uint8_t* rail_ids, std::uint8_t rail_count,
-                                                   std::uint32_t confirm_timeout_ms);
+  [[nodiscard]] RegulatorSequencerError configure(const std::uint8_t* rail_ids,
+                                                  std::uint8_t rail_count,
+                                                  std::uint32_t confirm_timeout_ms);
 
   /// @brief Starts (or restarts, once idle/complete/faulted) sequencing from
   /// the first configured rail.
@@ -82,12 +87,13 @@ class RegulatorSequencer {
 
   /// @brief ID of the rail currently being enabled.
   /// @return Valid only while state() == kEnabling; returns rail_ids[0] otherwise.
-  [[nodiscard]] std::uint8_t current_rail_id() const {
+  [[nodiscard]] std::uint8_t current_rail_id() const
+  {
     const std::uint8_t safe_index = index_ < rail_count_ ? index_ : static_cast<std::uint8_t>(0);
     return rail_ids_[safe_index];
   }
 
- private:
+private:
   std::array<std::uint8_t, kMaxRails> rail_ids_{};
   std::uint8_t rail_count_ = 0;
   std::uint8_t index_ = 0;

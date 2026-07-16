@@ -31,10 +31,10 @@ extern "C" {
 void hal_uart_init(uint8_t instance, uint32_t baud_rate);
 
 /** Blocking write of len bytes; returns once all bytes are transmitted. */
-void hal_uart_write(uint8_t instance, const uint8_t *data, size_t len);
+void hal_uart_write(uint8_t instance, const uint8_t* data, size_t len);
 
 /** Blocking read of up to len bytes; returns the number of bytes actually read. */
-size_t hal_uart_read(uint8_t instance, uint8_t *data, size_t len, uint32_t timeout_ms);
+size_t hal_uart_read(uint8_t instance, uint8_t* data, size_t len, uint32_t timeout_ms);
 
 #ifdef __cplusplus
 }

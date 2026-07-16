@@ -22,13 +22,15 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace hemerion::fault {
+namespace hemerion::fault
+{
 
 /// Maximum number of channels a WatchdogSupervisor can hold.
 inline constexpr std::size_t kMaxWatchdogChannels = 8;
 
 /// Result of WatchdogSupervisor registration/kick operations.
-enum class WatchdogError : std::uint8_t {
+enum class WatchdogError : std::uint8_t
+{
   kNone,          ///< Accepted.
   kRegistryFull,  ///< Supervisor already holds kMaxWatchdogChannels channels.
   kDuplicateId,   ///< register_channel() called with an already-registered id.
@@ -36,7 +38,8 @@ enum class WatchdogError : std::uint8_t {
 };
 
 /// Aggregate health reported by WatchdogSupervisor::step().
-enum class WatchdogStatus : std::uint8_t {
+enum class WatchdogStatus : std::uint8_t
+{
   kOk,       ///< No channel has exceeded its timeout.
   kExpired,  ///< At least one channel has exceeded its timeout.
 };
@@ -46,8 +49,9 @@ enum class WatchdogStatus : std::uint8_t {
 ///
 /// Call step() once per scheduler tick with the elapsed time since the
 /// previous call.
-class WatchdogSupervisor {
- public:
+class WatchdogSupervisor
+{
+public:
   /// @brief Adds a channel identified by `id` with the given timeout.
   ///
   /// A newly registered channel starts with a full timeout budget, as if
@@ -79,8 +83,9 @@ class WatchdogSupervisor {
   /// @return False for both unexpired and never-registered channels.
   [[nodiscard]] bool is_expired(std::uint8_t id) const;
 
- private:
-  struct Channel {
+private:
+  struct Channel
+  {
     std::uint8_t id = 0;
     std::uint32_t timeout_ms = 0;
     std::uint32_t elapsed_ms = 0;

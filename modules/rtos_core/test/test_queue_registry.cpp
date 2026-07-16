@@ -22,9 +22,11 @@ using hemerion::rtos_core::QueueDescriptor;
 using hemerion::rtos_core::QueueRegistry;
 using hemerion::rtos_core::QueueRegistryError;
 
-namespace {
+namespace
+{
 
-void test_register_queue_accepts_valid_descriptor() {
+void test_register_queue_accepts_valid_descriptor()
+{
   QueueRegistry registry;
   QueueDescriptor descriptor;
   descriptor.name = "imu_samples";
@@ -38,7 +40,8 @@ void test_register_queue_accepts_valid_descriptor() {
   assert(registry.find_by_name("missing") == nullptr);
 }
 
-void test_register_queue_rejects_invalid_descriptors() {
+void test_register_queue_rejects_invalid_descriptors()
+{
   QueueRegistry registry;
   QueueDescriptor descriptor;
   descriptor.name = nullptr;
@@ -54,7 +57,8 @@ void test_register_queue_rejects_invalid_descriptors() {
   assert(registry.register_queue(descriptor) == QueueRegistryError::kZeroDepth);
 }
 
-void test_register_queue_rejects_duplicate_name() {
+void test_register_queue_rejects_duplicate_name()
+{
   QueueRegistry registry;
   QueueDescriptor descriptor;
   descriptor.name = "fault_codes";
@@ -65,14 +69,16 @@ void test_register_queue_rejects_duplicate_name() {
   assert(registry.register_queue(descriptor) == QueueRegistryError::kDuplicateName);
 }
 
-void test_register_queue_rejects_when_full() {
+void test_register_queue_rejects_when_full()
+{
   QueueRegistry registry;
   QueueDescriptor descriptor;
   descriptor.element_size_bytes = 4;
   descriptor.depth = 4;
 
   std::array<std::array<char, 2>, kMaxQueues + 1> names{};
-  for (std::size_t i = 0; i < kMaxQueues; ++i) {
+  for (std::size_t i = 0; i < kMaxQueues; ++i)
+  {
     names[i][0] = static_cast<char>('a' + i);
     descriptor.name = names[i].data();
     assert(registry.register_queue(descriptor) == QueueRegistryError::kNone);
@@ -85,7 +91,8 @@ void test_register_queue_rejects_when_full() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_register_queue_accepts_valid_descriptor();
   test_register_queue_rejects_invalid_descriptors();
   test_register_queue_rejects_duplicate_name();

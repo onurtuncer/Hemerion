@@ -21,18 +21,21 @@
 #include "Hemerion/gps/nmeaParser.hpp"
 #include "Hemerion/gps/ubxParser.hpp"
 
-namespace hemerion::sensors::gps {
+namespace hemerion::sensors::gps
+{
 
 /// Wire protocol a GpsDriver expects from its receiver.
-enum class GpsProtocol : std::uint8_t {
+enum class GpsProtocol : std::uint8_t
+{
   kNmea,  ///< NMEA 0183 sentences, decoded by NmeaParser.
   kUbx,   ///< u-blox UBX binary frames, decoded by UbxParser.
 };
 
 /// @brief Routes a receiver's byte stream to the parser matching its
 /// configured protocol.
-class GpsDriver {
- public:
+class GpsDriver
+{
+public:
   /// @param protocol Wire protocol the receiver emits; fixed for the
   ///                 driver's lifetime.
   explicit GpsDriver(GpsProtocol protocol) : protocol_(protocol) {}
@@ -46,8 +49,10 @@ class GpsDriver {
   /// @param timestamp_us Caller's local clock value when this byte was received.
   /// @param out          Updated when the underlying parser completes a fix.
   /// @return The underlying parser's result.
-  [[nodiscard]] GpsParseError feed(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out) {
-    switch (protocol_) {
+  [[nodiscard]] GpsParseError feed(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out)
+  {
+    switch (protocol_)
+    {
       case GpsProtocol::kNmea:
         return nmea_parser_.parse_byte(byte, timestamp_us, out);
       case GpsProtocol::kUbx:
@@ -59,7 +64,7 @@ class GpsDriver {
   /// Wire protocol this driver was constructed with.
   [[nodiscard]] GpsProtocol protocol() const { return protocol_; }
 
- private:
+private:
   GpsProtocol protocol_;
   NmeaParser nmea_parser_;
   UbxParser ubx_parser_;

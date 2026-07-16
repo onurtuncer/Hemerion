@@ -30,12 +30,14 @@
 
 #include "Hemerion/gps/gpsTypes.hpp"
 
-namespace hemerion::sensors::gps::fmu {
+namespace hemerion::sensors::gps::fmu
+{
 
 /// @brief Stateless encoder producing complete UBX-NAV-PVT frames; see
 /// @ref ubxEmitter.hpp for which GpsFix fields are encoded.
-class UbxEmitter {
- public:
+class UbxEmitter
+{
+public:
   /// UBX-NAV-PVT payload length [bytes] (modern firmware layout).
   static constexpr std::size_t kPayloadLength = 92;
   /// Full frame length: 6-byte header + payload + 2 checksum bytes.

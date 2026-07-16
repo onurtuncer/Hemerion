@@ -29,21 +29,23 @@
 
 #include <utility>
 
-namespace hemerion::examples::rocket_gps_ecos {
+namespace hemerion::examples::rocket_gps_ecos
+{
 
-namespace {
+namespace
+{
 
 #if defined(_WIN32)
 constexpr std::uintptr_t kInvalidHandle = static_cast<std::uintptr_t>(~0ULL);  // INVALID_SOCKET
 
-SOCKET to_native(std::uintptr_t handle) {
-  return static_cast<SOCKET>(handle);
-}
+SOCKET to_native(std::uintptr_t handle) { return static_cast<SOCKET>(handle); }
 
 // One WSAStartup/WSACleanup pair for the process lifetime -- same pattern as
 // modules/sensors' udpSender.cpp and sim/udp_bridge's udp_socket.cpp.
-struct WinsockInit {
-  WinsockInit() {
+struct WinsockInit
+{
+  WinsockInit()
+  {
     WSADATA wsa_data;
     WSAStartup(MAKEWORD(2, 2), &wsa_data);
   }
@@ -54,16 +56,15 @@ struct WinsockInit {
   ~WinsockInit() { WSACleanup(); }
 };
 
-void ensure_winsock_ready() {
-  static WinsockInit init;
-}
+void ensure_winsock_ready() { static WinsockInit init; }
 #else
 constexpr int kInvalidHandle = -1;
 #endif
 
 }  // namespace
 
-std::optional<UdpReceiver> UdpReceiver::create(std::uint16_t local_port) {
+std::optional<UdpReceiver> UdpReceiver::create(std::uint16_t local_port)
+{
 #if defined(_WIN32)
   ensure_winsock_ready();
 #endif
@@ -75,11 +76,13 @@ std::optional<UdpReceiver> UdpReceiver::create(std::uint16_t local_port) {
 
 #if defined(_WIN32)
   SOCKET native = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (native == INVALID_SOCKET) {  // NOLINT(modernize-use-integer-sign-comparison)
+  if (native == INVALID_SOCKET)
+  {  // NOLINT(modernize-use-integer-sign-comparison)
     return std::nullopt;
   }
   if (bind(native, reinterpret_cast<sockaddr*>(&local_addr), sizeof(local_addr)) ==  // NOLINT(*-reinterpret-cast)
-      SOCKET_ERROR) {
+      SOCKET_ERROR)
+  {
     closesocket(native);
     return std::nullopt;
   }
@@ -89,10 +92,12 @@ std::optional<UdpReceiver> UdpReceiver::create(std::uint16_t local_port) {
   return result;
 #else
   int native = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (native < 0) {
+  if (native < 0)
+  {
     return std::nullopt;
   }
-  if (bind(native, reinterpret_cast<sockaddr*>(&local_addr), sizeof(local_addr)) != 0) {
+  if (bind(native, reinterpret_cast<sockaddr*>(&local_addr), sizeof(local_addr)) != 0)
+  {
     close(native);
     return std::nullopt;
   }
@@ -103,12 +108,12 @@ std::optional<UdpReceiver> UdpReceiver::create(std::uint16_t local_port) {
 #endif
 }
 
-UdpReceiver::UdpReceiver(UdpReceiver&& other) noexcept {
-  *this = std::move(other);
-}
+UdpReceiver::UdpReceiver(UdpReceiver&& other) noexcept { *this = std::move(other); }
 
-UdpReceiver& UdpReceiver::operator=(UdpReceiver&& other) noexcept {
-  if (this != &other) {
+UdpReceiver& UdpReceiver::operator=(UdpReceiver&& other) noexcept
+{
+  if (this != &other)
+  {
     reset();
     handle_ = other.handle_;
     other.handle_ = kInvalidHandle;
@@ -116,12 +121,12 @@ UdpReceiver& UdpReceiver::operator=(UdpReceiver&& other) noexcept {
   return *this;
 }
 
-UdpReceiver::~UdpReceiver() {
-  reset();
-}
+UdpReceiver::~UdpReceiver() { reset(); }
 
-void UdpReceiver::reset() noexcept {
-  if (handle_ != kInvalidHandle) {
+void UdpReceiver::reset() noexcept
+{
+  if (handle_ != kInvalidHandle)
+  {
 #if defined(_WIN32)
     closesocket(to_native(handle_));
 #else
@@ -131,9 +136,12 @@ void UdpReceiver::reset() noexcept {
   }
 }
 
-std::optional<std::size_t> UdpReceiver::receive(void* buffer, std::size_t buffer_size,
-                                                 std::chrono::milliseconds timeout) const {
-  if (handle_ == kInvalidHandle) {
+std::optional<std::size_t> UdpReceiver::receive(void* buffer,
+                                                std::size_t buffer_size,
+                                                std::chrono::milliseconds timeout) const
+{
+  if (handle_ == kInvalidHandle)
+  {
     return std::nullopt;
   }
 
@@ -152,18 +160,21 @@ std::optional<std::size_t> UdpReceiver::receive(void* buffer, std::size_t buffer
   FD_SET(native, &read_set);
   const int ready = select(native + 1, &read_set, nullptr, nullptr, &tv);
 #endif
-  if (ready <= 0) {
+  if (ready <= 0)
+  {
     return std::nullopt;  // timeout or select error
   }
 
 #if defined(_WIN32)
   const int received = recvfrom(native, static_cast<char*>(buffer), static_cast<int>(buffer_size), 0, nullptr, nullptr);
-  if (received == SOCKET_ERROR) {
+  if (received == SOCKET_ERROR)
+  {
     return std::nullopt;
   }
 #else
   const ssize_t received = recvfrom(native, buffer, buffer_size, 0, nullptr, nullptr);
-  if (received < 0) {
+  if (received < 0)
+  {
     return std::nullopt;
   }
 #endif

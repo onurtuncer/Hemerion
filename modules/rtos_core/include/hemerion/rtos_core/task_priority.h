@@ -19,10 +19,12 @@
 /// @namespace hemerion::rtos_core
 /// @brief RTOS-facing primitives: task/queue registries, priority bands,
 /// tick conversion, and static memory pools.
-namespace hemerion::rtos_core {
+namespace hemerion::rtos_core
+{
 
 /// Named priority band a numeric priority falls into; see band_of().
-enum class TaskPriorityBand : std::uint8_t {
+enum class TaskPriorityBand : std::uint8_t
+{
   kIdle,      ///< Priority kPriorityIdle (0).
   kLow,       ///< Priorities kPriorityLowMin..kPriorityLowMax.
   kMid,       ///< Priorities kPriorityMidMin..kPriorityMidMax.
@@ -43,9 +45,7 @@ inline constexpr std::uint8_t kPriorityCount = kPriorityCritical + 1;
 
 /// @brief True if `priority` lies within the defined scheme
 /// (0..kPriorityCritical).
-[[nodiscard]] constexpr bool is_valid_priority(std::uint8_t priority) {
-  return priority <= kPriorityCritical;
-}
+[[nodiscard]] constexpr bool is_valid_priority(std::uint8_t priority) { return priority <= kPriorityCritical; }
 
 /// @brief Maps a numeric priority to its band.
 ///
@@ -54,17 +54,22 @@ inline constexpr std::uint8_t kPriorityCount = kPriorityCritical + 1;
 ///
 /// @param priority Numeric task priority.
 /// @return The band `priority` falls into.
-[[nodiscard]] constexpr TaskPriorityBand band_of(std::uint8_t priority) {
-  if (priority == kPriorityIdle) {
+[[nodiscard]] constexpr TaskPriorityBand band_of(std::uint8_t priority)
+{
+  if (priority == kPriorityIdle)
+  {
     return TaskPriorityBand::kIdle;
   }
-  if (priority <= kPriorityLowMax) {
+  if (priority <= kPriorityLowMax)
+  {
     return TaskPriorityBand::kLow;
   }
-  if (priority <= kPriorityMidMax) {
+  if (priority <= kPriorityMidMax)
+  {
     return TaskPriorityBand::kMid;
   }
-  if (priority <= kPriorityHighMax) {
+  if (priority <= kPriorityHighMax)
+  {
     return TaskPriorityBand::kHigh;
   }
   return TaskPriorityBand::kCritical;

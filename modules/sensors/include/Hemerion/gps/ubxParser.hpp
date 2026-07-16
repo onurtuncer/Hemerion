@@ -21,12 +21,14 @@
 
 #include "Hemerion/gps/gpsTypes.hpp"
 
-namespace hemerion::sensors::gps {
+namespace hemerion::sensors::gps
+{
 
 /// @brief Byte-at-a-time UBX frame parser decoding UBX-NAV-PVT; see
 /// @ref ubxParser.hpp for the message-handling policy.
-class UbxParser {
- public:
+class UbxParser
+{
+public:
   /// @brief Feeds one byte from the receiver.
   ///
   /// @param byte         Next raw byte of the UBX stream.
@@ -39,8 +41,9 @@ class UbxParser {
   ///         kUnsupportedMessage if a completed message is rejected.
   [[nodiscard]] GpsParseError parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out);
 
- private:
-  enum class State : std::uint8_t {
+private:
+  enum class State : std::uint8_t
+  {
     kSync1,
     kSync2,
     kClass,
@@ -63,8 +66,9 @@ class UbxParser {
 
   void update_checksum(std::uint8_t byte);
   void reset();
-  [[nodiscard]] GpsParseError decode_nav_pvt(std::uint16_t payload_length, std::uint64_t timestamp_us,
-                                              GpsFix& out) const;
+  [[nodiscard]] GpsParseError decode_nav_pvt(std::uint16_t payload_length,
+                                             std::uint64_t timestamp_us,
+                                             GpsFix& out) const;
   [[nodiscard]] std::uint32_t read_u32(std::size_t offset) const;
   [[nodiscard]] std::int32_t read_i32(std::size_t offset) const;
   static GpsFixType to_fix_type(std::uint8_t ubx_fix_type);

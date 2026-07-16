@@ -22,11 +22,13 @@
 using hemerion::sim::udp_bridge::UdpSocket;
 using namespace std::chrono_literals;
 
-namespace {
+namespace
+{
 
 constexpr const char* kLoopback = "127.0.0.1";
 
-void test_send_then_receive_round_trip() {
+void test_send_then_receive_round_trip()
+{
   std::optional<UdpSocket> a = UdpSocket::create(kLoopback, 58101, kLoopback, 58102);
   assert(a.has_value());
   std::optional<UdpSocket> b = UdpSocket::create(kLoopback, 58102, kLoopback, 58101);
@@ -42,7 +44,8 @@ void test_send_then_receive_round_trip() {
   assert(std::memcmp(buffer, message, sizeof(message)) == 0);
 }
 
-void test_receive_times_out_when_nothing_sent() {
+void test_receive_times_out_when_nothing_sent()
+{
   std::optional<UdpSocket> a = UdpSocket::create(kLoopback, 58103, kLoopback, 58104);
   assert(a.has_value());
 
@@ -51,7 +54,8 @@ void test_receive_times_out_when_nothing_sent() {
   assert(!received.has_value());
 }
 
-void test_create_fails_if_local_port_already_bound() {
+void test_create_fails_if_local_port_already_bound()
+{
   std::optional<UdpSocket> first = UdpSocket::create(kLoopback, 58105, kLoopback, 58106);
   assert(first.has_value());
 
@@ -59,7 +63,8 @@ void test_create_fails_if_local_port_already_bound() {
   assert(!second.has_value());
 }
 
-void test_move_construct_transfers_ownership() {
+void test_move_construct_transfers_ownership()
+{
   std::optional<UdpSocket> a = UdpSocket::create(kLoopback, 58108, kLoopback, 58109);
   assert(a.has_value());
   std::optional<UdpSocket> b = UdpSocket::create(kLoopback, 58109, kLoopback, 58108);
@@ -78,7 +83,8 @@ void test_move_construct_transfers_ownership() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_send_then_receive_round_trip();
   test_receive_times_out_when_nothing_sent();
   test_create_fails_if_local_port_already_bound();

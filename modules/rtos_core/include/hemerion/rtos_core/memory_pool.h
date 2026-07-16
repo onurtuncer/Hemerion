@@ -19,20 +19,24 @@
 
 #include "etl/pool.h"
 
-namespace hemerion::rtos_core {
+namespace hemerion::rtos_core
+{
 
 /// @brief Statically-allocated pool of default-constructed T objects.
 ///
 /// @tparam T        Object type stored in the pool.
 /// @tparam Capacity Maximum number of simultaneously acquired objects.
 template <typename T, std::size_t Capacity>
-class MemoryPool {
- public:
+class MemoryPool
+{
+public:
   /// @brief Acquires one object from the pool.
   /// @return Pointer to a pool-owned object, or nullptr without allocating
   ///         if the pool is already full.
-  [[nodiscard]] T* acquire() {
-    if (pool_.full()) {
+  [[nodiscard]] T* acquire()
+  {
+    if (pool_.full())
+    {
       return nullptr;
     }
     return pool_.allocate();
@@ -49,7 +53,7 @@ class MemoryPool {
   /// Compile-time maximum number of objects.
   [[nodiscard]] static constexpr std::size_t capacity() { return Capacity; }
 
- private:
+private:
   etl::pool<T, Capacity> pool_;
 };
 

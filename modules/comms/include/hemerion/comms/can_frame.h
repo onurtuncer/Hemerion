@@ -21,7 +21,8 @@
 
 /// @namespace hemerion::comms
 /// @brief Communication-link framing and staging primitives (CAN today).
-namespace hemerion::comms {
+namespace hemerion::comms
+{
 
 /// Highest valid standard (11-bit) CAN identifier. Standard and extended
 /// identifiers share the same CanFrame representation; the
@@ -33,7 +34,8 @@ inline constexpr std::uint32_t kCanExtendedIdMax = 0x1FFFFFFFU;
 inline constexpr std::uint8_t kCanMaxDlc = 8U;
 
 /// Result of validating a CanFrame against the CAN 2.0 wire format.
-enum class CanFrameError : std::uint8_t {
+enum class CanFrameError : std::uint8_t
+{
   kNone,           ///< Frame is valid.
   kIdOutOfRange,   ///< Identifier exceeds the range selected by `extended`.
   kDlcOutOfRange,  ///< Data length code exceeds kCanMaxDlc.
@@ -41,12 +43,13 @@ enum class CanFrameError : std::uint8_t {
 
 /// One classic CAN 2.0A/2.0B frame, independent of any peripheral register
 /// layout.
-struct CanFrame {
-  std::uint32_t id = 0;                          ///< 11-bit or 29-bit identifier, per `extended`.
-  std::array<std::uint8_t, kCanMaxDlc> data{};   ///< Payload; only the first `dlc` bytes are meaningful.
-  std::uint8_t dlc = 0;                          ///< Data length code, 0..kCanMaxDlc.
-  bool extended = false;                         ///< True selects the 29-bit identifier range.
-  bool remote_request = false;                   ///< True marks a remote transmission request (RTR) frame.
+struct CanFrame
+{
+  std::uint32_t id = 0;                         ///< 11-bit or 29-bit identifier, per `extended`.
+  std::array<std::uint8_t, kCanMaxDlc> data{};  ///< Payload; only the first `dlc` bytes are meaningful.
+  std::uint8_t dlc = 0;                         ///< Data length code, 0..kCanMaxDlc.
+  bool extended = false;                        ///< True selects the 29-bit identifier range.
+  bool remote_request = false;                  ///< True marks a remote transmission request (RTR) frame.
 };
 
 /// @brief Builds a validated CanFrame from raw parts.
@@ -62,9 +65,12 @@ struct CanFrame {
 /// @param remote_request True to mark the frame as a remote transmission request.
 /// @param out_frame      Receives the built frame on success; untouched on error.
 /// @return CanFrameError::kNone on success, otherwise the first validation failure.
-[[nodiscard]] CanFrameError make_frame(std::uint32_t id, bool extended, const std::uint8_t* payload,
-                                        std::uint8_t length, bool remote_request,
-                                        CanFrame& out_frame);
+[[nodiscard]] CanFrameError make_frame(std::uint32_t id,
+                                       bool extended,
+                                       const std::uint8_t* payload,
+                                       std::uint8_t length,
+                                       bool remote_request,
+                                       CanFrame& out_frame);
 
 /// @brief Re-validates an already-constructed frame, e.g. one decoded from a
 /// wire buffer rather than built via make_frame().

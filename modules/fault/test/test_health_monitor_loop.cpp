@@ -28,7 +28,8 @@ using hemerion::fault::FaultSeverity;
 using hemerion::fault::WatchdogError;
 using hemerion::fault::WatchdogSupervisor;
 
-namespace {
+namespace
+{
 
 constexpr std::uint16_t kFaultGncTaskStale = 1;
 constexpr std::uint16_t kFaultImuTaskStale = 2;
@@ -36,11 +37,13 @@ constexpr std::uint16_t kFaultImuTaskStale = 2;
 constexpr std::uint8_t kChannelGncTask = 0;
 constexpr std::uint8_t kChannelImuTask = 1;
 
-struct HealthMonitor {
+struct HealthMonitor
+{
   FaultRegistry faults;
   WatchdogSupervisor watchdog;
 
-  void init() {
+  void init()
+  {
     assert(faults.register_code(kFaultGncTaskStale, FaultSeverity::kCritical) == FaultRegistryError::kNone);
     assert(faults.register_code(kFaultImuTaskStale, FaultSeverity::kWarning) == FaultRegistryError::kNone);
     assert(watchdog.register_channel(kChannelGncTask, 50) == WatchdogError::kNone);
@@ -50,28 +53,37 @@ struct HealthMonitor {
   // Mirrors the per-tick body a real health-monitor task would run: advance
   // the watchdog, then reflect each channel's expiry into the matching fault
   // code so the rest of the system only has to consult the fault registry.
-  void step(std::uint32_t elapsed_ms) {
+  void step(std::uint32_t elapsed_ms)
+  {
     watchdog.step(elapsed_ms);
 
-    if (watchdog.is_expired(kChannelGncTask)) {
+    if (watchdog.is_expired(kChannelGncTask))
+    {
       assert(faults.raise(kFaultGncTaskStale) == FaultRegistryError::kNone);
-    } else {
+    }
+    else
+    {
       assert(faults.clear(kFaultGncTaskStale) == FaultRegistryError::kNone);
     }
 
-    if (watchdog.is_expired(kChannelImuTask)) {
+    if (watchdog.is_expired(kChannelImuTask))
+    {
       assert(faults.raise(kFaultImuTaskStale) == FaultRegistryError::kNone);
-    } else {
+    }
+    else
+    {
       assert(faults.clear(kFaultImuTaskStale) == FaultRegistryError::kNone);
     }
   }
 };
 
-void test_nominal_ticks_with_regular_kicks_stay_clear() {
+void test_nominal_ticks_with_regular_kicks_stay_clear()
+{
   HealthMonitor monitor;
   monitor.init();
 
-  for (int tick = 0; tick < 5; ++tick) {
+  for (int tick = 0; tick < 5; ++tick)
+  {
     assert(monitor.watchdog.kick(kChannelGncTask) == WatchdogError::kNone);
     assert(monitor.watchdog.kick(kChannelImuTask) == WatchdogError::kNone);
     monitor.step(10);
@@ -81,12 +93,14 @@ void test_nominal_ticks_with_regular_kicks_stay_clear() {
   assert(monitor.faults.highest_active_severity() == FaultSeverity::kInfo);
 }
 
-void test_stalled_imu_task_raises_warning_without_tripping_critical() {
+void test_stalled_imu_task_raises_warning_without_tripping_critical()
+{
   HealthMonitor monitor;
   monitor.init();
 
   // GNC task keeps kicking; IMU task stops.
-  for (int tick = 0; tick < 3; ++tick) {
+  for (int tick = 0; tick < 3; ++tick)
+  {
     assert(monitor.watchdog.kick(kChannelGncTask) == WatchdogError::kNone);
     monitor.step(10);
   }
@@ -96,7 +110,8 @@ void test_stalled_imu_task_raises_warning_without_tripping_critical() {
   assert(monitor.faults.highest_active_severity() == FaultSeverity::kWarning);
 }
 
-void test_stalled_gnc_task_escalates_to_critical() {
+void test_stalled_gnc_task_escalates_to_critical()
+{
   HealthMonitor monitor;
   monitor.init();
 
@@ -108,7 +123,8 @@ void test_stalled_gnc_task_escalates_to_critical() {
   assert(monitor.faults.highest_active_severity() == FaultSeverity::kCritical);
 }
 
-void test_resumed_kicks_clear_the_fault() {
+void test_resumed_kicks_clear_the_fault()
+{
   HealthMonitor monitor;
   monitor.init();
 
@@ -125,7 +141,8 @@ void test_resumed_kicks_clear_the_fault() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_nominal_ticks_with_regular_kicks_stay_clear();
   test_stalled_imu_task_raises_warning_without_tripping_critical();
   test_stalled_gnc_task_escalates_to_critical();

@@ -12,17 +12,21 @@
 
 #include "Hemerion/imu/imu_conversion.h"
 
-namespace hemerion::sensors::imu {
+namespace hemerion::sensors::imu
+{
 
-namespace {
+namespace
+{
 // TODO: source from Aetherion's environment model instead of this local
 // placeholder once modules/sensors links against Aetherion::Aetherion.
 constexpr float kStandardGravityMps2 = 9.80665F;
 constexpr float kDegToRad = std::numbers::pi_v<float> / 180.0F;
 }  // namespace
 
-ImuConversionError convert_raw_to_si(const ImuRawSample& raw, const ImuScale& scale, ImuSample& out) {
-  if (scale.accel_lsb_per_g <= 0.0F || scale.gyro_lsb_per_dps <= 0.0F) {
+ImuConversionError convert_raw_to_si(const ImuRawSample& raw, const ImuScale& scale, ImuSample& out)
+{
+  if (scale.accel_lsb_per_g <= 0.0F || scale.gyro_lsb_per_dps <= 0.0F)
+  {
     return ImuConversionError::kInvalidScale;
   }
 

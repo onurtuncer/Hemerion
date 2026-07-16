@@ -18,10 +18,12 @@
 #include <optional>
 #include <string>
 
-namespace hemerion::sim::shm_bridge {
+namespace hemerion::sim::shm_bridge
+{
 
-class ShmSegment {
- public:
+class ShmSegment
+{
+public:
   // Creates a new named segment sized to exactly `size_bytes`. Fails (returns
   // std::nullopt) if a segment with this name already exists -- the owner
   // (the FMI master) is expected to create it once per simulation run.
@@ -44,7 +46,7 @@ class ShmSegment {
   // that handle is the one responsible for unlinking it (POSIX) on destruction.
   [[nodiscard]] bool owns_segment() const noexcept { return owns_segment_; }
 
- private:
+private:
   ShmSegment() = default;
   void reset() noexcept;
 

@@ -46,19 +46,20 @@
 // ---------------------------------------------------------------------------
 #if defined(__GNUC__) && !defined(_MSC_VER)
 
-  #define HEMERION_FLIGHT_SAFE_BEGIN                              \
-    _Pragma("GCC push_options")                                   \
-    _Pragma("GCC optimize(\"O2\")")                               \
-    _Pragma("GCC optimize(\"no-strict-overflow\")")               \
-    _Pragma("GCC optimize(\"no-omit-frame-pointer\")")            \
-    _Pragma("GCC optimize(\"no-tree-vectorize\")")                \
-    _Pragma("GCC optimize(\"no-aggressive-loop-optimizations\")") \
-    _Pragma("GCC optimize(\"fp-contract=off\")")                  \
-    static_assert(true, "HEMERION_FLIGHT_SAFE_BEGIN — semicolon required")
+#define HEMERION_FLIGHT_SAFE_BEGIN                                                                                     \
+  _Pragma("GCC push_options") _Pragma("GCC optimize(\"O2\")") _Pragma("GCC optimize(\"no-strict-overflow\")")          \
+      _Pragma("GCC optimize(\"no-omit-frame-pointer\")") _Pragma("GCC optimize(\"no-tree-vectorize\")")                \
+          _Pragma("GCC optimize(\"no-aggressive-loop-optimizations\")") _Pragma("GCC "                                 \
+                                                                                "optimize(\"fp-contract="              \
+                                                                                "off\")") static_assert(true,          \
+                                                                                                        "HEMERION_"    \
+                                                                                                        "FLIGHT_SAFE_" \
+                                                                                                        "BEGIN — "   \
+                                                                                                        "semicolon "   \
+                                                                                                        "required")
 
-  #define HEMERION_FLIGHT_SAFE_END                                \
-    _Pragma("GCC pop_options")                                    \
-    static_assert(true, "HEMERION_FLIGHT_SAFE_END — semicolon required")
+#define HEMERION_FLIGHT_SAFE_END                                                                                       \
+  _Pragma("GCC pop_options") static_assert(true, "HEMERION_FLIGHT_SAFE_END — semicolon required")
 
 // ---------------------------------------------------------------------------
 // MSVC — host-only builds (FMU / sim / Windows shm_bridge)
@@ -66,17 +67,15 @@
 // ---------------------------------------------------------------------------
 #elif defined(_MSC_VER)
 
-  #define HEMERION_FLIGHT_SAFE_BEGIN                              \
-    static_assert(true, "HEMERION_FLIGHT_SAFE_BEGIN (MSVC stub)")
+#define HEMERION_FLIGHT_SAFE_BEGIN static_assert(true, "HEMERION_FLIGHT_SAFE_BEGIN (MSVC stub)")
 
-  #define HEMERION_FLIGHT_SAFE_END                                \
-    static_assert(true, "HEMERION_FLIGHT_SAFE_END (MSVC stub)")
+#define HEMERION_FLIGHT_SAFE_END static_assert(true, "HEMERION_FLIGHT_SAFE_END (MSVC stub)")
 
 // ---------------------------------------------------------------------------
 // Unknown compiler — warn loudly rather than silently doing nothing
 // ---------------------------------------------------------------------------
 #else
-  #error "hemerion/safety/flight_safe.hpp: unsupported compiler. \
+#error "hemerion/safety/flight_safe.hpp: unsupported compiler. \
 Add pragmas for your toolchain or define HEMERION_SKIP_FLIGHT_SAFE_PRAGMAS."
 #endif
 
@@ -86,8 +85,8 @@ Add pragmas for your toolchain or define HEMERION_SKIP_FLIGHT_SAFE_PRAGMAS."
 // are validated. Never define this in production firmware builds.
 // ---------------------------------------------------------------------------
 #if defined(HEMERION_SKIP_FLIGHT_SAFE_PRAGMAS)
-  #undef  HEMERION_FLIGHT_SAFE_BEGIN
-  #undef  HEMERION_FLIGHT_SAFE_END
-  #define HEMERION_FLIGHT_SAFE_BEGIN  static_assert(true, "flight-safe pragmas skipped")
-  #define HEMERION_FLIGHT_SAFE_END    static_assert(true, "flight-safe pragmas skipped")
+#undef HEMERION_FLIGHT_SAFE_BEGIN
+#undef HEMERION_FLIGHT_SAFE_END
+#define HEMERION_FLIGHT_SAFE_BEGIN static_assert(true, "flight-safe pragmas skipped")
+#define HEMERION_FLIGHT_SAFE_END static_assert(true, "flight-safe pragmas skipped")
 #endif

@@ -25,10 +25,12 @@ using hemerion::comms::kCanStandardIdMax;
 using hemerion::comms::make_frame;
 using hemerion::comms::validate_frame;
 
-namespace {
+namespace
+{
 
-void test_standard_frame_roundtrip() {
-  const std::array<std::uint8_t, 3> payload = {0x01, 0x02, 0x03};
+void test_standard_frame_roundtrip()
+{
+  const std::array<std::uint8_t, 3> payload = { 0x01, 0x02, 0x03 };
   CanFrame frame;
   const CanFrameError error = make_frame(0x123, false, payload.data(), 3, false, frame);
 
@@ -39,27 +41,31 @@ void test_standard_frame_roundtrip() {
   assert(frame.data[0] == 0x01 && frame.data[1] == 0x02 && frame.data[2] == 0x03);
 }
 
-void test_standard_id_out_of_range() {
+void test_standard_id_out_of_range()
+{
   CanFrame frame;
   const CanFrameError error = make_frame(kCanStandardIdMax + 1, false, nullptr, 0, false, frame);
   assert(error == CanFrameError::kIdOutOfRange);
 }
 
-void test_extended_id_accepted() {
+void test_extended_id_accepted()
+{
   CanFrame frame;
   const CanFrameError error = make_frame(kCanExtendedIdMax, true, nullptr, 0, false, frame);
   assert(error == CanFrameError::kNone);
   assert(frame.id == kCanExtendedIdMax);
 }
 
-void test_dlc_out_of_range() {
+void test_dlc_out_of_range()
+{
   const std::array<std::uint8_t, 9> payload = {};
   CanFrame frame;
   const CanFrameError error = make_frame(0x1, false, payload.data(), 9, false, frame);
   assert(error == CanFrameError::kDlcOutOfRange);
 }
 
-void test_remote_request_frame_has_no_payload_bytes_copied() {
+void test_remote_request_frame_has_no_payload_bytes_copied()
+{
   CanFrame frame;
   const CanFrameError error = make_frame(0x7FF, false, nullptr, 0, true, frame);
   assert(error == CanFrameError::kNone);
@@ -67,14 +73,16 @@ void test_remote_request_frame_has_no_payload_bytes_copied() {
   assert(frame.dlc == 0);
 }
 
-void test_validate_frame_rejects_corrupted_dlc() {
+void test_validate_frame_rejects_corrupted_dlc()
+{
   CanFrame frame;
   frame.id = 0x10;
   frame.dlc = 200;  // Not reachable via make_frame(); simulates a decoded/corrupted frame.
   assert(validate_frame(frame) == CanFrameError::kDlcOutOfRange);
 }
 
-void test_fifo_push_pop_order_and_capacity() {
+void test_fifo_push_pop_order_and_capacity()
+{
   CanFifo<2> fifo;
   CanFrame a;
   CanFrame b;
@@ -97,7 +105,8 @@ void test_fifo_push_pop_order_and_capacity() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_standard_frame_roundtrip();
   test_standard_id_out_of_range();
   test_extended_id_accepted();

@@ -10,32 +10,40 @@
 
 #include "Hemerion/gps/nmeaParser.hpp"
 
-namespace hemerion::sensors::gps {
+namespace hemerion::sensors::gps
+{
 
-namespace {
+namespace
+{
 
 constexpr float kKnotsToMps = 0.514444F;
 
-bool parse_hex_digit(char c, std::uint8_t& out) {
-  if (c >= '0' && c <= '9') {
+bool parse_hex_digit(char c, std::uint8_t& out)
+{
+  if (c >= '0' && c <= '9')
+  {
     out = static_cast<std::uint8_t>(c - '0');
     return true;
   }
-  if (c >= 'A' && c <= 'F') {
+  if (c >= 'A' && c <= 'F')
+  {
     out = static_cast<std::uint8_t>(c - 'A' + 10);
     return true;
   }
-  if (c >= 'a' && c <= 'f') {
+  if (c >= 'a' && c <= 'f')
+  {
     out = static_cast<std::uint8_t>(c - 'a' + 10);
     return true;
   }
   return false;
 }
 
-bool parse_hex_byte(std::string_view two_chars, std::uint8_t& out) {
+bool parse_hex_byte(std::string_view two_chars, std::uint8_t& out)
+{
   std::uint8_t hi = 0;
   std::uint8_t lo = 0;
-  if (two_chars.size() != 2 || !parse_hex_digit(two_chars[0], hi) || !parse_hex_digit(two_chars[1], lo)) {
+  if (two_chars.size() != 2 || !parse_hex_digit(two_chars[0], hi) || !parse_hex_digit(two_chars[1], lo))
+  {
     return false;
   }
   out = static_cast<std::uint8_t>((hi << 4U) | lo);
@@ -45,32 +53,40 @@ bool parse_hex_byte(std::string_view two_chars, std::uint8_t& out) {
 // Manual decimal parser: no locale dependency and no heap allocation, unlike
 // std::strtod. Rejects anything that isn't a plain [+-]?digits[.digits]
 // field, which is all NMEA numeric fields ever contain.
-bool parse_double(std::string_view field, double& out) {
-  if (field.empty()) {
+bool parse_double(std::string_view field, double& out)
+{
+  if (field.empty())
+  {
     return false;
   }
 
   std::size_t i = 0;
   double sign = 1.0;
-  if (field[i] == '-') {
+  if (field[i] == '-')
+  {
     sign = -1.0;
     ++i;
-  } else if (field[i] == '+') {
+  }
+  else if (field[i] == '+')
+  {
     ++i;
   }
 
   double value = 0.0;
   bool any_digits = false;
-  while (i < field.size() && field[i] >= '0' && field[i] <= '9') {
+  while (i < field.size() && field[i] >= '0' && field[i] <= '9')
+  {
     value = value * 10.0 + static_cast<double>(field[i] - '0');
     any_digits = true;
     ++i;
   }
 
-  if (i < field.size() && field[i] == '.') {
+  if (i < field.size() && field[i] == '.')
+  {
     ++i;
     double scale = 0.1;
-    while (i < field.size() && field[i] >= '0' && field[i] <= '9') {
+    while (i < field.size() && field[i] >= '0' && field[i] <= '9')
+    {
       value += static_cast<double>(field[i] - '0') * scale;
       scale *= 0.1;
       any_digits = true;
@@ -78,20 +94,25 @@ bool parse_double(std::string_view field, double& out) {
     }
   }
 
-  if (!any_digits || i != field.size()) {
+  if (!any_digits || i != field.size())
+  {
     return false;
   }
   out = sign * value;
   return true;
 }
 
-bool parse_uint(std::string_view field, unsigned& out) {
-  if (field.empty()) {
+bool parse_uint(std::string_view field, unsigned& out)
+{
+  if (field.empty())
+  {
     return false;
   }
   unsigned value = 0;
-  for (const char c : field) {
-    if (c < '0' || c > '9') {
+  for (const char c : field)
+  {
+    if (c < '0' || c > '9')
+    {
       return false;
     }
     value = (value * 10U) + static_cast<unsigned>(c - '0');
@@ -102,7 +123,8 @@ bool parse_uint(std::string_view field, unsigned& out) {
 
 // Converts NMEA's "ddmm.mmmm" (or "dddmm.mmmm" for longitude) format to
 // signed-magnitude decimal degrees; the caller applies the N/S or E/W sign.
-double dmm_to_decimal_degrees(double dmm) {
+double dmm_to_decimal_degrees(double dmm)
+{
   const auto degrees = static_cast<double>(static_cast<long long>(dmm / 100.0));
   const double minutes = dmm - (degrees * 100.0);
   return degrees + (minutes / 60.0);
@@ -114,11 +136,14 @@ double dmm_to_decimal_degrees(double dmm) {
 // are silently dropped, matching the bounded-buffer style used throughout
 // this module -- a sentence with more fields than expected is still decoded
 // using whichever leading fields fit.
-std::size_t NmeaParser::split_fields(std::string_view sentence, FieldArray& fields) {
+std::size_t NmeaParser::split_fields(std::string_view sentence, FieldArray& fields)
+{
   std::size_t count = 0;
   std::size_t start = 0;
-  for (std::size_t i = 0; i <= sentence.size() && count < fields.size(); ++i) {
-    if (i == sentence.size() || sentence[i] == ',') {
+  for (std::size_t i = 0; i <= sentence.size() && count < fields.size(); ++i)
+  {
+    if (i == sentence.size() || sentence[i] == ',')
+    {
       fields[count] = sentence.substr(start, i - start);
       ++count;
       start = i + 1;
@@ -127,28 +152,34 @@ std::size_t NmeaParser::split_fields(std::string_view sentence, FieldArray& fiel
   return count;
 }
 
-GpsParseError NmeaParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out) {
+GpsParseError NmeaParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out)
+{
   const auto c = static_cast<char>(byte);
 
-  if (c == '$') {
+  if (c == '$')
+  {
     in_sentence_ = true;
     length_ = 0;
     return GpsParseError::kIncomplete;
   }
 
-  if (!in_sentence_) {
+  if (!in_sentence_)
+  {
     return GpsParseError::kIncomplete;
   }
 
-  if (c == '\r' || c == '\n') {
+  if (c == '\r' || c == '\n')
+  {
     in_sentence_ = false;
-    if (length_ == 0) {
+    if (length_ == 0)
+    {
       return GpsParseError::kIncomplete;
     }
     return decode_sentence(timestamp_us, out);
   }
 
-  if (length_ >= buffer_.size()) {
+  if (length_ >= buffer_.size())
+  {
     in_sentence_ = false;
     length_ = 0;
     return GpsParseError::kMalformed;
@@ -159,48 +190,58 @@ GpsParseError NmeaParser::parse_byte(std::uint8_t byte, std::uint64_t timestamp_
   return GpsParseError::kIncomplete;
 }
 
-GpsParseError NmeaParser::decode_sentence(std::uint64_t timestamp_us, GpsFix& out) {
+GpsParseError NmeaParser::decode_sentence(std::uint64_t timestamp_us, GpsFix& out)
+{
   const std::string_view sentence(buffer_.data(), length_);
   const std::size_t star = sentence.rfind('*');
-  if (star == std::string_view::npos || star + 3 != sentence.size()) {
+  if (star == std::string_view::npos || star + 3 != sentence.size())
+  {
     return GpsParseError::kMalformed;
   }
 
   std::uint8_t checksum = 0;
-  for (std::size_t i = 0; i < star; ++i) {
+  for (std::size_t i = 0; i < star; ++i)
+  {
     checksum ^= static_cast<std::uint8_t>(sentence[i]);
   }
 
   std::uint8_t expected_checksum = 0;
-  if (!parse_hex_byte(sentence.substr(star + 1, 2), expected_checksum)) {
+  if (!parse_hex_byte(sentence.substr(star + 1, 2), expected_checksum))
+  {
     return GpsParseError::kMalformed;
   }
-  if (checksum != expected_checksum) {
+  if (checksum != expected_checksum)
+  {
     return GpsParseError::kChecksumMismatch;
   }
 
   FieldArray fields;
   const std::size_t field_count = split_fields(sentence.substr(0, star), fields);
-  if (field_count == 0 || fields[0].size() < 3) {
+  if (field_count == 0 || fields[0].size() < 3)
+  {
     return GpsParseError::kUnsupportedMessage;
   }
 
   // Talker ID (e.g. "GP", "GN", "GL") is the first 1-2 chars; the sentence
   // type is always the trailing 3.
   const std::string_view sentence_id = fields[0].substr(fields[0].size() - 3);
-  if (sentence_id == "GGA") {
+  if (sentence_id == "GGA")
+  {
     return decode_gga(fields, field_count, timestamp_us, out);
   }
-  if (sentence_id == "RMC") {
+  if (sentence_id == "RMC")
+  {
     return decode_rmc(fields, field_count, timestamp_us, out);
   }
   return GpsParseError::kUnsupportedMessage;
 }
 
-GpsParseError NmeaParser::decode_gga(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us,
-                                      GpsFix& out) {
+GpsParseError
+NmeaParser::decode_gga(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us, GpsFix& out)
+{
   // $--GGA,time,lat,N/S,lon,E/W,quality,numSV,HDOP,altitude,M,...
-  if (field_count < 10 || fields[3].empty() || fields[5].empty()) {
+  if (field_count < 10 || fields[3].empty() || fields[5].empty())
+  {
     return GpsParseError::kMalformed;
   }
 
@@ -210,16 +251,19 @@ GpsParseError NmeaParser::decode_gga(const FieldArray& fields, std::size_t field
   unsigned quality = 0;
   unsigned num_satellites = 0;
   if (!parse_double(fields[2], raw_lat) || !parse_double(fields[4], raw_lon) || !parse_uint(fields[6], quality) ||
-      !parse_uint(fields[7], num_satellites) || !parse_double(fields[9], altitude_m)) {
+      !parse_uint(fields[7], num_satellites) || !parse_double(fields[9], altitude_m))
+  {
     return GpsParseError::kMalformed;
   }
 
   double latitude_deg = dmm_to_decimal_degrees(raw_lat);
-  if (fields[3] == "S") {
+  if (fields[3] == "S")
+  {
     latitude_deg = -latitude_deg;
   }
   double longitude_deg = dmm_to_decimal_degrees(raw_lon);
-  if (fields[5] == "W") {
+  if (fields[5] == "W")
+  {
     longitude_deg = -longitude_deg;
   }
 
@@ -234,10 +278,12 @@ GpsParseError NmeaParser::decode_gga(const FieldArray& fields, std::size_t field
   return GpsParseError::kNone;
 }
 
-GpsParseError NmeaParser::decode_rmc(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us,
-                                      GpsFix& out) {
+GpsParseError
+NmeaParser::decode_rmc(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us, GpsFix& out)
+{
   // $--RMC,time,status,lat,N/S,lon,E/W,speed_kt,course,date,...
-  if (field_count < 9 || fields[2].empty() || fields[4].empty() || fields[6].empty()) {
+  if (field_count < 9 || fields[2].empty() || fields[4].empty() || fields[6].empty())
+  {
     return GpsParseError::kMalformed;
   }
 
@@ -245,17 +291,20 @@ GpsParseError NmeaParser::decode_rmc(const FieldArray& fields, std::size_t field
   double raw_lon = 0.0;
   double speed_knots = 0.0;
   double course_deg = 0.0;
-  if (!parse_double(fields[3], raw_lat) || !parse_double(fields[5], raw_lon) ||
-      !parse_double(fields[7], speed_knots) || !parse_double(fields[8], course_deg)) {
+  if (!parse_double(fields[3], raw_lat) || !parse_double(fields[5], raw_lon) || !parse_double(fields[7], speed_knots) ||
+      !parse_double(fields[8], course_deg))
+  {
     return GpsParseError::kMalformed;
   }
 
   double latitude_deg = dmm_to_decimal_degrees(raw_lat);
-  if (fields[4] == "S") {
+  if (fields[4] == "S")
+  {
     latitude_deg = -latitude_deg;
   }
   double longitude_deg = dmm_to_decimal_degrees(raw_lon);
-  if (fields[6] == "W") {
+  if (fields[6] == "W")
+  {
     longitude_deg = -longitude_deg;
   }
 

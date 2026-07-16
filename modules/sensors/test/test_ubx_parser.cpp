@@ -29,34 +29,39 @@ using hemerion::sensors::gps::GpsFixType;
 using hemerion::sensors::gps::GpsParseError;
 using hemerion::sensors::gps::UbxParser;
 
-namespace {
+namespace
+{
 
-bool near(float a, float b, float tol = 1e-4F) {
-  return std::fabs(a - b) <= tol;
-}
+bool near(float a, float b, float tol = 1e-4F) { return std::fabs(a - b) <= tol; }
 
-const std::vector<std::uint8_t>& nav_pvt_payload() {
+const std::vector<std::uint8_t>& nav_pvt_payload()
+{
   static const std::vector<std::uint8_t> payload = {
-      0x00, 0x00, 0x00, 0x00, 0xEA, 0x07, 0x06, 0x1A, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x09, 0xC0, 0xC0, 0x45, 0x11, 0xD0, 0x5A, 0x71, 0x18, 0x50, 0xC3,
-      0x00, 0x00, 0xC8, 0xAF, 0x00, 0x00, 0xC4, 0x09, 0x00, 0x00, 0xA0, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDC, 0x05, 0x00, 0x00, 0x40, 0x54, 0x89, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xEA, 0x07, 0x06, 0x1A, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x03, 0x00, 0x00, 0x09, 0xC0, 0xC0, 0x45, 0x11, 0xD0, 0x5A, 0x71, 0x18, 0x50, 0xC3, 0x00, 0x00, 0xC8, 0xAF,
+    0x00, 0x00, 0xC4, 0x09, 0x00, 0x00, 0xA0, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0xDC, 0x05, 0x00, 0x00, 0x40, 0x54, 0x89, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x96, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   };
   return payload;
 }
 
-std::vector<std::uint8_t> build_message(std::uint8_t msg_class, std::uint8_t msg_id,
-                                         const std::vector<std::uint8_t>& payload) {
-  std::vector<std::uint8_t> message = {0xB5, 0x62, msg_class, msg_id,
+std::vector<std::uint8_t> build_message(std::uint8_t msg_class,
+                                        std::uint8_t msg_id,
+                                        const std::vector<std::uint8_t>& payload)
+{
+  std::vector<std::uint8_t> message = { 0xB5,
+                                        0x62,
+                                        msg_class,
+                                        msg_id,
                                         static_cast<std::uint8_t>(payload.size() & 0xFFU),
-                                        static_cast<std::uint8_t>((payload.size() >> 8U) & 0xFFU)};
+                                        static_cast<std::uint8_t>((payload.size() >> 8U) & 0xFFU) };
   message.insert(message.end(), payload.begin(), payload.end());
 
   std::uint8_t ck_a = 0;
   std::uint8_t ck_b = 0;
-  for (std::size_t i = 2; i < message.size(); ++i) {
+  for (std::size_t i = 2; i < message.size(); ++i)
+  {
     ck_a = static_cast<std::uint8_t>(ck_a + message[i]);
     ck_b = static_cast<std::uint8_t>(ck_b + ck_a);
   }
@@ -65,16 +70,19 @@ std::vector<std::uint8_t> build_message(std::uint8_t msg_class, std::uint8_t msg
   return message;
 }
 
-GpsParseError feed_message(UbxParser& parser, const std::vector<std::uint8_t>& message, std::uint64_t timestamp_us,
-                            GpsFix& out) {
+GpsParseError
+feed_message(UbxParser& parser, const std::vector<std::uint8_t>& message, std::uint64_t timestamp_us, GpsFix& out)
+{
   GpsParseError last_error = GpsParseError::kIncomplete;
-  for (const std::uint8_t byte : message) {
+  for (const std::uint8_t byte : message)
+  {
     last_error = parser.parse_byte(byte, timestamp_us, out);
   }
   return last_error;
 }
 
-void test_nav_pvt_decodes_full_fix() {
+void test_nav_pvt_decodes_full_fix()
+{
   UbxParser parser;
   GpsFix fix;
   const auto message = build_message(0x01, 0x07, nav_pvt_payload());
@@ -93,7 +101,8 @@ void test_nav_pvt_decodes_full_fix() {
   assert(fix.timestamp_us == 5000);
 }
 
-void test_corrupted_checksum_is_rejected() {
+void test_corrupted_checksum_is_rejected()
+{
   UbxParser parser;
   GpsFix fix;
   auto message = build_message(0x01, 0x07, nav_pvt_payload());
@@ -103,7 +112,8 @@ void test_corrupted_checksum_is_rejected() {
   assert(error == GpsParseError::kChecksumMismatch);
 }
 
-void test_other_message_class_is_unsupported() {
+void test_other_message_class_is_unsupported()
+{
   UbxParser parser;
   GpsFix fix;
   const auto message = build_message(0x01, 0x02, {});  // UBX-NAV-POSLLH, empty payload for this test
@@ -112,10 +122,11 @@ void test_other_message_class_is_unsupported() {
   assert(error == GpsParseError::kUnsupportedMessage);
 }
 
-void test_partial_message_is_incomplete() {
+void test_partial_message_is_incomplete()
+{
   UbxParser parser;
   GpsFix fix;
-  const std::vector<std::uint8_t> partial = {0xB5, 0x62, 0x01, 0x07, 0x5C, 0x00};
+  const std::vector<std::uint8_t> partial = { 0xB5, 0x62, 0x01, 0x07, 0x5C, 0x00 };
   const GpsParseError error = feed_message(parser, partial, 0, fix);
 
   assert(error == GpsParseError::kIncomplete);
@@ -123,7 +134,8 @@ void test_partial_message_is_incomplete() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_nav_pvt_decodes_full_fix();
   test_corrupted_checksum_is_rejected();
   test_other_message_class_is_unsupported();

@@ -22,11 +22,13 @@
 
 using hemerion::sim::shm_bridge::ShmSegment;
 
-namespace {
+namespace
+{
 
 constexpr std::size_t kSize = 256;
 
-void test_create_then_open_existing_share_bytes() {
+void test_create_then_open_existing_share_bytes()
+{
   std::optional<ShmSegment> owner = ShmSegment::create("hemerion_test_shm_segment_a", kSize);
   assert(owner.has_value());
   assert(owner->size() == kSize);
@@ -45,7 +47,8 @@ void test_create_then_open_existing_share_bytes() {
   assert(static_cast<std::uint8_t*>(owner->data())[0] == 0x7);
 }
 
-void test_create_fails_if_name_already_exists() {
+void test_create_fails_if_name_already_exists()
+{
   std::optional<ShmSegment> first = ShmSegment::create("hemerion_test_shm_segment_b", kSize);
   assert(first.has_value());
 
@@ -53,12 +56,14 @@ void test_create_fails_if_name_already_exists() {
   assert(!second.has_value());
 }
 
-void test_open_existing_fails_if_never_created() {
+void test_open_existing_fails_if_never_created()
+{
   std::optional<ShmSegment> peer = ShmSegment::open_existing("hemerion_test_shm_segment_never_created", kSize);
   assert(!peer.has_value());
 }
 
-void test_move_construct_transfers_ownership() {
+void test_move_construct_transfers_ownership()
+{
   std::optional<ShmSegment> owner = ShmSegment::create("hemerion_test_shm_segment_c", kSize);
   assert(owner.has_value());
   void* original_data = owner->data();
@@ -74,7 +79,8 @@ void test_move_construct_transfers_ownership() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_create_then_open_existing_share_bytes();
   test_create_fails_if_name_already_exists();
   test_open_existing_fails_if_never_created();

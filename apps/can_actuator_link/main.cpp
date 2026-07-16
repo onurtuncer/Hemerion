@@ -20,51 +20,58 @@
 #include "hemerion/comms/can_fifo.h"
 #include "hemerion/comms/can_frame.h"
 
-namespace {
+namespace
+{
 
 constexpr std::size_t kTxFifoCapacity = 8;
 
-struct Setpoint {
+struct Setpoint
+{
   std::uint16_t actuator_id;
   float value;
 };
 
-[[nodiscard]] bool stage_setpoint_frame(const Setpoint& setpoint,
-                                         hemerion::comms::CanFifo<kTxFifoCapacity>& tx_fifo) {
+[[nodiscard]] bool stage_setpoint_frame(const Setpoint& setpoint, hemerion::comms::CanFifo<kTxFifoCapacity>& tx_fifo)
+{
   std::array<std::uint8_t, 4> payload = {};
   std::memcpy(payload.data(), &setpoint.value, sizeof(setpoint.value));
 
   hemerion::comms::CanFrame frame;
-  const hemerion::comms::CanFrameError error = hemerion::comms::make_frame(
-      setpoint.actuator_id, false, payload.data(), payload.size(), false, frame);
-  if (error != hemerion::comms::CanFrameError::kNone) {
+  const hemerion::comms::CanFrameError error =
+      hemerion::comms::make_frame(setpoint.actuator_id, false, payload.data(), payload.size(), false, frame);
+  if (error != hemerion::comms::CanFrameError::kNone)
+  {
     return false;
   }
   return tx_fifo.push(frame);
 }
 
-void drain_to_stdout(hemerion::comms::CanFifo<kTxFifoCapacity>& tx_fifo) {
+void drain_to_stdout(hemerion::comms::CanFifo<kTxFifoCapacity>& tx_fifo)
+{
   hemerion::comms::CanFrame frame;
-  while (tx_fifo.pop(frame)) {
+  while (tx_fifo.pop(frame))
+  {
     float value = 0.0F;
     std::memcpy(&value, frame.data.data(), sizeof(value));
-    std::println("CAN TX id=0x{:03X} dlc={} value={}", frame.id, static_cast<unsigned>(frame.dlc),
-                 value);
+    std::println("CAN TX id=0x{:03X} dlc={} value={}", frame.id, static_cast<unsigned>(frame.dlc), value);
   }
 }
 
 }  // namespace
 
-int main() {
+int main()
+{
   hemerion::comms::CanFifo<kTxFifoCapacity> tx_fifo;
 
   constexpr std::array<Setpoint, 2> kSetpoints = {
-      Setpoint{.actuator_id = 0x100, .value = 0.25F},
-      Setpoint{.actuator_id = 0x101, .value = -0.10F},
+    Setpoint{ .actuator_id = 0x100, .value = 0.25F },
+    Setpoint{ .actuator_id = 0x101, .value = -0.10F },
   };
 
-  for (const Setpoint& setpoint : kSetpoints) {
-    if (!stage_setpoint_frame(setpoint, tx_fifo)) {
+  for (const Setpoint& setpoint : kSetpoints)
+  {
+    if (!stage_setpoint_frame(setpoint, tx_fifo))
+    {
       std::println(stderr, "failed to stage setpoint for actuator 0x{:03X}", setpoint.actuator_id);
     }
   }

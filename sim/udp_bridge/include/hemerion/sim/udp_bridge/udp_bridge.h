@@ -26,16 +26,19 @@
 #include "hemerion/sim/udp_bridge/bridge_protocol.h"
 #include "hemerion/sim/udp_bridge/udp_socket.h"
 
-namespace hemerion::sim::udp_bridge {
+namespace hemerion::sim::udp_bridge
+{
 
-enum class WaitResult {
+enum class WaitResult
+{
   kReady,
   kShutdown,
   kTimedOut,
 };
 
-class UdpBridge {
- public:
+class UdpBridge
+{
+public:
   // Binds `local_address:local_port` and targets `peer_address:peer_port`;
   // called by the FMI master. Named create_master() to stay parallel to
   // ShmBridge, but unlike ShmBridge::create_master() there is nothing to
@@ -44,9 +47,9 @@ class UdpBridge {
   // create_peer() differ only in which side of the protocol the caller
   // intends to drive afterwards.
   [[nodiscard]] static std::optional<UdpBridge> create_master(const std::string& local_address,
-                                                                std::uint16_t local_port,
-                                                                const std::string& peer_address,
-                                                                std::uint16_t peer_port);
+                                                              std::uint16_t local_port,
+                                                              const std::string& peer_address,
+                                                              std::uint16_t peer_port);
 
   // Binds `local_address:local_port` and targets `peer_address:peer_port`;
   // called by the Aetherion process. Can be called before or after the
@@ -54,9 +57,9 @@ class UdpBridge {
   // ShmBridge::open_peer() has, since there is no shared object to attach
   // to.
   [[nodiscard]] static std::optional<UdpBridge> create_peer(const std::string& local_address,
-                                                              std::uint16_t local_port,
-                                                              const std::string& peer_address,
-                                                              std::uint16_t peer_port);
+                                                            std::uint16_t local_port,
+                                                            const std::string& peer_address,
+                                                            std::uint16_t peer_port);
 
   UdpBridge(const UdpBridge&) = delete;
   UdpBridge& operator=(const UdpBridge&) = delete;
@@ -82,8 +85,8 @@ class UdpBridge {
   // -- peer side -------------------------------------------------------------
   // Blocks until a kInputs datagram arrives, a kShutdown datagram is
   // observed, or `timeout` elapses.
-  [[nodiscard]] WaitResult wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, double& dt_s,
-                                            std::chrono::milliseconds timeout);
+  [[nodiscard]] WaitResult
+  wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, double& dt_s, std::chrono::milliseconds timeout);
   // Sends this step's outputs as a kOutputs datagram, stamped with the
   // step_index() of the most recently received inputs.
   void post_outputs(const ChannelFrame& outputs);
@@ -93,11 +96,10 @@ class UdpBridge {
   // synchronized with the other side the way ShmBridge::step_index() is.
   [[nodiscard]] std::uint64_t step_index() const noexcept { return step_index_; }
 
- private:
+private:
   explicit UdpBridge(UdpSocket socket);
 
-  [[nodiscard]] WaitResult wait_for_packet(PacketType expected, StepPacket& packet,
-                                            std::chrono::milliseconds timeout);
+  [[nodiscard]] WaitResult wait_for_packet(PacketType expected, StepPacket& packet, std::chrono::milliseconds timeout);
 
   UdpSocket socket_;
   std::uint64_t step_index_ = 0;

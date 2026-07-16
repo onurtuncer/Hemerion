@@ -21,21 +21,24 @@
 
 /// @namespace hemerion::power
 /// @brief Battery telemetry evaluation and regulator rail sequencing.
-namespace hemerion::power {
+namespace hemerion::power
+{
 
 /// Maximum number of series cells a BatterySample can describe.
 inline constexpr std::size_t kMaxCells = 12;
 
 /// Operating limits a BatterySample is checked against by evaluate_faults().
-struct BatteryLimits {
-  float cell_voltage_min_v = 3.0f;        ///< Per-cell undervoltage threshold [V].
-  float cell_voltage_max_v = 4.25f;       ///< Per-cell overvoltage threshold [V].
-  float pack_current_max_a = 80.0f;       ///< Pack discharge current limit [A].
-  float cell_temperature_max_c = 60.0f;   ///< Cell temperature limit [degrees C].
+struct BatteryLimits
+{
+  float cell_voltage_min_v = 3.0f;       ///< Per-cell undervoltage threshold [V].
+  float cell_voltage_max_v = 4.25f;      ///< Per-cell overvoltage threshold [V].
+  float pack_current_max_a = 80.0f;      ///< Pack discharge current limit [A].
+  float cell_temperature_max_c = 60.0f;  ///< Cell temperature limit [degrees C].
 };
 
 /// One snapshot of pack telemetry, as a HAL-backed BMS driver would report it.
-struct BatterySample {
+struct BatterySample
+{
   std::array<float, kMaxCells> cell_voltages_v{};  ///< Per-cell voltages [V]; first `cell_count` entries are valid.
   std::uint8_t cell_count = 0;                     ///< Number of valid entries in cell_voltages_v.
   float pack_current_a = 0.0f;                     ///< Pack current [A].
@@ -43,7 +46,8 @@ struct BatterySample {
 };
 
 /// Bitmask values, OR-able into the std::uint8_t returned by evaluate_faults().
-enum class BatteryFaultBits : std::uint8_t {
+enum class BatteryFaultBits : std::uint8_t
+{
   kNone = 0,                    ///< No limit violated.
   kCellUnderVoltage = 1U << 0,  ///< At least one cell below BatteryLimits::cell_voltage_min_v.
   kCellOverVoltage = 1U << 1,   ///< At least one cell above BatteryLimits::cell_voltage_max_v.

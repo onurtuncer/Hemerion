@@ -18,13 +18,16 @@
 
 using hemerion::rtos_core::MemoryPool;
 
-namespace {
+namespace
+{
 
-struct Payload {
+struct Payload
+{
   std::uint32_t value = 0;
 };
 
-void test_acquire_release_round_trip() {
+void test_acquire_release_round_trip()
+{
   MemoryPool<Payload, 2> pool;
   assert(pool.capacity() == 2);
   assert(pool.size() == 0);
@@ -57,7 +60,8 @@ void test_acquire_release_round_trip() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_acquire_release_round_trip();
 
   std::puts("test_memory_pool: all checks passed");

@@ -24,13 +24,13 @@ using hemerion::sensors::gps::GpsFix;
 using hemerion::sensors::gps::GpsParseError;
 using hemerion::sensors::gps::GpsProtocol;
 
-namespace {
+namespace
+{
 
-bool near(double a, double b, double tol = 1e-3) {
-  return std::fabs(a - b) <= tol;
-}
+bool near(double a, double b, double tol = 1e-3) { return std::fabs(a - b) <= tol; }
 
-void test_nmea_protocol_decodes_gga() {
+void test_nmea_protocol_decodes_gga()
+{
   GpsDriver driver(GpsProtocol::kNmea);
   assert(driver.protocol() == GpsProtocol::kNmea);
 
@@ -40,9 +40,11 @@ void test_nmea_protocol_decodes_gga() {
   const std::string_view sentence = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n";
   GpsFix fix;
   GpsParseError error = GpsParseError::kIncomplete;
-  for (const char c : sentence) {
+  for (const char c : sentence)
+  {
     const GpsParseError result = driver.feed(static_cast<std::uint8_t>(c), 42, fix);
-    if (result != GpsParseError::kIncomplete) {
+    if (result != GpsParseError::kIncomplete)
+    {
       error = result;
     }
   }
@@ -52,7 +54,8 @@ void test_nmea_protocol_decodes_gga() {
   assert(fix.timestamp_us == 42);
 }
 
-void test_ubx_protocol_decodes_nav_pvt() {
+void test_ubx_protocol_decodes_nav_pvt()
+{
   GpsDriver driver(GpsProtocol::kUbx);
   assert(driver.protocol() == GpsProtocol::kUbx);
 
@@ -62,10 +65,11 @@ void test_ubx_protocol_decodes_nav_pvt() {
   // NAV-PVT is below kNavPvtMinPayloadLength, so it resolves to kMalformed,
   // which is enough to prove the bytes reached UbxParser rather than
   // NmeaParser.
-  const std::vector<std::uint8_t> message = {0xB5, 0x62, 0x01, 0x07, 0x00, 0x00, 0x08, 0x19};
+  const std::vector<std::uint8_t> message = { 0xB5, 0x62, 0x01, 0x07, 0x00, 0x00, 0x08, 0x19 };
   GpsFix fix;
   GpsParseError error = GpsParseError::kIncomplete;
-  for (const std::uint8_t byte : message) {
+  for (const std::uint8_t byte : message)
+  {
     error = driver.feed(byte, 0, fix);
   }
 
@@ -74,7 +78,8 @@ void test_ubx_protocol_decodes_nav_pvt() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_nmea_protocol_decodes_gga();
   test_ubx_protocol_decodes_nav_pvt();
 

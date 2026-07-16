@@ -19,19 +19,23 @@
 #include "etl/queue.h"
 #include "hemerion/comms/can_frame.h"
 
-namespace hemerion::comms {
+namespace hemerion::comms
+{
 
 /// @brief Statically-allocated FIFO of CanFrame values.
 ///
 /// @tparam Capacity Maximum number of frames the FIFO can hold.
 template <std::size_t Capacity>
-class CanFifo {
- public:
+class CanFifo
+{
+public:
   /// @brief Appends `frame` to the back of the queue.
   /// @param frame Frame to enqueue (copied).
   /// @return False without modifying the queue if it is already full.
-  [[nodiscard]] bool push(const CanFrame& frame) {
-    if (queue_.full()) {
+  [[nodiscard]] bool push(const CanFrame& frame)
+  {
+    if (queue_.full())
+    {
       return false;
     }
     queue_.push(frame);
@@ -41,8 +45,10 @@ class CanFifo {
   /// @brief Removes the front frame and copies it into `out_frame`.
   /// @param out_frame Receives the dequeued frame on success.
   /// @return False without modifying `out_frame` if the queue is empty.
-  [[nodiscard]] bool pop(CanFrame& out_frame) {
-    if (queue_.empty()) {
+  [[nodiscard]] bool pop(CanFrame& out_frame)
+  {
+    if (queue_.empty())
+    {
       return false;
     }
     out_frame = queue_.front();
@@ -59,7 +65,7 @@ class CanFifo {
   /// Compile-time maximum number of frames.
   [[nodiscard]] static constexpr std::size_t capacity() { return Capacity; }
 
- private:
+private:
   etl::queue<CanFrame, Capacity> queue_;
 };
 

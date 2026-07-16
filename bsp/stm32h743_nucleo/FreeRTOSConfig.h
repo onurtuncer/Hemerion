@@ -93,16 +93,16 @@
 #define configPRIO_BITS 4
 #define configLIBRARY_LOWEST_INTERRUPT_PRIORITY 0xf
 #define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY 5
-#define configKERNEL_INTERRUPT_PRIORITY \
-  (configLIBRARY_LOWEST_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
-#define configMAX_SYSCALL_INTERRUPT_PRIORITY \
-  (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
+#define configKERNEL_INTERRUPT_PRIORITY (configLIBRARY_LOWEST_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
+#define configMAX_SYSCALL_INTERRUPT_PRIORITY (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
 
-#define configASSERT(x) \
-  if ((x) == 0) { \
-    taskDISABLE_INTERRUPTS(); \
-    for (;;) { \
-    } \
+#define configASSERT(x)                                                                                                \
+  if ((x) == 0)                                                                                                        \
+  {                                                                                                                    \
+    taskDISABLE_INTERRUPTS();                                                                                          \
+    for (;;)                                                                                                           \
+    {                                                                                                                  \
+    }                                                                                                                  \
   }
 
 #endif /* FREERTOS_CONFIG_H */

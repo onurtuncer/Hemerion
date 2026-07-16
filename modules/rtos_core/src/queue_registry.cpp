@@ -12,22 +12,29 @@
 
 #include <cstring>
 
-namespace hemerion::rtos_core {
+namespace hemerion::rtos_core
+{
 
-QueueRegistryError QueueRegistry::register_queue(const QueueDescriptor& descriptor) {
-  if (descriptor.name == nullptr) {
+QueueRegistryError QueueRegistry::register_queue(const QueueDescriptor& descriptor)
+{
+  if (descriptor.name == nullptr)
+  {
     return QueueRegistryError::kNullName;
   }
-  if (descriptor.element_size_bytes == 0) {
+  if (descriptor.element_size_bytes == 0)
+  {
     return QueueRegistryError::kZeroElementSize;
   }
-  if (descriptor.depth == 0) {
+  if (descriptor.depth == 0)
+  {
     return QueueRegistryError::kZeroDepth;
   }
-  if (find_by_name(descriptor.name) != nullptr) {
+  if (find_by_name(descriptor.name) != nullptr)
+  {
     return QueueRegistryError::kDuplicateName;
   }
-  if (count_ >= kMaxQueues) {
+  if (count_ >= kMaxQueues)
+  {
     return QueueRegistryError::kRegistryFull;
   }
 
@@ -36,9 +43,12 @@ QueueRegistryError QueueRegistry::register_queue(const QueueDescriptor& descript
   return QueueRegistryError::kNone;
 }
 
-const QueueDescriptor* QueueRegistry::find_by_name(const char* name) const {
-  for (std::size_t i = 0; i < count_; ++i) {
-    if (std::strcmp(queues_[i].name, name) == 0) {
+const QueueDescriptor* QueueRegistry::find_by_name(const char* name) const
+{
+  for (std::size_t i = 0; i < count_; ++i)
+  {
+    if (std::strcmp(queues_[i].name, name) == 0)
+    {
       return &queues_[i];
     }
   }

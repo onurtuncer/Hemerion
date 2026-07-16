@@ -22,20 +22,24 @@ using hemerion::sim::udp_bridge::UdpBridge;
 using hemerion::sim::udp_bridge::WaitResult;
 using namespace std::chrono_literals;
 
-namespace {
+namespace
+{
 
 constexpr const char* kLoopback = "127.0.0.1";
 
-ChannelFrame make_frame(std::initializer_list<double> values) {
+ChannelFrame make_frame(std::initializer_list<double> values)
+{
   ChannelFrame frame;
   frame.count = 0;
-  for (double v : values) {
+  for (double v : values)
+  {
     frame.values[frame.count++] = v;
   }
   return frame;
 }
 
-void test_round_trip_step() {
+void test_round_trip_step()
+{
   std::optional<UdpBridge> master = UdpBridge::create_master(kLoopback, 58201, kLoopback, 58202);
   assert(master.has_value());
   std::optional<UdpBridge> peer = UdpBridge::create_peer(kLoopback, 58202, kLoopback, 58201);
@@ -43,7 +47,7 @@ void test_round_trip_step() {
 
   assert(master->step_index() == 0);
 
-  const ChannelFrame inputs = make_frame({1.0, 2.0, 3.0});
+  const ChannelFrame inputs = make_frame({ 1.0, 2.0, 3.0 });
   master->post_inputs(/*sim_time_s=*/0.5, /*dt_s=*/0.01, inputs);
   assert(master->step_index() == 1);
 
@@ -59,7 +63,7 @@ void test_round_trip_step() {
   assert(received_inputs.values[2] == 3.0);
   assert(peer->step_index() == 1);  // mirrored from the received packet
 
-  const ChannelFrame outputs = make_frame({9.0, 8.0});
+  const ChannelFrame outputs = make_frame({ 9.0, 8.0 });
   peer->post_outputs(outputs);
 
   ChannelFrame received_outputs;
@@ -75,7 +79,8 @@ void test_round_trip_step() {
   assert(master->step_index() == 2);
 }
 
-void test_wait_for_inputs_times_out_when_nothing_posted() {
+void test_wait_for_inputs_times_out_when_nothing_posted()
+{
   std::optional<UdpBridge> peer = UdpBridge::create_peer(kLoopback, 58203, kLoopback, 58204);
   assert(peer.has_value());
 
@@ -86,7 +91,8 @@ void test_wait_for_inputs_times_out_when_nothing_posted() {
   assert(result == WaitResult::kTimedOut);
 }
 
-void test_shutdown_unblocks_peer() {
+void test_shutdown_unblocks_peer()
+{
   std::optional<UdpBridge> master = UdpBridge::create_master(kLoopback, 58205, kLoopback, 58206);
   assert(master.has_value());
   std::optional<UdpBridge> peer = UdpBridge::create_peer(kLoopback, 58206, kLoopback, 58205);
@@ -103,7 +109,8 @@ void test_shutdown_unblocks_peer() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_round_trip_step();
   test_wait_for_inputs_times_out_when_nothing_posted();
   test_shutdown_unblocks_peer();

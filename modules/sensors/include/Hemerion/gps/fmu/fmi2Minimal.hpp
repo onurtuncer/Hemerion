@@ -22,29 +22,51 @@
 
 extern "C" {
 
-using fmi2Component = void*;             ///< Opaque handle to one FMU instance.
-using fmi2ComponentEnvironment = void*;  ///< Opaque importer-side context passed back in callbacks.
-using fmi2FMUstate = void*;              ///< Opaque serialized-state handle (unused by this FMU).
-using fmi2ValueReference = unsigned int; ///< Index identifying one scalar variable.
-using fmi2Real = double;                 ///< FMI real scalar type.
-using fmi2Integer = int;                 ///< FMI integer scalar type.
-using fmi2Boolean = int;                 ///< FMI boolean scalar type (0/1).
-using fmi2Char = char;                   ///< FMI character type.
-using fmi2String = const fmi2Char*;      ///< FMI string type (null-terminated).
-using fmi2Byte = char;                   ///< FMI raw byte type.
+using fmi2Component = void*;              ///< Opaque handle to one FMU instance.
+using fmi2ComponentEnvironment = void*;   ///< Opaque importer-side context passed back in callbacks.
+using fmi2FMUstate = void*;               ///< Opaque serialized-state handle (unused by this FMU).
+using fmi2ValueReference = unsigned int;  ///< Index identifying one scalar variable.
+using fmi2Real = double;                  ///< FMI real scalar type.
+using fmi2Integer = int;                  ///< FMI integer scalar type.
+using fmi2Boolean = int;                  ///< FMI boolean scalar type (0/1).
+using fmi2Char = char;                    ///< FMI character type.
+using fmi2String = const fmi2Char*;       ///< FMI string type (null-terminated).
+using fmi2Byte = char;                    ///< FMI raw byte type.
 
 /// Status every fmi2* API function returns to the importer.
-enum fmi2Status { fmi2OK = 0, fmi2Warning = 1, fmi2Discard = 2, fmi2Error = 3, fmi2Fatal = 4, fmi2Pending = 5 };
+enum fmi2Status
+{
+  fmi2OK = 0,
+  fmi2Warning = 1,
+  fmi2Discard = 2,
+  fmi2Error = 3,
+  fmi2Fatal = 4,
+  fmi2Pending = 5
+};
 
 /// Which FMI 2.0 interface an instance is created for.
-enum fmi2Type { fmi2ModelExchange = 0, fmi2CoSimulation = 1 };
+enum fmi2Type
+{
+  fmi2ModelExchange = 0,
+  fmi2CoSimulation = 1
+};
 
 /// Selector for fmi2GetStatus-family queries.
-enum fmi2StatusKind { fmi2DoStepStatus = 0, fmi2PendingStatus = 1, fmi2LastSuccessfulTime = 2, fmi2Terminated = 3 };
+enum fmi2StatusKind
+{
+  fmi2DoStepStatus = 0,
+  fmi2PendingStatus = 1,
+  fmi2LastSuccessfulTime = 2,
+  fmi2Terminated = 3
+};
 
 /// Importer-supplied logging callback.
-using fmi2CallbackLogger = void (*)(fmi2ComponentEnvironment componentEnvironment, fmi2String instanceName,
-                                     fmi2Status status, fmi2String category, fmi2String message, ...);
+using fmi2CallbackLogger = void (*)(fmi2ComponentEnvironment componentEnvironment,
+                                    fmi2String instanceName,
+                                    fmi2Status status,
+                                    fmi2String category,
+                                    fmi2String message,
+                                    ...);
 /// Importer-supplied allocator (calloc-shaped).
 using fmi2CallbackAllocateMemory = void* (*)(std::size_t nobj, std::size_t size);
 /// Importer-supplied deallocator for fmi2CallbackAllocateMemory memory.
@@ -53,12 +75,13 @@ using fmi2CallbackFreeMemory = void (*)(void* obj);
 using fmi2StepFinished = void (*)(fmi2ComponentEnvironment componentEnvironment, fmi2Status status);
 
 /// Callback table the importer hands to fmi2Instantiate().
-struct fmi2CallbackFunctions {
-  fmi2CallbackLogger logger;                       ///< Never null.
-  fmi2CallbackAllocateMemory allocateMemory;       ///< Never null.
-  fmi2CallbackFreeMemory freeMemory;               ///< Never null.
-  fmi2StepFinished stepFinished;                   ///< May be null (synchronous stepping).
-  fmi2ComponentEnvironment componentEnvironment;   ///< Passed back verbatim in every callback.
+struct fmi2CallbackFunctions
+{
+  fmi2CallbackLogger logger;                      ///< Never null.
+  fmi2CallbackAllocateMemory allocateMemory;      ///< Never null.
+  fmi2CallbackFreeMemory freeMemory;              ///< Never null.
+  fmi2StepFinished stepFinished;                  ///< May be null (synchronous stepping).
+  fmi2ComponentEnvironment componentEnvironment;  ///< Passed back verbatim in every callback.
 };
 
 }  // extern "C"

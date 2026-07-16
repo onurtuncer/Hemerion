@@ -64,5 +64,3 @@ BraceWrapping:
     BeforeCatch : 'true'
     BeforeElse : 'true'
     IndentBraces : 'false'
-
-...

@@ -9,24 +9,32 @@
 #include <thread>
 #include <utility>
 
-namespace hemerion::sim::shm_bridge {
+namespace hemerion::sim::shm_bridge
+{
 
-namespace {
+namespace
+{
 
-constexpr std::chrono::microseconds kSpinSleep{50};
+constexpr std::chrono::microseconds kSpinSleep{ 50 };
 
-WaitResult spin_wait_for_phase(const std::atomic<std::uint32_t>& phase, StepPhase target,
-                                std::chrono::milliseconds timeout) {
+WaitResult spin_wait_for_phase(const std::atomic<std::uint32_t>& phase,
+                               StepPhase target,
+                               std::chrono::milliseconds timeout)
+{
   const auto deadline = std::chrono::steady_clock::now() + timeout;
-  for (;;) {
+  for (;;)
+  {
     const auto current = static_cast<StepPhase>(phase.load(std::memory_order_acquire));
-    if (current == target) {
+    if (current == target)
+    {
       return WaitResult::kReady;
     }
-    if (current == StepPhase::kShutdownRequested) {
+    if (current == StepPhase::kShutdownRequested)
+    {
       return WaitResult::kShutdown;
     }
-    if (std::chrono::steady_clock::now() >= deadline) {
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
       return WaitResult::kTimedOut;
     }
     std::this_thread::sleep_for(kSpinSleep);
@@ -37,9 +45,11 @@ WaitResult spin_wait_for_phase(const std::atomic<std::uint32_t>& phase, StepPhas
 
 ShmBridge::ShmBridge(ShmSegment segment) : segment_(std::move(segment)) {}
 
-std::optional<ShmBridge> ShmBridge::create_master(const std::string& name) {
+std::optional<ShmBridge> ShmBridge::create_master(const std::string& name)
+{
   std::optional<ShmSegment> segment = ShmSegment::create(name, sizeof(BridgeRegion));
-  if (!segment) {
+  if (!segment)
+  {
     return std::nullopt;
   }
   // The master is the only side that ever constructs the region -- the peer
@@ -48,12 +58,15 @@ std::optional<ShmBridge> ShmBridge::create_master(const std::string& name) {
   return ShmBridge(std::move(*segment));
 }
 
-std::optional<ShmBridge> ShmBridge::open_peer(const std::string& name) {
+std::optional<ShmBridge> ShmBridge::open_peer(const std::string& name)
+{
   std::optional<ShmSegment> segment = ShmSegment::open_existing(name, sizeof(BridgeRegion));
-  if (!segment) {
+  if (!segment)
+  {
     return std::nullopt;
   }
-  if (static_cast<const BridgeRegion*>(segment->data())->protocol_version != kProtocolVersion) {
+  if (static_cast<const BridgeRegion*>(segment->data())->protocol_version != kProtocolVersion)
+  {
     return std::nullopt;
   }
   return ShmBridge(std::move(*segment));
@@ -63,7 +76,8 @@ BridgeRegion& ShmBridge::region() noexcept { return *static_cast<BridgeRegion*>(
 
 const BridgeRegion& ShmBridge::region() const noexcept { return *static_cast<const BridgeRegion*>(segment_.data()); }
 
-void ShmBridge::post_inputs(double sim_time_s, double dt_s, const ChannelFrame& inputs) {
+void ShmBridge::post_inputs(double sim_time_s, double dt_s, const ChannelFrame& inputs)
+{
   BridgeRegion& r = region();
   r.sim_time_s = sim_time_s;
   r.dt_s = dt_s;
@@ -72,10 +86,12 @@ void ShmBridge::post_inputs(double sim_time_s, double dt_s, const ChannelFrame& 
   r.phase.store(static_cast<std::uint32_t>(StepPhase::kInputsPosted), std::memory_order_release);
 }
 
-WaitResult ShmBridge::wait_for_outputs(ChannelFrame& outputs, std::chrono::milliseconds timeout) {
+WaitResult ShmBridge::wait_for_outputs(ChannelFrame& outputs, std::chrono::milliseconds timeout)
+{
   BridgeRegion& r = region();
   const WaitResult result = spin_wait_for_phase(r.phase, StepPhase::kOutputsPosted, timeout);
-  if (result != WaitResult::kReady) {
+  if (result != WaitResult::kReady)
+  {
     return result;
   }
   outputs = r.plant_to_master;
@@ -83,15 +99,18 @@ WaitResult ShmBridge::wait_for_outputs(ChannelFrame& outputs, std::chrono::milli
   return WaitResult::kReady;
 }
 
-void ShmBridge::request_shutdown() {
+void ShmBridge::request_shutdown()
+{
   region().phase.store(static_cast<std::uint32_t>(StepPhase::kShutdownRequested), std::memory_order_release);
 }
 
-WaitResult ShmBridge::wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, double& dt_s,
-                                       std::chrono::milliseconds timeout) {
+WaitResult
+ShmBridge::wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, double& dt_s, std::chrono::milliseconds timeout)
+{
   BridgeRegion& r = region();
   const WaitResult result = spin_wait_for_phase(r.phase, StepPhase::kInputsPosted, timeout);
-  if (result != WaitResult::kReady) {
+  if (result != WaitResult::kReady)
+  {
     return result;
   }
   inputs = r.master_to_plant;
@@ -100,7 +119,8 @@ WaitResult ShmBridge::wait_for_inputs(ChannelFrame& inputs, double& sim_time_s, 
   return WaitResult::kReady;
 }
 
-void ShmBridge::post_outputs(const ChannelFrame& outputs) {
+void ShmBridge::post_outputs(const ChannelFrame& outputs)
+{
   BridgeRegion& r = region();
   r.plant_to_master = outputs;
   r.phase.store(static_cast<std::uint32_t>(StepPhase::kOutputsPosted), std::memory_order_release);

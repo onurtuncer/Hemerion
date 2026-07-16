@@ -25,7 +25,8 @@
 
 #include "hemerion/rtos_core/task_priority.h"
 
-namespace hemerion::rtos_core {
+namespace hemerion::rtos_core
+{
 
 /// Maximum number of tasks a TaskRegistry can hold.
 inline constexpr std::size_t kMaxTasks = 16;
@@ -38,7 +39,8 @@ inline constexpr std::uint32_t kMinStackWords = 128;
 using TaskEntryPoint = void (*)(void*);
 
 /// Result of TaskRegistry::register_task().
-enum class TaskRegistryError : std::uint8_t {
+enum class TaskRegistryError : std::uint8_t
+{
   kNone,             ///< Descriptor accepted.
   kRegistryFull,     ///< Registry already holds kMaxTasks descriptors.
   kDuplicateName,    ///< A descriptor with the same name is already registered.
@@ -48,19 +50,21 @@ enum class TaskRegistryError : std::uint8_t {
 };
 
 /// Everything needed to later create one FreeRTOS task.
-struct TaskDescriptor {
-  const char* name = nullptr;               ///< Unique, non-null task name; not copied -- must outlive the registry.
-  TaskEntryPoint entry_point = nullptr;     ///< Function the task runs; passed to xTaskCreate() unchanged.
-  void* argument = nullptr;                 ///< Opaque argument forwarded to entry_point.
-  std::uint8_t priority = kPriorityIdle;    ///< Task priority; must satisfy is_valid_priority().
+struct TaskDescriptor
+{
+  const char* name = nullptr;                  ///< Unique, non-null task name; not copied -- must outlive the registry.
+  TaskEntryPoint entry_point = nullptr;        ///< Function the task runs; passed to xTaskCreate() unchanged.
+  void* argument = nullptr;                    ///< Opaque argument forwarded to entry_point.
+  std::uint8_t priority = kPriorityIdle;       ///< Task priority; must satisfy is_valid_priority().
   std::uint32_t stack_words = kMinStackWords;  ///< Stack size in 32-bit words, >= kMinStackWords.
-  std::uint32_t period_ms = 0;              ///< Nominal period [ms]; 0 = event-driven / not periodic.
+  std::uint32_t period_ms = 0;                 ///< Nominal period [ms]; 0 = event-driven / not periodic.
 };
 
 /// @brief Fixed-capacity, statically-allocated table of TaskDescriptor
 /// entries, validated as they are registered.
-class TaskRegistry {
- public:
+class TaskRegistry
+{
+public:
   /// @brief Validates and stores `descriptor`.
   ///
   /// Rejects the descriptor (without modifying the registry) if its name is
@@ -84,7 +88,7 @@ class TaskRegistry {
   /// Removes every registered descriptor.
   void clear() { count_ = 0; }
 
- private:
+private:
   std::array<TaskDescriptor, kMaxTasks> tasks_{};
   std::size_t count_ = 0;
 };

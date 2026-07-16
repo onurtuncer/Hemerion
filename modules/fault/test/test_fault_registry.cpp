@@ -21,15 +21,18 @@ using hemerion::fault::FaultRegistryError;
 using hemerion::fault::FaultSeverity;
 using hemerion::fault::kMaxFaultCodes;
 
-namespace {
+namespace
+{
 
-void test_unregistered_code_is_not_active() {
+void test_unregistered_code_is_not_active()
+{
   FaultRegistry registry;
   assert(!registry.is_active(1));
   assert(registry.active_count() == 0);
 }
 
-void test_register_then_raise_makes_code_active() {
+void test_register_then_raise_makes_code_active()
+{
   FaultRegistry registry;
   assert(registry.register_code(1, FaultSeverity::kWarning) == FaultRegistryError::kNone);
   assert(!registry.is_active(1));
@@ -38,7 +41,8 @@ void test_register_then_raise_makes_code_active() {
   assert(registry.active_count() == 1);
 }
 
-void test_clear_makes_code_inactive() {
+void test_clear_makes_code_inactive()
+{
   FaultRegistry registry;
   assert(registry.register_code(1, FaultSeverity::kCritical) == FaultRegistryError::kNone);
   assert(registry.raise(1) == FaultRegistryError::kNone);
@@ -47,7 +51,8 @@ void test_clear_makes_code_inactive() {
   assert(registry.active_count() == 0);
 }
 
-void test_raise_and_clear_are_idempotent() {
+void test_raise_and_clear_are_idempotent()
+{
   FaultRegistry registry;
   assert(registry.register_code(1, FaultSeverity::kInfo) == FaultRegistryError::kNone);
   assert(registry.clear(1) == FaultRegistryError::kNone);
@@ -56,28 +61,33 @@ void test_raise_and_clear_are_idempotent() {
   assert(registry.active_count() == 1);
 }
 
-void test_duplicate_registration_rejected() {
+void test_duplicate_registration_rejected()
+{
   FaultRegistry registry;
   assert(registry.register_code(1, FaultSeverity::kInfo) == FaultRegistryError::kNone);
   assert(registry.register_code(1, FaultSeverity::kWarning) == FaultRegistryError::kDuplicateCode);
 }
 
-void test_unknown_code_operations_rejected() {
+void test_unknown_code_operations_rejected()
+{
   FaultRegistry registry;
   assert(registry.raise(42) == FaultRegistryError::kUnknownCode);
   assert(registry.clear(42) == FaultRegistryError::kUnknownCode);
 }
 
-void test_registry_full_rejects_further_registration() {
+void test_registry_full_rejects_further_registration()
+{
   FaultRegistry registry;
-  for (std::uint16_t code = 0; code < static_cast<std::uint16_t>(kMaxFaultCodes); ++code) {
+  for (std::uint16_t code = 0; code < static_cast<std::uint16_t>(kMaxFaultCodes); ++code)
+  {
     assert(registry.register_code(code, FaultSeverity::kInfo) == FaultRegistryError::kNone);
   }
   assert(registry.register_code(static_cast<std::uint16_t>(kMaxFaultCodes), FaultSeverity::kInfo) ==
          FaultRegistryError::kRegistryFull);
 }
 
-void test_highest_active_severity_tracks_active_set() {
+void test_highest_active_severity_tracks_active_set()
+{
   FaultRegistry registry;
   assert(registry.register_code(1, FaultSeverity::kWarning) == FaultRegistryError::kNone);
   assert(registry.register_code(2, FaultSeverity::kCritical) == FaultRegistryError::kNone);
@@ -95,7 +105,8 @@ void test_highest_active_severity_tracks_active_set() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_unregistered_code_is_not_active();
   test_register_then_raise_makes_code_active();
   test_clear_makes_code_inactive();

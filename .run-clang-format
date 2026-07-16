@@ -1,3 +1,6 @@
 #!/bin/bash
-find . -type d \( -name out -o -name vendor -o -name .venv -o -name _deps \) -prune \
-  -o -type f -regex '.*\.\(cpp\|hpp\|cc\|cxx\|h\|hxx\)' -exec clang-format-18 -style=file -i {} \;
+set -euo pipefail
+# -exec ... + (instead of \;) makes find exit non-zero when clang-format fails, so a
+# broken .clang-format fails the CI job instead of silently formatting nothing.
+find . -type d \( -name out -o -name vendor -o -name .venv -o -name _deps -o -name build \) -prune \
+  -o -type f -regex '.*\.\(cpp\|hpp\|cc\|cxx\|h\|hxx\)' -exec clang-format-18 -style=file -i {} +

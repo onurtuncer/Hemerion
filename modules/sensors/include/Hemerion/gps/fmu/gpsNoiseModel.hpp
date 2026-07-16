@@ -31,10 +31,12 @@
 /// @namespace hemerion::sensors::gps::fmu
 /// @brief Host-only GPS hardware-simulator FMU: noise model, UBX emitter,
 /// UDP transport, and FMI 2.0 glue.
-namespace hemerion::sensors::gps::fmu {
+namespace hemerion::sensors::gps::fmu
+{
 
 /// One step of noiseless truth, in the same units GpsFix reports.
-struct GpsTruthSample {
+struct GpsTruthSample
+{
   double latitude_deg = 0.0;       ///< True geodetic latitude [degrees].
   double longitude_deg = 0.0;      ///< True geodetic longitude [degrees].
   float altitude_m = 0.0F;         ///< True altitude above mean sea level [m].
@@ -45,24 +47,28 @@ struct GpsTruthSample {
 
 /// Noise magnitudes and constant receiver-status fields applied by
 /// GpsNoiseModel. Defaults approximate a u-blox M9N in open sky.
-struct GpsNoiseConfig {
-  float horizontal_pos_noise_m = 1.5F;   ///< 1-sigma, applied independently to north/east [m].
-  float vertical_pos_noise_m = 3.0F;     ///< 1-sigma [m].
-  float speed_noise_mps = 0.1F;          ///< 1-sigma [m/s].
-  float course_noise_deg = 1.0F;         ///< 1-sigma [degrees].
-  std::uint8_t num_satellites = 11;      ///< Constant satellite count to report.
+struct GpsNoiseConfig
+{
+  float horizontal_pos_noise_m = 1.5F;       ///< 1-sigma, applied independently to north/east [m].
+  float vertical_pos_noise_m = 3.0F;         ///< 1-sigma [m].
+  float speed_noise_mps = 0.1F;              ///< 1-sigma [m/s].
+  float course_noise_deg = 1.0F;             ///< 1-sigma [degrees].
+  std::uint8_t num_satellites = 11;          ///< Constant satellite count to report.
   GpsFixType fix_type = GpsFixType::kFix3D;  ///< Constant fix type to report.
 };
 
 /// @brief Applies configured Gaussian noise to truth samples, producing
 /// realistic GpsFix values.
-class GpsNoiseModel {
- public:
+class GpsNoiseModel
+{
+public:
   /// @param config Noise magnitudes and constant status fields.
   /// @param seed   RNG seed; defaults to a nondeterministic seed. Pass a
   ///               fixed value for reproducible runs.
   explicit GpsNoiseModel(const GpsNoiseConfig& config = {}, std::uint64_t seed = std::random_device{}())
-      : config_(config), rng_(seed) {}
+    : config_(config), rng_(seed)
+  {
+  }
 
   /// @brief Produces one noisy fix from one truth sample.
   ///
@@ -73,7 +79,8 @@ class GpsNoiseModel {
   /// @param truth Noiseless trajectory sample.
   /// @return A GpsFix carrying `truth` plus noise, stamped with
   ///         `truth.timestamp_us`.
-  [[nodiscard]] GpsFix apply(const GpsTruthSample& truth) {
+  [[nodiscard]] GpsFix apply(const GpsTruthSample& truth)
+  {
     std::normal_distribution<float> horizontal_noise(0.0F, config_.horizontal_pos_noise_m);
     std::normal_distribution<float> vertical_noise(0.0F, config_.vertical_pos_noise_m);
     std::normal_distribution<float> speed_noise(0.0F, config_.speed_noise_mps);
@@ -90,8 +97,7 @@ class GpsNoiseModel {
     GpsFix fix;
     fix.latitude_deg = truth.latitude_deg + static_cast<double>(north_error_m) / kMetersPerDegLat;
     fix.longitude_deg =
-        truth.longitude_deg + (meters_per_deg_lon > 1.0 ? static_cast<double>(east_error_m) / meters_per_deg_lon
-                                                         : 0.0);
+        truth.longitude_deg + (meters_per_deg_lon > 1.0 ? static_cast<double>(east_error_m) / meters_per_deg_lon : 0.0);
     fix.altitude_m = truth.altitude_m + vertical_noise(rng_);
     fix.ground_speed_mps = std::max(0.0F, truth.ground_speed_mps + speed_noise(rng_));
     fix.course_deg = std::fmod(truth.course_deg + course_noise(rng_) + 360.0F, 360.0F);
@@ -103,7 +109,7 @@ class GpsNoiseModel {
     return fix;
   }
 
- private:
+private:
   GpsNoiseConfig config_;
   std::mt19937_64 rng_;
 };

@@ -23,9 +23,11 @@ using hemerion::power::evaluate_faults;
 using hemerion::power::max_cell_voltage_v;
 using hemerion::power::min_cell_voltage_v;
 
-namespace {
+namespace
+{
 
-BatterySample make_nominal_sample() {
+BatterySample make_nominal_sample()
+{
   BatterySample sample;
   sample.cell_count = 4;
   sample.cell_voltages_v[0] = 3.7F;
@@ -37,13 +39,15 @@ BatterySample make_nominal_sample() {
   return sample;
 }
 
-void test_nominal_sample_has_no_faults() {
+void test_nominal_sample_has_no_faults()
+{
   const BatterySample sample = make_nominal_sample();
   const BatteryLimits limits;
   assert(evaluate_faults(sample, limits) == static_cast<std::uint8_t>(BatteryFaultBits::kNone));
 }
 
-void test_cell_under_voltage_detected() {
+void test_cell_under_voltage_detected()
+{
   BatterySample sample = make_nominal_sample();
   sample.cell_voltages_v[2] = 2.5F;
   const BatteryLimits limits;
@@ -51,7 +55,8 @@ void test_cell_under_voltage_detected() {
   assert(faults & static_cast<std::uint8_t>(BatteryFaultBits::kCellUnderVoltage));
 }
 
-void test_cell_over_voltage_detected() {
+void test_cell_over_voltage_detected()
+{
   BatterySample sample = make_nominal_sample();
   sample.cell_voltages_v[0] = 4.3F;
   const BatteryLimits limits;
@@ -59,7 +64,8 @@ void test_cell_over_voltage_detected() {
   assert(faults & static_cast<std::uint8_t>(BatteryFaultBits::kCellOverVoltage));
 }
 
-void test_over_current_detected() {
+void test_over_current_detected()
+{
   BatterySample sample = make_nominal_sample();
   sample.pack_current_a = 100.0F;
   const BatteryLimits limits;
@@ -67,7 +73,8 @@ void test_over_current_detected() {
   assert(faults & static_cast<std::uint8_t>(BatteryFaultBits::kOverCurrent));
 }
 
-void test_over_temperature_detected() {
+void test_over_temperature_detected()
+{
   BatterySample sample = make_nominal_sample();
   sample.cell_temperature_c = 80.0F;
   const BatteryLimits limits;
@@ -75,13 +82,15 @@ void test_over_temperature_detected() {
   assert(faults & static_cast<std::uint8_t>(BatteryFaultBits::kOverTemperature));
 }
 
-void test_min_max_cell_voltage() {
+void test_min_max_cell_voltage()
+{
   const BatterySample sample = make_nominal_sample();
   assert(min_cell_voltage_v(sample) == 3.7F);
   assert(max_cell_voltage_v(sample) == 3.8F);
 }
 
-void test_zero_cell_count_reports_no_voltage_faults() {
+void test_zero_cell_count_reports_no_voltage_faults()
+{
   BatterySample sample;
   sample.cell_count = 0;
   sample.pack_current_a = 5.0F;
@@ -94,7 +103,8 @@ void test_zero_cell_count_reports_no_voltage_faults() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_nominal_sample_has_no_faults();
   test_cell_under_voltage_detected();
   test_cell_over_voltage_detected();

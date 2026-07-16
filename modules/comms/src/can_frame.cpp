@@ -12,21 +12,30 @@
 
 #include <algorithm>
 
-namespace hemerion::comms {
+namespace hemerion::comms
+{
 
-CanFrameError validate_frame(const CanFrame& frame) {
+CanFrameError validate_frame(const CanFrame& frame)
+{
   const std::uint32_t id_max = frame.extended ? kCanExtendedIdMax : kCanStandardIdMax;
-  if (frame.id > id_max) {
+  if (frame.id > id_max)
+  {
     return CanFrameError::kIdOutOfRange;
   }
-  if (frame.dlc > kCanMaxDlc) {
+  if (frame.dlc > kCanMaxDlc)
+  {
     return CanFrameError::kDlcOutOfRange;
   }
   return CanFrameError::kNone;
 }
 
-CanFrameError make_frame(std::uint32_t id, bool extended, const std::uint8_t* payload,
-                          std::uint8_t length, bool remote_request, CanFrame& out_frame) {
+CanFrameError make_frame(std::uint32_t id,
+                         bool extended,
+                         const std::uint8_t* payload,
+                         std::uint8_t length,
+                         bool remote_request,
+                         CanFrame& out_frame)
+{
   CanFrame candidate;
   candidate.id = id;
   candidate.extended = extended;
@@ -34,11 +43,13 @@ CanFrameError make_frame(std::uint32_t id, bool extended, const std::uint8_t* pa
   candidate.remote_request = remote_request;
 
   const CanFrameError error = validate_frame(candidate);
-  if (error != CanFrameError::kNone) {
+  if (error != CanFrameError::kNone)
+  {
     return error;
   }
 
-  if (length > 0) {
+  if (length > 0)
+  {
     std::copy_n(payload, length, candidate.data.begin());
   }
 

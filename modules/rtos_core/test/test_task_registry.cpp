@@ -34,7 +34,8 @@ using hemerion::rtos_core::TaskRegistry;
 using hemerion::rtos_core::TaskRegistryError;
 using hemerion::rtos_core::ticks_to_ms;
 
-namespace {
+namespace
+{
 
 void noop_entry_point(void*) {}
 
@@ -56,7 +57,8 @@ static_assert(ms_to_ticks(0) == 0);
 static_assert(ms_to_ticks(10, 100) == 1);  // 10ms @ 100Hz tick rate -> 1 tick
 static_assert(ticks_to_ms(1, 100) == 10);  // 1 tick @ 100Hz tick rate -> 10ms
 
-void test_register_task_accepts_valid_descriptor() {
+void test_register_task_accepts_valid_descriptor()
+{
   TaskRegistry registry;
   TaskDescriptor descriptor;
   descriptor.name = "control_loop";
@@ -70,7 +72,8 @@ void test_register_task_accepts_valid_descriptor() {
   assert(registry.find_by_name("missing") == nullptr);
 }
 
-void test_register_task_rejects_invalid_descriptors() {
+void test_register_task_rejects_invalid_descriptors()
+{
   TaskRegistry registry;
   TaskDescriptor descriptor;
   descriptor.name = "bad";
@@ -86,7 +89,8 @@ void test_register_task_rejects_invalid_descriptors() {
   assert(registry.register_task(descriptor) == TaskRegistryError::kStackTooSmall);
 }
 
-void test_register_task_rejects_duplicate_name() {
+void test_register_task_rejects_duplicate_name()
+{
   TaskRegistry registry;
   TaskDescriptor descriptor;
   descriptor.name = "telemetry";
@@ -97,14 +101,16 @@ void test_register_task_rejects_duplicate_name() {
   assert(registry.register_task(descriptor) == TaskRegistryError::kDuplicateName);
 }
 
-void test_register_task_rejects_when_full() {
+void test_register_task_rejects_when_full()
+{
   TaskRegistry registry;
   TaskDescriptor descriptor;
   descriptor.entry_point = &noop_entry_point;
   descriptor.stack_words = 256;
 
   std::array<std::array<char, 2>, hemerion::rtos_core::kMaxTasks + 1> names{};
-  for (std::size_t i = 0; i < hemerion::rtos_core::kMaxTasks; ++i) {
+  for (std::size_t i = 0; i < hemerion::rtos_core::kMaxTasks; ++i)
+  {
     names[i][0] = static_cast<char>('a' + i);
     descriptor.name = names[i].data();
     assert(registry.register_task(descriptor) == TaskRegistryError::kNone);
@@ -117,7 +123,8 @@ void test_register_task_rejects_when_full() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_register_task_accepts_valid_descriptor();
   test_register_task_rejects_invalid_descriptors();
   test_register_task_rejects_duplicate_name();

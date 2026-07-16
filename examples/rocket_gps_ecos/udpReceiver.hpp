@@ -20,13 +20,15 @@
 #include <cstdint>
 #include <optional>
 
-namespace hemerion::examples::rocket_gps_ecos {
+namespace hemerion::examples::rocket_gps_ecos
+{
 
 /// @brief RAII wrapper over one bound, receive-only UDP socket.
 ///
 /// Move-only; the socket is closed on destruction.
-class UdpReceiver {
- public:
+class UdpReceiver
+{
+public:
   /// @brief Binds a UDP socket to 0.0.0.0:`local_port`.
   ///
   /// @param local_port Port to listen on.
@@ -49,10 +51,11 @@ class UdpReceiver {
   /// @param buffer_size Capacity of `buffer` [bytes]; longer datagrams are truncated.
   /// @param timeout     Maximum time to wait.
   /// @return Number of bytes received, or std::nullopt on timeout or error.
-  [[nodiscard]] std::optional<std::size_t> receive(void* buffer, std::size_t buffer_size,
-                                                    std::chrono::milliseconds timeout) const;
+  [[nodiscard]] std::optional<std::size_t> receive(void* buffer,
+                                                   std::size_t buffer_size,
+                                                   std::chrono::milliseconds timeout) const;
 
- private:
+private:
   UdpReceiver() = default;
   void reset() noexcept;
 

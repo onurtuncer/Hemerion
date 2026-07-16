@@ -22,19 +22,20 @@ using hemerion::sensors::gps::GpsFixType;
 using hemerion::sensors::gps::GpsParseError;
 using hemerion::sensors::gps::NmeaParser;
 
-namespace {
+namespace
+{
 
-bool near(double a, double b, double tol = 1e-4) {
-  return std::fabs(a - b) <= tol;
-}
+bool near(double a, double b, double tol = 1e-4) { return std::fabs(a - b) <= tol; }
 
 // Feeds every byte of `sentence` plus a trailing "\r\n" into `parser` and
 // returns the result of decoding the sentence -- i.e. parse_byte()'s return
 // for the '\r' that terminates it. The following '\n' is fed too (receivers
 // send CRLF), but by then in_sentence_ is already false, so it's always a
 // no-op kIncomplete and isn't what the caller wants back.
-GpsParseError feed_sentence(NmeaParser& parser, std::string_view sentence, std::uint64_t timestamp_us, GpsFix& out) {
-  for (const char c : sentence) {
+GpsParseError feed_sentence(NmeaParser& parser, std::string_view sentence, std::uint64_t timestamp_us, GpsFix& out)
+{
+  for (const char c : sentence)
+  {
     static_cast<void>(parser.parse_byte(static_cast<std::uint8_t>(c), timestamp_us, out));
   }
   const GpsParseError result = parser.parse_byte(static_cast<std::uint8_t>('\r'), timestamp_us, out);
@@ -42,7 +43,8 @@ GpsParseError feed_sentence(NmeaParser& parser, std::string_view sentence, std::
   return result;
 }
 
-void test_gga_decodes_position_altitude_and_satellites() {
+void test_gga_decodes_position_altitude_and_satellites()
+{
   NmeaParser parser;
   GpsFix fix;
   const GpsParseError error =
@@ -57,7 +59,8 @@ void test_gga_decodes_position_altitude_and_satellites() {
   assert(fix.timestamp_us == 1000);
 }
 
-void test_gga_zero_quality_is_no_fix() {
+void test_gga_zero_quality_is_no_fix()
+{
   // Same sentence with quality forced to 0; checksum recomputed for the body
   // "GPGGA,123519,4807.038,N,01131.000,E,0,08,0.9,545.4,M,46.9,M,,".
   NmeaParser parser;
@@ -69,7 +72,8 @@ void test_gga_zero_quality_is_no_fix() {
   assert(fix.fix_type == GpsFixType::kNoFix);
 }
 
-void test_rmc_decodes_speed_and_course() {
+void test_rmc_decodes_speed_and_course()
+{
   NmeaParser parser;
   GpsFix fix;
   const GpsParseError error =
@@ -84,7 +88,8 @@ void test_rmc_decodes_speed_and_course() {
   assert(fix.timestamp_us == 2000);
 }
 
-void test_rmc_void_status_is_no_fix() {
+void test_rmc_void_status_is_no_fix()
+{
   // Status field flipped from 'A' to 'V'; checksum recomputed for the body
   // "GPRMC,123519,V,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W".
   NmeaParser parser;
@@ -96,7 +101,8 @@ void test_rmc_void_status_is_no_fix() {
   assert(fix.fix_type == GpsFixType::kNoFix);
 }
 
-void test_corrupted_checksum_is_rejected() {
+void test_corrupted_checksum_is_rejected()
+{
   NmeaParser parser;
   GpsFix fix;
   const GpsParseError error =
@@ -105,7 +111,8 @@ void test_corrupted_checksum_is_rejected() {
   assert(error == GpsParseError::kChecksumMismatch);
 }
 
-void test_unsupported_sentence_type_is_reported() {
+void test_unsupported_sentence_type_is_reported()
+{
   NmeaParser parser;
   GpsFix fix;
   const GpsParseError error = feed_sentence(parser, "$GPXXX,1,2,3*53", 0, fix);
@@ -113,7 +120,8 @@ void test_unsupported_sentence_type_is_reported() {
   assert(error == GpsParseError::kUnsupportedMessage);
 }
 
-void test_bytes_outside_a_sentence_are_ignored() {
+void test_bytes_outside_a_sentence_are_ignored()
+{
   NmeaParser parser;
   GpsFix fix;
   assert(parser.parse_byte(static_cast<std::uint8_t>('x'), 0, fix) == GpsParseError::kIncomplete);
@@ -122,7 +130,8 @@ void test_bytes_outside_a_sentence_are_ignored() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_gga_decodes_position_altitude_and_satellites();
   test_gga_zero_quality_is_no_fix();
   test_rmc_decodes_speed_and_course();

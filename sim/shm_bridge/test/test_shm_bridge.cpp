@@ -23,23 +23,28 @@ using hemerion::sim::shm_bridge::ShmBridge;
 using hemerion::sim::shm_bridge::WaitResult;
 using namespace std::chrono_literals;
 
-namespace {
+namespace
+{
 
-ChannelFrame make_frame(std::initializer_list<double> values) {
+ChannelFrame make_frame(std::initializer_list<double> values)
+{
   ChannelFrame frame;
   frame.count = 0;
-  for (double v : values) {
+  for (double v : values)
+  {
     frame.values[frame.count++] = v;
   }
   return frame;
 }
 
-void test_open_peer_before_create_master_fails() {
+void test_open_peer_before_create_master_fails()
+{
   std::optional<ShmBridge> peer = ShmBridge::open_peer("hemerion_test_shm_bridge_never_created");
   assert(!peer.has_value());
 }
 
-void test_round_trip_step() {
+void test_round_trip_step()
+{
   std::optional<ShmBridge> master = ShmBridge::create_master("hemerion_test_shm_bridge_a");
   assert(master.has_value());
   std::optional<ShmBridge> peer = ShmBridge::open_peer("hemerion_test_shm_bridge_a");
@@ -47,7 +52,7 @@ void test_round_trip_step() {
 
   assert(master->step_index() == 0);
 
-  const ChannelFrame inputs = make_frame({1.0, 2.0, 3.0});
+  const ChannelFrame inputs = make_frame({ 1.0, 2.0, 3.0 });
   master->post_inputs(/*sim_time_s=*/0.5, /*dt_s=*/0.01, inputs);
   assert(master->step_index() == 1);
   assert(peer->step_index() == 1);  // same backing memory, visible from either handle
@@ -63,7 +68,7 @@ void test_round_trip_step() {
   assert(received_inputs.values[0] == 1.0);
   assert(received_inputs.values[2] == 3.0);
 
-  const ChannelFrame outputs = make_frame({9.0, 8.0});
+  const ChannelFrame outputs = make_frame({ 9.0, 8.0 });
   peer->post_outputs(outputs);
 
   ChannelFrame received_outputs;
@@ -79,7 +84,8 @@ void test_round_trip_step() {
   assert(master->step_index() == 2);
 }
 
-void test_wait_for_inputs_times_out_when_nothing_posted() {
+void test_wait_for_inputs_times_out_when_nothing_posted()
+{
   std::optional<ShmBridge> master = ShmBridge::create_master("hemerion_test_shm_bridge_b");
   assert(master.has_value());
   std::optional<ShmBridge> peer = ShmBridge::open_peer("hemerion_test_shm_bridge_b");
@@ -92,7 +98,8 @@ void test_wait_for_inputs_times_out_when_nothing_posted() {
   assert(result == WaitResult::kTimedOut);
 }
 
-void test_shutdown_unblocks_peer() {
+void test_shutdown_unblocks_peer()
+{
   std::optional<ShmBridge> master = ShmBridge::create_master("hemerion_test_shm_bridge_c");
   assert(master.has_value());
   std::optional<ShmBridge> peer = ShmBridge::open_peer("hemerion_test_shm_bridge_c");
@@ -109,7 +116,8 @@ void test_shutdown_unblocks_peer() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_open_peer_before_create_master_fails();
   test_round_trip_step();
   test_wait_for_inputs_times_out_when_nothing_posted();

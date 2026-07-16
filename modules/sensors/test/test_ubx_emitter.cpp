@@ -31,16 +31,16 @@ using hemerion::sensors::gps::fmu::GpsNoiseModel;
 using hemerion::sensors::gps::fmu::GpsTruthSample;
 using hemerion::sensors::gps::fmu::UbxEmitter;
 
-namespace {
+namespace
+{
 
-bool near(double a, double b, double tol) {
-  return std::fabs(a - b) <= tol;
-}
+bool near(double a, double b, double tol) { return std::fabs(a - b) <= tol; }
 
-GpsParseError feed_frame(UbxParser& parser, const UbxEmitter::Frame& frame, std::uint64_t timestamp_us,
-                          GpsFix& out) {
+GpsParseError feed_frame(UbxParser& parser, const UbxEmitter::Frame& frame, std::uint64_t timestamp_us, GpsFix& out)
+{
   GpsParseError last_error = GpsParseError::kIncomplete;
-  for (const std::uint8_t byte : frame) {
+  for (const std::uint8_t byte : frame)
+  {
     last_error = parser.parse_byte(byte, timestamp_us, out);
   }
   return last_error;
@@ -48,7 +48,8 @@ GpsParseError feed_frame(UbxParser& parser, const UbxEmitter::Frame& frame, std:
 
 // Noiseless fix straight through the emitter and back through the real
 // parser must round-trip to within fixed-point rounding error only.
-void test_noiseless_round_trip() {
+void test_noiseless_round_trip()
+{
   GpsFix truth;
   truth.latitude_deg = 41.0082;
   truth.longitude_deg = 28.9784;
@@ -84,7 +85,8 @@ void test_noiseless_round_trip() {
 // and parser, and the decoded position must land within a generous
 // (5-sigma) bound of truth -- a statistical check with a fixed seed so it
 // isn't flaky.
-void test_noisy_round_trip_stays_bounded() {
+void test_noisy_round_trip_stays_bounded()
+{
   GpsTruthSample truth;
   truth.latitude_deg = 41.0082;
   truth.longitude_deg = 28.9784;
@@ -118,7 +120,8 @@ void test_noisy_round_trip_stays_bounded() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_noiseless_round_trip();
   test_noisy_round_trip_stays_bounded();
 

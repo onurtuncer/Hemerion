@@ -23,12 +23,14 @@
 
 #include "Hemerion/gps/gpsTypes.hpp"
 
-namespace hemerion::sensors::gps {
+namespace hemerion::sensors::gps
+{
 
 /// @brief Byte-at-a-time NMEA 0183 sentence parser; see @ref nmeaParser.hpp
 /// for which sentences are decoded.
-class NmeaParser {
- public:
+class NmeaParser
+{
+public:
   /// @brief Feeds one byte from the receiver.
   ///
   /// @param byte         Next raw byte of the NMEA stream.
@@ -44,7 +46,7 @@ class NmeaParser {
   ///         rejected.
   [[nodiscard]] GpsParseError parse_byte(std::uint8_t byte, std::uint64_t timestamp_us, GpsFix& out);
 
- private:
+private:
   // NMEA 0183 caps a sentence (excluding the leading '$' and trailing CRLF)
   // at 79 characters.
   static constexpr std::size_t kMaxSentenceLength = 79;
@@ -54,10 +56,10 @@ class NmeaParser {
 
   GpsParseError decode_sentence(std::uint64_t timestamp_us, GpsFix& out);
   static std::size_t split_fields(std::string_view sentence, FieldArray& fields);
-  static GpsParseError decode_gga(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us,
-                                   GpsFix& out);
-  static GpsParseError decode_rmc(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us,
-                                   GpsFix& out);
+  static GpsParseError
+  decode_gga(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us, GpsFix& out);
+  static GpsParseError
+  decode_rmc(const FieldArray& fields, std::size_t field_count, std::uint64_t timestamp_us, GpsFix& out);
 
   std::array<char, kMaxSentenceLength> buffer_{};
   std::size_t length_ = 0;

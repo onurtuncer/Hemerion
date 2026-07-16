@@ -23,7 +23,8 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace hemerion::sim::shm_bridge {
+namespace hemerion::sim::shm_bridge
+{
 
 inline constexpr std::uint32_t kProtocolVersion = 1;
 inline constexpr std::size_t kMaxChannelValues = 64;
@@ -34,7 +35,8 @@ inline constexpr std::size_t kMaxChannelValues = 64;
 //   kOutputsPosted  -> kIdle                driven by the master
 // kShutdownRequested is set by the master at any time and is a terminal
 // state for the peer's wait loops -- it never transitions back to kIdle.
-enum class StepPhase : std::uint32_t {
+enum class StepPhase : std::uint32_t
+{
   kIdle = 0,
   kInputsPosted = 1,
   kOutputsPosted = 2,
@@ -43,7 +45,8 @@ enum class StepPhase : std::uint32_t {
 
 // Fixed-capacity vector of FMI variable values, in the order
 // sim/fmi/topology.cpp wired them up.
-struct ChannelFrame {
+struct ChannelFrame
+{
   std::array<double, kMaxChannelValues> values{};
   std::uint32_t count = 0;
 };
@@ -54,10 +57,11 @@ static_assert(std::is_trivially_copyable_v<ChannelFrame>,
 // The full shared-memory region. Constructed exactly once, in place, by the
 // master (see ShmBridge::create_master); the peer only ever reinterprets an
 // already-constructed region -- never reconstructs it.
-struct BridgeRegion {
+struct BridgeRegion
+{
   std::uint32_t protocol_version = kProtocolVersion;
-  std::atomic<std::uint32_t> phase{static_cast<std::uint32_t>(StepPhase::kIdle)};
-  std::atomic<std::uint64_t> step_index{0};
+  std::atomic<std::uint32_t> phase{ static_cast<std::uint32_t>(StepPhase::kIdle) };
+  std::atomic<std::uint64_t> step_index{ 0 };
   double sim_time_s = 0.0;
   double dt_s = 0.0;
   ChannelFrame master_to_plant;  // FMI master -> Aetherion: actuator/command channels

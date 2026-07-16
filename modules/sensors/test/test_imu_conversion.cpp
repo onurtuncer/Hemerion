@@ -23,15 +23,15 @@ using hemerion::sensors::imu::ImuRawSample;
 using hemerion::sensors::imu::ImuSample;
 using hemerion::sensors::imu::ImuScale;
 
-namespace {
+namespace
+{
 
-bool near(float a, float b, float tol = 1e-4F) {
-  return std::fabs(a - b) <= tol;
-}
+bool near(float a, float b, float tol = 1e-4F) { return std::fabs(a - b) <= tol; }
 
-void test_one_g_on_z_converts_to_standard_gravity() {
+void test_one_g_on_z_converts_to_standard_gravity()
+{
   // ICM-42688-P-style +-16g range: 2048 LSB/g.
-  const ImuScale scale{.accel_lsb_per_g = 2048.0F, .gyro_lsb_per_dps = 16.4F};
+  const ImuScale scale{ .accel_lsb_per_g = 2048.0F, .gyro_lsb_per_dps = 16.4F };
   ImuRawSample raw;
   raw.accel_z = 2048;
   raw.timestamp_us = 42;
@@ -45,9 +45,10 @@ void test_one_g_on_z_converts_to_standard_gravity() {
   assert(out.timestamp_us == 42);
 }
 
-void test_gyro_counts_convert_to_radians_per_second() {
+void test_gyro_counts_convert_to_radians_per_second()
+{
   // +-2000 dps range: 16.4 LSB/dps. 16.4 counts == 1 dps == pi/180 rad/s.
-  const ImuScale scale{.accel_lsb_per_g = 2048.0F, .gyro_lsb_per_dps = 16.4F};
+  const ImuScale scale{ .accel_lsb_per_g = 2048.0F, .gyro_lsb_per_dps = 16.4F };
   ImuRawSample raw;
   raw.gyro_y = 16;  // ~0.9756 dps
 
@@ -60,16 +61,18 @@ void test_gyro_counts_convert_to_radians_per_second() {
   assert(near(out.gyro_y, expected_rad_s));
 }
 
-void test_zero_accel_scale_is_rejected() {
-  const ImuScale scale{.accel_lsb_per_g = 0.0F, .gyro_lsb_per_dps = 16.4F};
+void test_zero_accel_scale_is_rejected()
+{
+  const ImuScale scale{ .accel_lsb_per_g = 0.0F, .gyro_lsb_per_dps = 16.4F };
   const ImuRawSample raw;
   ImuSample out;
 
   assert(convert_raw_to_si(raw, scale, out) == ImuConversionError::kInvalidScale);
 }
 
-void test_negative_gyro_scale_is_rejected() {
-  const ImuScale scale{.accel_lsb_per_g = 2048.0F, .gyro_lsb_per_dps = -1.0F};
+void test_negative_gyro_scale_is_rejected()
+{
+  const ImuScale scale{ .accel_lsb_per_g = 2048.0F, .gyro_lsb_per_dps = -1.0F };
   const ImuRawSample raw;
   ImuSample out;
 
@@ -78,7 +81,8 @@ void test_negative_gyro_scale_is_rejected() {
 
 }  // namespace
 
-int main() {
+int main()
+{
   test_one_g_on_z_converts_to_standard_gravity();
   test_gyro_counts_convert_to_radians_per_second();
   test_zero_accel_scale_is_rejected();

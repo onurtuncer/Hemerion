@@ -21,13 +21,15 @@
 #include <optional>
 #include <string>
 
-namespace hemerion::sensors::gps::fmu {
+namespace hemerion::sensors::gps::fmu
+{
 
 /// @brief RAII wrapper over one connected, send-only UDP socket.
 ///
 /// Move-only; the socket is closed on destruction.
-class UdpSender {
- public:
+class UdpSender
+{
+public:
   /// @brief Connects a UDP socket to `peer_address:peer_port`.
   ///
   /// @param peer_address Numeric IPv4 address only, no DNS resolution.
@@ -53,7 +55,7 @@ class UdpSender {
   ///         UDP gives no delivery confirmation beyond that.
   [[nodiscard]] bool send(const void* data, std::size_t size) const;
 
- private:
+private:
   UdpSender() = default;
   void reset() noexcept;
 

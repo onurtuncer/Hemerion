@@ -16,7 +16,8 @@
 
 #include <cstdint>
 
-namespace hemerion::rtos_core {
+namespace hemerion::rtos_core
+{
 
 /// Default tick rate [Hz]. The STM32H743 Nucleo BSP (see modules/README.md
 /// target hardware) is documented to run configTICK_RATE_HZ = 1000; used
@@ -29,7 +30,8 @@ inline constexpr std::uint32_t kDefaultTickRateHz = 1000;
 /// @param tick_rate_hz Scheduler tick rate [Hz].
 /// @return Equivalent tick count, truncated toward zero.
 [[nodiscard]] constexpr std::uint32_t ms_to_ticks(std::uint32_t milliseconds,
-                                                   std::uint32_t tick_rate_hz = kDefaultTickRateHz) {
+                                                  std::uint32_t tick_rate_hz = kDefaultTickRateHz)
+{
   return (milliseconds * tick_rate_hz) / 1000U;
 }
 
@@ -37,8 +39,8 @@ inline constexpr std::uint32_t kDefaultTickRateHz = 1000;
 /// @param ticks        Tick count to convert.
 /// @param tick_rate_hz Scheduler tick rate [Hz].
 /// @return Equivalent duration [ms], truncated toward zero.
-[[nodiscard]] constexpr std::uint32_t ticks_to_ms(std::uint32_t ticks,
-                                                   std::uint32_t tick_rate_hz = kDefaultTickRateHz) {
+[[nodiscard]] constexpr std::uint32_t ticks_to_ms(std::uint32_t ticks, std::uint32_t tick_rate_hz = kDefaultTickRateHz)
+{
   return (ticks * 1000U) / tick_rate_hz;
 }
 

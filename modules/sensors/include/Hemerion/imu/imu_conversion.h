@@ -11,7 +11,8 @@
 
 #include "Hemerion/imu/imu_types.h"
 
-namespace hemerion::sensors::imu {
+namespace hemerion::sensors::imu
+{
 
 /// @brief Converts raw accel/gyro counts to SI units using the given
 /// sensitivity.

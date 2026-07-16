@@ -23,20 +23,23 @@
 
 /// @namespace hemerion::fault
 /// @brief Fault bookkeeping and software watchdog supervision.
-namespace hemerion::fault {
+namespace hemerion::fault
+{
 
 /// Maximum number of fault codes a FaultRegistry can hold.
 inline constexpr std::size_t kMaxFaultCodes = 64;
 
 /// Severity assigned to a fault code at registration time.
-enum class FaultSeverity : std::uint8_t {
+enum class FaultSeverity : std::uint8_t
+{
   kInfo,      ///< Informational; no action expected.
   kWarning,   ///< Degraded but operable.
   kCritical,  ///< Requires the health monitor to act (e.g. safe state).
 };
 
 /// Result of FaultRegistry operations.
-enum class FaultRegistryError : std::uint8_t {
+enum class FaultRegistryError : std::uint8_t
+{
   kNone,           ///< Accepted.
   kRegistryFull,   ///< Registry already holds kMaxFaultCodes codes.
   kDuplicateCode,  ///< register_code() called with an already-registered code.
@@ -48,8 +51,9 @@ enum class FaultRegistryError : std::uint8_t {
 ///
 /// Codes are arbitrary caller-defined std::uint16_t values; this class does
 /// not assign them.
-class FaultRegistry {
- public:
+class FaultRegistry
+{
+public:
   /// @brief Adds `code` to the registry with the given severity.
   /// @param code     Caller-defined fault code.
   /// @param severity Severity reported while `code` is active.
@@ -84,8 +88,9 @@ class FaultRegistry {
   /// @return FaultSeverity::kInfo if none are active.
   [[nodiscard]] FaultSeverity highest_active_severity() const;
 
- private:
-  struct Entry {
+private:
+  struct Entry
+  {
     std::uint16_t code = 0;
     FaultSeverity severity = FaultSeverity::kInfo;
     bool registered = false;

@@ -23,17 +23,21 @@
 #include <optional>
 #include <string>
 
-namespace hemerion::sim::udp_bridge {
+namespace hemerion::sim::udp_bridge
+{
 
-class UdpSocket {
- public:
+class UdpSocket
+{
+public:
   // Binds to `local_address:local_port` and connects to
   // `peer_address:peer_port`. Addresses must be numeric IPv4 (e.g.
   // "127.0.0.1" or "0.0.0.0") -- no DNS resolution is performed. Fails
   // (returns std::nullopt) if the local port is already bound by another
   // socket on this host, or if either address fails to parse.
-  [[nodiscard]] static std::optional<UdpSocket> create(const std::string& local_address, std::uint16_t local_port,
-                                                        const std::string& peer_address, std::uint16_t peer_port);
+  [[nodiscard]] static std::optional<UdpSocket> create(const std::string& local_address,
+                                                       std::uint16_t local_port,
+                                                       const std::string& peer_address,
+                                                       std::uint16_t peer_port);
 
   UdpSocket(const UdpSocket&) = delete;
   UdpSocket& operator=(const UdpSocket&) = delete;
@@ -50,10 +54,11 @@ class UdpSocket {
   // Blocks until a datagram from the connected peer arrives, `timeout`
   // elapses, or the socket errors. Returns the number of bytes received, or
   // std::nullopt on timeout or error.
-  [[nodiscard]] std::optional<std::size_t> receive(void* buffer, std::size_t buffer_size,
-                                                    std::chrono::milliseconds timeout) const;
+  [[nodiscard]] std::optional<std::size_t> receive(void* buffer,
+                                                   std::size_t buffer_size,
+                                                   std::chrono::milliseconds timeout) const;
 
- private:
+private:
   UdpSocket() = default;
   void reset() noexcept;
 

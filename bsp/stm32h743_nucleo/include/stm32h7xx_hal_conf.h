@@ -1,24 +1,24 @@
 /**
-  ******************************************************************************
-  * @file    stm32h7xx_hal_conf.h
-  * @brief   HAL configuration for bsp/stm32h743_nucleo -- adapted from
-  *          vendor/stm32h7xx-hal-driver/Inc/stm32h7xx_hal_conf_template.h per
-  *          vendor/CMakeLists.txt's documented convention (the BSP owns its
-  *          own copy of the template, on its include path ahead of
-  *          STM32H7xx::HAL). Only the modules this BSP currently links
-  *          (board.c, gpio.c, uart.c) are enabled; add more as drivers land.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2017 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    stm32h7xx_hal_conf.h
+ * @brief   HAL configuration for bsp/stm32h743_nucleo -- adapted from
+ *          vendor/stm32h7xx-hal-driver/Inc/stm32h7xx_hal_conf_template.h per
+ *          vendor/CMakeLists.txt's documented convention (the BSP owns its
+ *          own copy of the template, on its include path ahead of
+ *          STM32H7xx::HAL). Only the modules this BSP currently links
+ *          (board.c, gpio.c, uart.c) are enabled; add more as drivers land.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2017 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 
 #ifndef STM32H7xx_HAL_CONF_H
 #define STM32H7xx_HAL_CONF_H
@@ -40,7 +40,7 @@ extern "C" {
 /* ########################## Oscillator Values adaptation ################## */
 #if !defined(HSE_VALUE)
 #define HSE_VALUE (8000000UL) /* NUCLEO-H743ZI2: ST-LINK MCO, HSE bypass -- see system_stm32h7xx.c */
-#endif /* HSE_VALUE */
+#endif                        /* HSE_VALUE */
 
 #if !defined(HSE_STARTUP_TIMEOUT)
 #define HSE_STARTUP_TIMEOUT (100UL)
@@ -120,8 +120,8 @@ extern "C" {
 
 /* Exported macro ---------------------------------------------------------- */
 #ifdef USE_FULL_ASSERT
-#define assert_param(expr) ((expr) ? (void)0U : assert_failed((uint8_t *)__FILE__, __LINE__))
-void assert_failed(uint8_t *file, uint32_t line);
+#define assert_param(expr) ((expr) ? (void)0U : assert_failed((uint8_t*)__FILE__, __LINE__))
+void assert_failed(uint8_t* file, uint32_t line);
 #else
 #define assert_param(expr) ((void)0U)
 #endif /* USE_FULL_ASSERT */
