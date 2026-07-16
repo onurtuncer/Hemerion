@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# examples/ -- host-only, end-to-end demonstration programs (co-simulation, tooling). Never cross-compiled: the
-# root CMakeLists.txt only reaches this directory when HEMERION_BUILD_EXAMPLES is ON, which it guards against
+# examples/ -- host-only, end-to-end demonstration programs (co-simulation, tooling). Never cross-compiled: the root
+# CMakeLists.txt only reaches this directory when HEMERION_BUILD_EXAMPLES is ON, which it guards against
 # CMAKE_CROSSCOMPILING. Same EXISTS-guarded foreach pattern as apps/CMakeLists.txt.
 # ------------------------------------------------------------------------------
 

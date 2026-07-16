@@ -4,16 +4,15 @@
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # examples/rocket_gps_ecos -- Ecos co-simulation of Aetherion's TwoStageRocket.fmu feeding Hemerion's GPS UBX
-# hardware-simulator FMU, whose UBX-NAV-PVT UDP stream is decoded by the same GpsDriver/UbxParser stack that runs
-# on the STM32H743 flight computer. See README.md and doc/rocket_gps_ecos_cosim.rst.
+# hardware-simulator FMU, whose UBX-NAV-PVT UDP stream is decoded by the same GpsDriver/UbxParser stack that runs on the
+# STM32H743 flight computer. See README.md and doc/rocket_gps_ecos_cosim.rst.
 #
-# Two host executables:
-#   rocket_gps_cosim    -- Ecos master: loads both FMUs, wires truth -> GPS, logs rocket truth to CSV
-#   gps_flight_computer -- consumes the FMU's UBX UDP stream with the on-target GPS stack, logs decoded fixes
+# Two host executables: rocket_gps_cosim    -- Ecos master: loads both FMUs, wires truth -> GPS, logs rocket truth to
+# CSV gps_flight_computer -- consumes the FMU's UBX UDP stream with the on-target GPS stack, logs decoded fixes
 #
-# The Ecos platform library (github.com/Ecos-platform/ecos) is fetched and built from source here; its own CMake
-# fetches everything else it needs (fmi4c for FMU loading, header-only utilities). CLI/C-bindings/proxyfmu are
-# switched off -- only the C++ library target `libecos` is consumed.
+# The Ecos platform library (github.com/Ecos-platform/ecos) is fetched and built from source here; its own CMake fetches
+# everything else it needs (fmi4c for FMU loading, header-only utilities). CLI/C-bindings/proxyfmu are switched off --
+# only the C++ library target `libecos` is consumed.
 # ------------------------------------------------------------------------------
 
 if(NOT TARGET hemerion_gps_fmu_package)
@@ -28,19 +27,17 @@ set(ECOS_BUILD_CLIB OFF CACHE BOOL "" FORCE)
 set(ECOS_WITH_PROXYFMU OFF CACHE BOOL "" FORCE)
 set(ECOS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ECOS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-fetchcontent_declare(
-  ecos
-  GIT_REPOSITORY https://github.com/Ecos-platform/ecos.git
-  GIT_TAG v.0.7.2 # note the vendor's unusual tag spelling; this is release 0.7.2
+FetchContent_Declare(
+  ecos GIT_REPOSITORY https://github.com/Ecos-platform/ecos.git GIT_TAG v.0.7.2 # note the vendor's unusual tag
+                                                                                # spelling; this is release 0.7.2
 )
-fetchcontent_makeavailable(ecos)
+FetchContent_MakeAvailable(ecos)
 
-# Toolchain workarounds for the fetched sources, applied at the target level rather than patching them:
-#  - fmi4c's vendored ezxml calls POSIX read() with no declaration in scope on Windows; MSVC merely warns
-#    (C4013) but clang treats implicit function declarations as a hard error. The symbol itself still links
-#    via the MSVC CRT's oldnames read->_read alias.
-#  - ecos' bundled spdlog/fmt trips clang >= 17's stricter consteval checking inside FMT_STRING; an empty
-#    FMT_CONSTEVAL moves the format-string checks to runtime, which is fine for a demo host program.
+# Toolchain workarounds for the fetched sources, applied at the target level rather than patching them: - fmi4c's
+# vendored ezxml calls POSIX read() with no declaration in scope on Windows; MSVC merely warns (C4013) but clang treats
+# implicit function declarations as a hard error. The symbol itself still links via the MSVC CRT's oldnames read->_read
+# alias. - ecos' bundled spdlog/fmt trips clang >= 17's stricter consteval checking inside FMT_STRING; an empty
+# FMT_CONSTEVAL moves the format-string checks to runtime, which is fine for a demo host program.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(fmi4c PRIVATE -Wno-implicit-function-declaration)
   foreach(_ecos_target libecos fmilibcpp)
@@ -51,14 +48,18 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   unset(_ecos_target)
 endif()
 
-# Aetherion installs its example FMUs under <prefix>/share/Aetherion/fmu/. The path is baked in as the runtime
-# default; --rocket overrides it, so a machine without Aetherion can still build this example and point at a
-# copied FMU at runtime.
+# Aetherion installs its example FMUs under <prefix>/share/Aetherion/fmu/. The path is baked in as the runtime default;
+# --rocket overrides it, so a machine without Aetherion can still build this example and point at a copied FMU at
+# runtime.
 find_file(
   HEMERION_TWO_STAGE_ROCKET_FMU
   NAMES TwoStageRocket.fmu
   HINTS ENV AETHERION_ROOT
-  PATHS "C:/Program Files/Aetherion" "C:/Program Files (x86)/Aetherion" /usr/local /usr /opt/aetherion
+  PATHS "C:/Program Files/Aetherion"
+        "C:/Program Files (x86)/Aetherion"
+        /usr/local
+        /usr
+        /opt/aetherion
   PATH_SUFFIXES share/Aetherion/fmu)
 
 if(NOT HEMERION_TWO_STAGE_ROCKET_FMU)
