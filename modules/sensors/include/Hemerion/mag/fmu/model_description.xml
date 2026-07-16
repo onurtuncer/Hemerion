@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+  SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+
+  FMI 2.0 model description for the magnetometer hardware simulator FMU
+  (Hemerion/mag/fmu/fmu_main.cpp). This FMU has no FMI-level outputs: its
+  only effect is a UDP side channel (Hemerion magnetometer raw-sample frames
+  sent on every fmi2DoStep, sample_rate_hz frames per simulated second), so
+  <Outputs> in ModelStructure is intentionally empty. The guid below must
+  match kExpectedGuid in fmu_main.cpp exactly.
+
+  Note: "double hyphen" sequences are illegal inside XML comments (and make
+  strict parsers such as fmi4c's ezxml reject the whole document), so the
+  repo's usual comment dash style is avoided in this file.
+-->
+<fmiModelDescription
+    fmiVersion="2.0"
+    modelName="HemerionMagSimulator"
+    guid="{23191CA1-1B4E-4D8B-A569-A63C8F908FBA}"
+    description="Body-frame truth-field-to-raw-register-counts magnetometer hardware simulator for SWIL/HIL co-simulation"
+    generationTool="hand-written (see fmu_main.cpp header comment)"
+    variableNamingConvention="flat">
+
+  <CoSimulation
+      modelIdentifier="hemerion_mag_fmu"
+      canHandleVariableCommunicationStepSize="true"
+      canGetAndSetFMUstate="false"
+      canSerializeFMUstate="false"
+      providesDirectionalDerivative="false"/>
+
+  <ModelVariables>
+    <!--
+      True magnetic field in the body frame, in microtesla (what an ideal
+      three-axis magnetometer would read): the local geomagnetic reference
+      field rotated into the body frame by the plant's attitude. The
+      co-simulation host computes b_body = C_bn * b_ned from the plant's
+      attitude and a reference field (e.g. WMM or a fixed launch-site
+      vector).
+    -->
+    <ScalarVariable name="b_x_ut" valueReference="0" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="b_y_ut" valueReference="1" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="b_z_ut" valueReference="2" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <!--
+      Sensor output data rate. Each fmi2DoStep emits round(step * rate)
+      frames (at least one); the truth inputs are zero-order-held across the
+      step, so sub-step frames differ in noise draw and timestamp only.
+    -->
+    <ScalarVariable name="sample_rate_hz" valueReference="3" causality="parameter" variability="tunable">
+      <Real start="100.0"/>
+    </ScalarVariable>
+  </ModelVariables>
+
+  <ModelStructure>
+    <!-- No <Outputs/> entries: this FMU's effect is the UDP side channel in fmi2DoStep, not FMI variable exchange. -->
+  </ModelStructure>
+
+</fmiModelDescription>

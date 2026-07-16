@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package name="hemerion_sensors" version="0.1.0">
-  <description>IMU, barometer, GPS drivers; raw to SI unit conversion; FMU export</description>
+  <description>IMU, barometer, radar altimeter, magnetometer, GPS drivers; raw to SI unit conversion; FMU export</description>
   <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
   <license>GPL-3.0-only</license>
   <url type="repository">https://github.com/onurtuncer/Hemerion</url>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+  SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+
+  FMI 2.0 model description for the radar altimeter hardware simulator FMU
+  (Hemerion/radalt/fmu/fmu_main.cpp). This FMU has no FMI-level outputs: its
+  only effect is a UDP side channel (Hemerion radar altimeter raw-sample
+  frames sent on every fmi2DoStep, sample_rate_hz frames per simulated
+  second), so <Outputs> in ModelStructure is intentionally empty. The guid
+  below must match kExpectedGuid in fmu_main.cpp exactly.
+
+  Note: "double hyphen" sequences are illegal inside XML comments (and make
+  strict parsers such as fmi4c's ezxml reject the whole document), so the
+  repo's usual comment dash style is avoided in this file.
+-->
+<fmiModelDescription
+    fmiVersion="2.0"
+    modelName="HemerionRadAltSimulator"
+    guid="{6F8252FE-FD6E-48CD-9C51-8F9EDB00765A}"
+    description="Truth-height-to-raw-range-counts radar altimeter hardware simulator for SWIL/HIL co-simulation"
+    generationTool="hand-written (see fmu_main.cpp header comment)"
+    variableNamingConvention="flat">
+
+  <CoSimulation
+      modelIdentifier="hemerion_radalt_fmu"
+      canHandleVariableCommunicationStepSize="true"
+      canGetAndSetFMUstate="false"
+      canSerializeFMUstate="false"
+      providesDirectionalDerivative="false"/>
+
+  <ModelVariables>
+    <!--
+      True height above ground level along the radar beam. Beyond the noise
+      model's maximum tracking range (default 6000 m) or below zero the
+      emitted frames carry a no-return status instead of a range word,
+      exactly as a real part loses ground track.
+    -->
+    <ScalarVariable name="h_agl_m" valueReference="0" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <!--
+      Sensor output data rate. Each fmi2DoStep emits round(step * rate)
+      frames (at least one); the truth input is zero-order-held across the
+      step, so sub-step frames differ in noise draw and timestamp only.
+    -->
+    <ScalarVariable name="sample_rate_hz" valueReference="1" causality="parameter" variability="tunable">
+      <Real start="25.0"/>
+    </ScalarVariable>
+  </ModelVariables>
+
+  <ModelStructure>
+    <!-- No <Outputs/> entries: this FMU's effect is the UDP side channel in fmi2DoStep, not FMI variable exchange. -->
+  </ModelStructure>
+
+</fmiModelDescription>

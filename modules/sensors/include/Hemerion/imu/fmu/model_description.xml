@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+  SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+
+  FMI 2.0 model description for the IMU hardware simulator FMU
+  (Hemerion/imu/fmu/fmu_main.cpp). This FMU has no FMI-level outputs: its
+  only effect is a UDP side channel (Hemerion IMU raw-sample frames sent on
+  every fmi2DoStep, sample_rate_hz frames per simulated second), so
+  <Outputs> in ModelStructure is intentionally empty. The guid below must
+  match kExpectedGuid in fmu_main.cpp exactly.
+
+  Note: "double hyphen" sequences are illegal inside XML comments (and make
+  strict parsers such as fmi4c's ezxml reject the whole document), so the
+  repo's usual comment dash style is avoided in this file.
+-->
+<fmiModelDescription
+    fmiVersion="2.0"
+    modelName="HemerionImuSimulator"
+    guid="{6E2B9C41-8D5F-4A07-9C63-1F7E5B8A2D94}"
+    description="Body-frame truth-state-to-raw-register-counts IMU hardware simulator for SWIL/HIL co-simulation"
+    generationTool="hand-written (see fmu_main.cpp header comment)"
+    variableNamingConvention="flat">
+
+  <CoSimulation
+      modelIdentifier="hemerion_imu_fmu"
+      canHandleVariableCommunicationStepSize="true"
+      canGetAndSetFMUstate="false"
+      canSerializeFMUstate="false"
+      providesDirectionalDerivative="false"/>
+
+  <ModelVariables>
+    <!--
+      True specific force in the body frame (what an ideal accelerometer
+      triad would read): the sum of all non-gravitational forces divided by
+      vehicle mass. For a 6-DoF plant that reports thrust, aero force and
+      mass rather than specific force directly, the co-simulation host
+      computes f = (F_thrust + F_aero) / m; see
+      examples/rocket_gps_ecos/cosim_host_main.cpp.
+    -->
+    <ScalarVariable name="f_x_mps2" valueReference="0" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="f_y_mps2" valueReference="1" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="f_z_mps2" valueReference="2" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <!-- True body angular rates p/q/r, matching a 6-DoF plant's gyroscopic outputs. -->
+    <ScalarVariable name="p_rad_s" valueReference="3" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="q_rad_s" valueReference="4" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <ScalarVariable name="r_rad_s" valueReference="5" causality="input" variability="continuous">
+      <Real start="0.0"/>
+    </ScalarVariable>
+    <!--
+      Sensor output data rate. Each fmi2DoStep emits round(step * rate)
+      frames (at least one); the truth inputs are zero-order-held across the
+      step, so sub-step frames differ in noise draw and timestamp only.
+    -->
+    <ScalarVariable name="sample_rate_hz" valueReference="6" causality="parameter" variability="tunable">
+      <Real start="100.0"/>
+    </ScalarVariable>
+  </ModelVariables>
+
+  <ModelStructure>
+    <!-- No <Outputs/> entries: this FMU's effect is the UDP side channel in fmi2DoStep, not FMI variable exchange. -->
+  </ModelStructure>
+
+</fmiModelDescription>
