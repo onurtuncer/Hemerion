@@ -34,6 +34,12 @@ Flight Dynamics with Spatial Vector Algebra
 
 .. toctree::
    :maxdepth: 2
+   :caption: Sensor models
+
+   sensor_models
+
+.. toctree::
+   :maxdepth: 2
    :caption: Co-simulation examples
 
    rocket_gps_ecos_cosim
