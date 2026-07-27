@@ -36,15 +36,16 @@ modules/<name>/
 │   └── hemerion/<name>/   # Public headers only — no implementation details
 ├── src/                    # Implementation files
 ├── fmu/
-│   ├── CMakeLists.txt      # Wraps the module as an FMI 2.0 shared library
-│   ├── fmu_main.cpp        # fmi2Instantiate / fmi2DoStep entry points
-│   └── model_description.xml
+│   ├── CMakeLists.txt      # One generateFMU() call — builds and packages the .fmu
+│   └── fmu_main.cpp        # Variable registrations + do_step(), on fmu4cpp
 └── test/
     ├── CMakeLists.txt
     └── test_<name>.cpp     # Unity test cases; compiled for native host
 ```
 
 The `fmu/` and `test/` subdirectories are added to the build only when the corresponding preset is active. Cross-compiled firmware builds skip both.
+
+There is no hand-written FMI plumbing: `fmu_main.cpp` derives one class from `fmu4cpp::fmu_base`, registers its variables by name and implements `do_step()`. The vendored fmu4cpp export layer (`vendor/fmu4cpp/`) supplies the complete FMI 2.0 entry-point table, and `generateFMU()` (`cmake/generate_fmu.cmake`) compiles the two together, **generates** `modelDescription.xml` from the registered variables at build time, and zips the result into `<build>/fmus/fmi2/<name>.fmu`. Adding `fmi3` to the call's `FMI_VERSIONS` emits an FMI 3.0 archive from the same sources.
 
 ---
 

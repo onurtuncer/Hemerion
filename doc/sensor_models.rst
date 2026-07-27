@@ -103,11 +103,22 @@ Every FMU takes its UDP destination from the environment
 (``HEMERION_<SENSOR>_FMU_UDP_HOST`` / ``HEMERION_<SENSOR>_FMU_UDP_PORT``,
 with ``<SENSOR>`` one of ``GPS``, ``IMU``, ``BARO``, ``RADALT``, ``MAG``),
 defaulting to ``127.0.0.1`` and the port above. The four register-count
-sensors expose a ``sample_rate_hz`` FMI parameter: each ``fmi2DoStep`` emits
-``round(step · rate)`` frames, so the sensor rate is decoupled from the
-co-simulation communication step. The GPS FMU instead emits exactly one
+sensors expose a ``sample_rate_hz`` FMI parameter: each communication step
+emits ``round(step · rate)`` frames, so the sensor rate is decoupled from
+the co-simulation communication step. The GPS FMU instead emits exactly one
 NAV-PVT frame per communication step, matching a receiver's navigation
 epoch.
+
+None of the five implements the FMI interface itself. Each
+``include/Hemerion/<sensor>/fmu/fmu_main.cpp`` derives one class from
+``fmu4cpp::fmu_base``, registers the variables named above and implements
+``do_step()``; the vendored fmu4cpp export layer (:file:`vendor/fmu4cpp/`)
+supplies the entry points, and ``generateFMU()``
+(:file:`cmake/generate_fmu.cmake`) compiles the two together, generates
+``modelDescription.xml`` from the registered variables at build time, and
+packages ``<build>/fmus/fmi2/hemerion_<sensor>_fmu.fmu``. Variable *names*
+are therefore the stable interface an FMI master wires against; value
+references are assigned by the export layer and should not be hard-coded.
 
 The shared error-model form
 ---------------------------
@@ -401,9 +412,9 @@ pending Aetherion's environment model), so the round trip through
      - 800 LSB/g, 16.4 LSB/(°/s)
      - register sensitivity, must match the driver's ``ImuScale``
 
-FMI inputs: ``specific_force_{x,y,z}_mps2`` (0–2),
-``angular_rate_{x,y,z}_rad_s`` (3–5), parameter ``sample_rate_hz`` (6,
-default 100 Hz).
+FMI inputs: ``f_{x,y,z}_mps2`` (body-frame specific force),
+``{p,q,r}_rad_s`` (body angular rates); parameter ``sample_rate_hz``
+(default 100 Hz).
 
 Barometer model
 ---------------
@@ -469,8 +480,8 @@ as MS5611-class parts output 24-bit compensated words.
      - 1 LSB/Pa, 100 LSB/°C
      - output sensitivity, must match the driver's ``BaroScale``
 
-FMI inputs: ``altitude_m`` (0), parameter ``sample_rate_hz`` (1, default
-50 Hz).
+FMI inputs: ``h_m`` (truth altitude above MSL); parameter
+``sample_rate_hz`` (default 50 Hz).
 
 Radar altimeter model
 ---------------------
@@ -507,8 +518,8 @@ never negative) and saturated at the 24-bit range register.
      - 100 LSB/m
      - register sensitivity, must match the driver's ``RadAltScale``
 
-FMI inputs: ``height_agl_m`` (0), parameter ``sample_rate_hz`` (1, default
-25 Hz).
+FMI inputs: ``h_agl_m`` (truth height above ground); parameter
+``sample_rate_hz`` (default 25 Hz).
 
 Magnetometer model
 ------------------
@@ -544,8 +555,8 @@ simulator family relies on.
      - 100 LSB/µT
      - register sensitivity, must match the driver's ``MagScale``
 
-FMI inputs: ``mag_{x,y,z}_ut`` (0–2), parameter ``sample_rate_hz`` (3,
-default 100 Hz).
+FMI inputs: ``b_{x,y,z}_ut`` (body-frame field); parameter
+``sample_rate_hz`` (default 100 Hz).
 
 The Hemerion sensor wire protocol
 ---------------------------------

@@ -76,7 +76,7 @@ hemerion/
 │   ├── shm_bridge/
 │   └── udp_bridge/
 │
-├── vendor/                 # Git submodules — no source copies (FreeRTOS, ETL, fmi4c, fmu4cpp, ...)
+├── vendor/                 # Third-party deps, submodules where upstream allows (FreeRTOS, ETL, fmi4c, fmu4cpp, ...)
 │
 ├── apps/                   # Top-level firmware executables (link modules + bsp)
 ├── tests/                  # Cross-cutting integration and SWIL tests
@@ -197,8 +197,8 @@ The framework includes a structured verification strategy:
 - **FreeRTOS-Kernel** — vendored via CMake / git submodules
 - **CMSIS-Core, CMSIS-Device (H7/F4), STM32H7xx/STM32F4xx HAL drivers** — vendored via git submodules; see `vendor/CMakeLists.txt` for the `CMSIS::Core`, `CMSIS::STM32H7`, `STM32H7xx::HAL`, `CMSIS::STM32F4`, `STM32F4xx::HAL` targets
 - **Embedded Template Library (ETL)** — vendored via git submodule; STL alternative for bare-metal C++
-- **fmi4c** — FMI 2.0 export for module FMUs
-- **fmu4cpp** — FMI 2.0 import; used by `sim/fmi/plant` to consume Aetherion's plant FMU
+- **fmu4cpp** — FMI 2.0/3.0 co-simulation *export*; every module FMU is built on it via `generateFMU()` (`cmake/generate_fmu.cmake`). Vendored as a directory copy of upstream's `export/` subtree, not a submodule — see `vendor/CMakeLists.txt`
+- **fmi4c** — FMI *import*; how an FMI master (Ecos, `sim/fmi/`) loads a packaged `.fmu`
 - **Renode** — SWIL simulation platform
 - **Catch2 v3** — unit and integration testing
 - **CMake ≥ 3.26** with `CMakePresets.json` for cross-compilation

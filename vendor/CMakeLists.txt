@@ -3,9 +3,10 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# vendor/ holds git submodules only -- no vendored source is copied into this
-# tree. Each submodule that exposes its own CMakeLists.txt is added below;
-# submodules not yet checked out are skipped so configure still succeeds.
+# vendor/ holds third-party dependencies, as git submodules wherever upstream's
+# own layout allows it. Each dependency that exposes its own CMakeLists.txt is
+# added below; dependencies not yet checked out are skipped so configure still
+# succeeds. fmu4cpp is the one directory copy -- see its block further down.
 #
 # FreeRTOS-Kernel is additionally skipped whenever no freertos_config target
 # exists: its own CMakeLists.txt hard-fails (FATAL_ERROR) without one, and
@@ -31,6 +32,30 @@ unset(_hemerion_vendor_dep)
 # add_subdirectory() call above runs.
 if(TARGET freertos_kernel)
   add_library(FreeRTOS::Kernel ALIAS freertos_kernel)
+endif()
+
+# ------------------------------------------------------------------------------
+# fmu4cpp -- the FMI 2.0/3.0 co-simulation export layer every module FMU is
+# built on, via generateFMU() (cmake/generate_fmu.cmake). Only upstream's
+# export/ subtree is vendored: its root CMakeLists.txt exists to declare a
+# project() and fetch Catch2 for fmu4cpp's own test suite, neither of which a
+# consumer wants. Hence a directory copy added by its inner path, rather than a
+# submodule added by the loop above.
+#
+# Native-only: descriptionGenerator is a host tool run during the build to emit
+# each model's modelDescription.xml, and an arm-none-eabi toolchain would
+# cross-compile it into something unrunnable. HEMERION_BUILD_FMU already implies
+# a native toolchain -- the root CMakeLists.txt hard-fails otherwise -- so
+# gating on it is enough.
+#
+# The FMI2/FMI3 macros belong here rather than inside generateFMU():
+# fmu4cpp_fmi2/fmi3 are object libraries compiled exactly once and shared by
+# every model, so the definition is a property of the target, not of a model.
+# ------------------------------------------------------------------------------
+if(HEMERION_BUILD_FMU AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fmu4cpp/export/CMakeLists.txt")
+  add_subdirectory(fmu4cpp/export)
+  target_compile_definitions(fmu4cpp_fmi2 PUBLIC FMI2)
+  target_compile_definitions(fmu4cpp_fmi3 PUBLIC FMI3)
 endif()
 
 # ------------------------------------------------------------------------------

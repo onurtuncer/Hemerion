@@ -22,12 +22,13 @@ End-to-end sensor-in-the-loop scenario built from four independently developed p
   aero/propulsion/inertia tables, J2 gravity, stage separation), installed with Aetherion under
   `<prefix>/share/Aetherion/fmu/`. It is the *truth* source.
 * **`hemerion_gps_fmu.fmu`** — this repo's GPS hardware simulator
-  (`modules/sensors/include/Hemerion/gps/fmu/`), packaged into a proper FMI 2.0 archive by the
-  `hemerion_gps_fmu_package` target. Each co-simulation step it applies u-blox-M9N-grade noise to the truth
-  inputs and emits one wire-exact UBX-NAV-PVT frame over UDP. It has **no FMI outputs** — the byte stream *is*
-  its output, exactly like a real receiver's UART.
+  (`modules/sensors/include/Hemerion/gps/fmu/`), built and packaged into a proper FMI 2.0 archive by
+  `generateFMU()` (`cmake/generate_fmu.cmake`). Each co-simulation step it applies u-blox-M9N-grade noise to
+  the truth inputs, gates the result through the receiver's dynamics envelope, and emits one wire-exact
+  UBX-NAV-PVT frame over UDP. It has **no FMI outputs** — the byte stream *is* its output, exactly like a real
+  receiver's UART.
 * **`hemerion_imu_fmu.fmu`** — this repo's IMU hardware simulator
-  (`modules/sensors/include/Hemerion/imu/fmu/`), packaged by `hemerion_imu_fmu_package`. It takes true
+  (`modules/sensors/include/Hemerion/imu/fmu/`), packaged the same way. It takes true
   body-frame specific force and angular rate, applies a tactical-grade-MEMS error model (per-run turn-on bias +
   white noise), quantizes to 16-bit register counts at ±40 g / ±2000 °/s sensitivity, and streams Hemerion IMU
   raw-sample frames over UDP at `sample_rate_hz` (default 100 Hz — 10 frames per 0.1 s communication step,
@@ -69,8 +70,8 @@ This produces, under `build/examples-native/`:
 |---|---|
 | `rocket_gps_cosim` | `examples/rocket_gps_ecos/` |
 | `gps_flight_computer` | `examples/rocket_gps_ecos/` |
-| `hemerion_gps_fmu.fmu` | `modules/sensors/include/Hemerion/gps/fmu/` |
-| `hemerion_imu_fmu.fmu` | `modules/sensors/include/Hemerion/imu/fmu/` |
+| `hemerion_gps_fmu.fmu` | `fmus/fmi2/` |
+| `hemerion_imu_fmu.fmu` | `fmus/fmi2/` |
 
 ## Running
 
@@ -140,7 +141,8 @@ python plot_results.py            # reads results/, writes plots/
   than real time, wall-clock arrival times are meaningless for plotting; these mappings are exact as long as
   no datagram is dropped (loopback UDP; the summary line reports decoded counts vs. the master's step count).
 * **fmi4c compatibility.** Ecos loads FMUs through fmi4c, which resolves the *complete* FMI 2.0 export table
-  up front. Both sensor FMUs therefore export stub implementations (returning `fmi2Error`) of the
-  state-management/derivative functions their capability flags disable. fmi4c's XML parser also rejects
-  double-hyphen sequences inside XML comments (they are illegal per the XML spec), which constrains the
-  comment style in `model_description.xml`.
+  up front and refuses a binary that omits any function — including the state-management/derivative functions
+  whose capability flags are `false`. Neither sensor FMU implements that table by hand: the vendored fmu4cpp
+  export layer exports all of it, and `modelDescription.xml` is generated from the variables `fmu_main.cpp`
+  registers, so the description and the binary cannot drift apart (the GUID is derived from the model metadata,
+  and `fmi2Instantiate` rejects a mismatch).

@@ -38,6 +38,26 @@ public:
   ///         connect failed. The local port is left to the OS to choose.
   [[nodiscard]] static std::optional<UdpSender> create(const std::string& peer_address, std::uint16_t peer_port);
 
+  /// @brief Connects to the peer named by two environment variables, falling
+  /// back to the supplied defaults when either is unset.
+  ///
+  /// This is how every sensor hardware-simulator FMU picks its destination.
+  /// Doing it through the environment rather than through FMI string
+  /// parameters keeps the FMUs free of String-typed variables (and so of the
+  /// fmi2SetString/fmi2GetString paths), and lets a Renode or Ecos launch
+  /// script retarget the stream without repackaging the archive.
+  ///
+  /// @param host_variable Name of the variable holding a numeric IPv4 address.
+  /// @param port_variable Name of the variable holding a decimal UDP port.
+  /// @param default_host  Address used when `host_variable` is unset.
+  /// @param default_port  Port used when `port_variable` is unset or unparsable.
+  /// @return The connected sender, or std::nullopt on the same failures as
+  ///         create().
+  [[nodiscard]] static std::optional<UdpSender> create_from_env(const char* host_variable,
+                                                               const char* port_variable,
+                                                               const std::string& default_host,
+                                                               std::uint16_t default_port);
+
   UdpSender(const UdpSender&) = delete;
   UdpSender& operator=(const UdpSender&) = delete;
   /// Takes over `other`'s socket, leaving `other` empty.

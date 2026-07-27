@@ -6,6 +6,22 @@ with section("parse"):
 
   # Specify structure for custom cmake functions
   additional_commands = {
+    # cmake/generate_fmu.cmake -- builds and packages an FMI co-simulation FMU.
+    # Declared here so the formatter groups its keyword arguments instead of
+    # dumping one token per line, and keeps the camelCase name.
+    'generateFMU': {
+      'pargs': {'nargs': 1, 'flags': ['WITH_SOURCES']},
+      'kwargs': {
+        'FMI_VERSIONS': '+',
+        'SOURCES': '+',
+        'INCLUDE_DIRS': '*',
+        'LINK_TARGETS': '*',
+        'COMPILE_DEFINITIONS': '*',
+        'RESOURCE_FOLDER': 1,
+        'DOC_FOLDER': 1,
+        'DESTINATION': 1,
+      }
+    },
     'target_clang_tidy': {
       'pargs': {'nargs': 1},
       'kwargs': {

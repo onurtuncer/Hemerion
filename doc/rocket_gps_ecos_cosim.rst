@@ -170,11 +170,14 @@ the FMU at runtime):
    $ cmake --build build/examples-native
 
 Besides the two example executables this also produces
-``hemerion_gps_fmu.fmu`` and ``hemerion_imu_fmu.fmu`` — the
-``hemerion_gps_fmu_package``/``hemerion_imu_fmu_package`` targets zip each
-simulator into a proper FMI 2.0 archive (``modelDescription.xml`` at the
-archive root, the shared library under ``binaries/win64/`` or
-``binaries/linux64/``).
+``hemerion_gps_fmu.fmu`` and ``hemerion_imu_fmu.fmu`` under
+``build/examples-native/fmus/fmi2/``. ``generateFMU()``
+(:file:`cmake/generate_fmu.cmake`) builds each simulator against the vendored
+fmu4cpp export layer, generates its ``modelDescription.xml`` from the
+variables the model registers, and zips both into a proper FMI 2.0 archive
+(``modelDescription.xml`` at the archive root, the shared library under
+``binaries/win64/`` or ``binaries/linux64/``) as a post-build step of the
+``hemerion_gps_fmu_fmi2``/``hemerion_imu_fmu_fmi2`` targets.
 
 Running
 -------
@@ -200,8 +203,8 @@ Ecos master console
 .. code-block:: text
 
    [cosim] rocket: C:/Program Files/Aetherion/share/Aetherion/fmu/TwoStageRocket.fmu
-   [cosim] gps:    D:/Dev/Hemerion/build/examples-native/modules/sensors/include/Hemerion/gps/fmu/hemerion_gps_fmu.fmu
-   [cosim] imu:    D:/Dev/Hemerion/build/examples-native/modules/sensors/include/Hemerion/imu/fmu/hemerion_imu_fmu.fmu
+   [cosim] gps:    D:/Dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gps_fmu.fmu
+   [cosim] imu:    D:/Dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
    [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU), stop 240 s
    [cosim] t=10 s  alt=1828.52 m  mach=1.52854  mass=265846 kg
    [cosim] t=20 s  alt=7244.12 m  mach=3.63514  mass=217693 kg
@@ -349,20 +352,33 @@ the FMU actually sampled.)
 Implementation notes
 --------------------
 
-Ecos and fmi4c compatibility
+Where the FMI plumbing lives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Two properties of the FMU loader Ecos uses (`fmi4c
-<https://github.com/Ecos-platform/fmi4c>`_) shaped both sensor FMUs:
+Neither sensor FMU implements the FMI interface itself. Each ``fmu_main.cpp``
+derives one class from ``fmu4cpp::fmu_base``, registers its variables by name
+and implements ``do_step()``; the vendored fmu4cpp export layer
+(:file:`vendor/fmu4cpp/`) supplies the entry points, and ``generateFMU()``
+(:file:`cmake/generate_fmu.cmake`) generates ``modelDescription.xml`` by
+loading the freshly built shared library and asking it to serialise its own
+variables.
+
+That removes two whole classes of hazard the FMU loader Ecos uses (`fmi4c
+<https://github.com/Ecos-platform/fmi4c>`_) is strict about, and which a
+hand-written export had to handle by hand:
 
 * fmi4c resolves the **complete FMI 2.0 export table** up front and refuses to
-  load a binary that omits any function. The sensor FMUs therefore export stub
-  implementations (returning ``fmi2Error``) of the state-management and
-  derivative functions their capability flags disable
-  (``fmi2GetFMUstate`` … ``fmi2GetRealOutputDerivatives``).
-* fmi4c's XML parser (ezxml) rejects ``--`` sequences inside XML comments —
-  they are in fact illegal per the XML specification — which constrains the
-  comment style used in ``model_description.xml``.
+  load a binary that omits any function — including the state-management and
+  derivative functions whose capability flags are ``false``. fmu4cpp exports
+  the full table unconditionally, so there are no stubs to forget.
+* the model description and the binary can no longer disagree. The GUID is
+  derived from the model metadata rather than pasted into two files, and
+  ``fmi2Instantiate`` still rejects a mismatch, so a stale archive fails loudly
+  at load time instead of running against the wrong variable list. (fmi4c's XML
+  parser, ezxml, also rejects ``--`` inside XML comments — legitimately, per the
+  XML specification — which used to constrain the hand-written
+  ``model_description.xml`` comment style. Generated descriptions carry no
+  comments at all.)
 
 Both are good conformance pressure: any strict FMI master would be within its
 rights on either count.

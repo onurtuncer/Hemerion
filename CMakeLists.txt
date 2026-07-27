@@ -92,6 +92,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CMakeLists.txt")
 endif()
 
 # ------------------------------------------------------------------------------
+# FMU export helper -- generateFMU() builds and packages FMI co-simulation FMUs on top of the vendored fmu4cpp export
+# layer that vendor/CMakeLists.txt just added. Included here (not per module) so every module that exports an FMU calls
+# the same helper, and so the fmu4cpp targets it needs already exist.
+#
+# HEMERION_FMU_OUTPUT_DIR collects the packaged archives in one place instead of scattering them across each model's
+# build directory; examples/ and any external FMI master read them from there.
+# ------------------------------------------------------------------------------
+if(HEMERION_BUILD_FMU)
+  set(HEMERION_FMU_OUTPUT_DIR "${CMAKE_BINARY_DIR}/fmus"
+      CACHE INTERNAL "Directory the packaged .fmu archives are written to, one subdirectory per FMI version")
+  include(generate_fmu)
+endif()
+
+# ------------------------------------------------------------------------------
 # Board support package -- owns linker scripts, startup code, FreeRTOSConfig.h
 # ------------------------------------------------------------------------------
 if(HEMERION_BSP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/CMakeLists.txt")
