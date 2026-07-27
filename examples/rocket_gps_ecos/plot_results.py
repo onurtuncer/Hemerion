@@ -70,10 +70,22 @@ def read_truth(path: Path) -> dict[str, list[float]]:
 
 
 def read_fixes(path: Path) -> dict[str, list[float]]:
+    """Reads a flight-computer log, keeping only epochs that carry a fix.
+
+    The GPS FMU's dynamics envelope (see doc/sensor_models.rst) drops the fix
+    whenever the vehicle leaves the receiver's platform-model limits or the
+    COCOM thresholds, so the log legitimately contains no-fix epochs whose
+    position fields mean nothing. Plotting them as data would invent a
+    trajectory the receiver never reported. The IMU log has no fix_type
+    column and passes through unfiltered.
+    """
     with path.open(newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
-    return {k: [float(r[k]) for r in rows] for k in reader.fieldnames}
+    fields = reader.fieldnames
+    if "fix_type" in fields:
+        rows = [r for r in rows if float(r["fix_type"]) > 0.0]
+    return {k: [float(r[k]) for r in rows] for k in fields}
 
 
 def style_axis(ax) -> None:
@@ -192,13 +204,22 @@ def plot_gps_error(truth, fixes, out: Path) -> None:
     # one step earlier. Comparing at equal timestamps instead would show
     # speed x 0.1 s (hundreds of metres at rocket velocities), which is
     # latency, not receiver error.
-    step = fixes["sim_time_s"][1] - fixes["sim_time_s"][0]
+    # The communication step is the smallest gap between fixes: consecutive
+    # epochs are one step apart, but the dynamics envelope drops whole runs of
+    # them, so the first two entries alone are not a reliable measure.
+    stamps = fixes["sim_time_s"]
+    step = min(b - a for a, b in zip(stamps, stamps[1:]))
     truth_by_time = {round(t, 3): i for i, t in enumerate(truth["time"])}
     times, horizontal, vertical = [], [], []
-    for i, t in enumerate(fixes["sim_time_s"]):
+    for i, t in enumerate(stamps):
         j = truth_by_time.get(round(t - step, 3))
         if j is None:
             continue
+        # Break the line across a dropout rather than drawing a chord over it.
+        if times and t - times[-1] > 1.5 * step:
+            times.append(t - step)
+            horizontal.append(float("nan"))
+            vertical.append(float("nan"))
         lat_t = math.degrees(truth["lat_rad"][j])
         lon_t = math.degrees(truth["lon_rad"][j])
         dlat_m = (fixes["latitude_deg"][i] - lat_t) * METERS_PER_DEG_LAT
@@ -281,6 +302,12 @@ def main() -> None:
     truth = read_truth(args.truth)
     fixes = read_fixes(args.fixes)
     args.out.mkdir(parents=True, exist_ok=True)
+
+    epochs = sum(1 for _ in args.fixes.open(newline="")) - 1  # minus the header
+    valid = len(fixes["sim_time_s"])
+    if valid < epochs:
+        print(f"{epochs - valid} of {epochs} NAV-PVT epochs carried no fix "
+              f"(receiver dynamics envelope); plotting the {valid} valid ones")
 
     plot_altitude(truth, fixes, args.out)
     plot_ground_track(truth, fixes, args.out)

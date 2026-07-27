@@ -250,6 +250,28 @@ off the decoded stream: ~55 m/s² of thrust acceleration at ignition rising to
 ~265 m/s² at stage-2 burnout (t ≈ 100 s), then **zero specific force in free
 fall** — an accelerometer does not sense gravity.
 
+.. note::
+
+   The transcript and figures on this page were captured before the GPS FMU
+   grew its :ref:`receiver dynamics envelope <gps_dynamics_envelope>`, and show a
+   receiver still reporting ``sats=11`` at 780 km and 6.7 km/s. No COTS
+   receiver does that: with the envelope's defaults (``dynamic_platform`` 8,
+   airborne <4 g, COCOM limits in force) this vehicle loses the fix during
+   boost — past 500 m/s horizontal — and stays dark above the 18 km / 515 m/s
+   COCOM thresholds, so the GPS stream on a rerun now has long, deliberate
+   holes in it. ``plot_results.py`` drops no-fix epochs rather than plotting
+   their meaningless position fields.
+
+   That dropout is the realistic case and worth testing flight software
+   against. To reproduce the unrestricted stream shown above instead — a
+   waivered, envelope-unlocked receiver — add the two parameters to the
+   example's parameter set in ``cosim_host_main.cpp``:
+
+   .. code-block:: cpp
+
+      launch_site["gps::dynamic_platform"] = -1;        // no platform envelope
+      launch_site["gps::cocom_limits_enabled"] = false; // export-licensed receiver
+
 Results
 -------
 

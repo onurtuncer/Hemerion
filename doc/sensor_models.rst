@@ -198,12 +198,163 @@ values — so the flight software sees an honest receiver.
      - 3D fix
      - constant fix type reported
 
-FMI inputs (value references in parentheses): ``latitude_deg`` (0),
-``longitude_deg`` (1), ``altitude_m`` (2), ``ground_speed_mps`` (3),
-``course_deg`` (4), ``v_north_mps`` (5), ``v_east_mps`` (6),
-``v_down_mps`` (7). When NED velocity is wired, the FMU derives
+FMI inputs: ``latitude_deg``, ``longitude_deg``, ``altitude_m``,
+``ground_speed_mps``, ``course_deg``, ``v_north_mps``, ``v_east_mps``,
+``v_down_mps``. When NED velocity is wired, the FMU derives
 speed-over-ground and course itself. See :ref:`rocket_gps_ecos_cosim` for a
 complete, verified wiring of this FMU against a 6-DoF plant.
+
+.. _gps_dynamics_envelope:
+
+Receiver dynamics envelope
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:file: ``modules/sensors/include/Hemerion/gps/fmu/gpsDynamicsModel.hpp``
+
+A real receiver does not keep reporting a solution however hard the vehicle
+it is bolted to accelerates, and a launch vehicle is exactly the case where
+that matters. ``GpsDynamicsModel`` gates every fix produced by the noise
+model through the two mechanisms that take the fix away on real hardware.
+
+**Navigation-engine sanity checks.** u-blox receivers validate their
+solution against the limits of the configured *dynamic platform model*
+(``CFG-NAVSPG-DYNMODEL``; ``dynModel`` in the legacy ``UBX-CFG-NAV5``
+message); a solution outside them is rejected rather than output. The
+altitude and velocity columns below are u-blox's published table,
+reproduced as-is. The acceleration column is **not** in that table: for the
+airborne models it is the g-class in the model's own name, and for the rest
+it is a representative figure for that kind of platform — an engineering
+estimate, not a datasheet number.
+
+.. list-table:: Dynamic platform models (``dynamic_platform`` = the u-blox ``dynModel`` code)
+   :header-rows: 1
+   :widths: 12 22 16 16 16 18
+
+   * - Code
+     - Platform
+     - Max altitude
+     - Max horizontal
+     - Max vertical
+     - Max acceleration
+   * - 0
+     - portable
+     - 12 000 m
+     - 310 m/s
+     - 50 m/s
+     - 2 g
+   * - 2
+     - stationary
+     - 9 000 m
+     - 10 m/s
+     - 6 m/s
+     - 0.2 g
+   * - 3
+     - pedestrian
+     - 9 000 m
+     - 30 m/s
+     - 20 m/s
+     - 1 g
+   * - 4
+     - automotive
+     - 6 000 m
+     - 100 m/s
+     - 15 m/s
+     - 1 g
+   * - 5
+     - sea
+     - 500 m
+     - 25 m/s
+     - 5 m/s
+     - 0.5 g
+   * - 6
+     - airborne <1 g
+     - 80 000 m
+     - 100 m/s
+     - 6 m/s
+     - 1 g
+   * - 7
+     - airborne <2 g
+     - 80 000 m
+     - 250 m/s
+     - 15 m/s
+     - 2 g
+   * - 8
+     - airborne <4 g *(default)*
+     - 80 000 m
+     - 500 m/s
+     - 100 m/s
+     - 4 g
+   * - 9
+     - wrist
+     - 9 000 m
+     - 30 m/s
+     - 20 m/s
+     - 4 g
+   * - 10
+     - bike
+     - 6 000 m
+     - 100 m/s
+     - 15 m/s
+     - 1 g
+   * - -1
+     - *not a u-blox code*
+     - —
+     - —
+     - —
+     - —
+
+Code ``-1`` disables the platform checks altogether (the COCOM cut-off below
+is independent of it); u-blox reserves code 1, which the FMU rejects.
+
+**COCOM export limits.** Independently of the platform model, the receiver
+stops producing navigation output when altitude *and* speed both exceed the
+export-control thresholds — 18 000 m and 515 m/s (~1000 knots). u-blox
+applies these as an AND, so a high slow balloon and a fast low sled both
+keep their fix; a sounding rocket past first-stage burnout does not. Clear
+``cocom_limits_enabled`` to model an export-licensed receiver.
+
+Both are evaluated against the **truth** state rather than the noisy fix: it
+is the vehicle's real motion that breaks carrier tracking, not the
+receiver's estimate of it. Acceleration is not an input — it is differenced
+from the truth velocity between consecutive navigation epochs,
+
+.. math::
+
+   a[k] \;=\; \frac{\big\lVert \mathbf{v}[k] - \mathbf{v}[k-1] \big\rVert}
+                   {t[k] - t[k-1]},
+   \qquad
+   \mathbf{v} = \big(v_N,\; v_E,\; v_D\big)^{\!\top}
+
+so the first epoch after instantiation or a configuration change never trips
+it. Whenever any limit is active the emitted NAV-PVT carries no fix
+(``fixType`` 0, ``gnssFixOK`` clear), zero satellites, and kilometre-scale
+``hAcc``/``vAcc``; the position and velocity fields keep carrying the
+invalid solution, as a real receiver does. Recovery is not instantaneous
+either — once the vehicle is back inside the envelope the fix stays invalid
+for ``reacquisition_time_s`` (default 2 s), representing the re-acquisition
+the receiver has to do after its tracking loops dropped lock.
+
+.. list-table:: Dynamics-envelope FMI parameters
+   :header-rows: 1
+   :widths: 34 16 50
+
+   * - Parameter
+     - Default
+     - Meaning
+   * - ``dynamic_platform``
+     - 8
+     - u-blox ``dynModel`` code from the table above
+   * - ``cocom_limits_enabled``
+     - true
+     - apply the 18 000 m + 515 m/s export cut-off
+   * - ``reacquisition_time_s``
+     - 2.0 s
+     - hold-off before a fix returns after any limit trips
+
+The defaults therefore describe a stock M9N configured for a launch vehicle,
+which is why a rocket co-simulation shows the GPS dropping out through boost
+and again above 18 km — the flight software has to survive that, and now it
+gets the chance to prove it.
 
 IMU model
 ---------
@@ -450,6 +601,21 @@ GPS
    :members:
 
 .. doxygenclass:: hemerion::sensors::gps::fmu::GpsNoiseModel
+   :members:
+
+.. doxygenenum:: hemerion::sensors::gps::fmu::GpsDynamicPlatform
+
+.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsDynamicsLimits
+   :members:
+
+.. doxygenfunction:: hemerion::sensors::gps::fmu::limits_for
+
+.. doxygenenum:: hemerion::sensors::gps::fmu::GpsDynamicsVerdict
+
+.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsDynamicsConfig
+   :members:
+
+.. doxygenclass:: hemerion::sensors::gps::fmu::GpsDynamicsModel
    :members:
 
 IMU
