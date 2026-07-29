@@ -11,7 +11,7 @@ Sensor Models (``modules/sensors``)
 ===================================
 
 ``modules/sensors`` ships five *hardware-simulator FMUs* — GPS, IMU,
-barometer, radar altimeter, and magnetometer — each packaged as an FMI 2.0
+barometer, radar altimeter, and magnetometer — each packaged as an FMI
 co-simulation slave. Every one follows the same pattern established by the
 GPS FMU in :ref:`rocket_gps_ecos_cosim`:
 
@@ -31,7 +31,7 @@ GPS FMU in :ref:`rocket_gps_ecos_cosim`:
 
 .. code-block:: text
 
-   ┌──────────────────┐  FMI 2.0 inputs   ┌─────────────────────────────┐  raw frames   ┌────────────────────┐
+   ┌──────────────────┐    FMI inputs     ┌─────────────────────────────┐  raw frames   ┌────────────────────┐
    │  6-DoF plant     │  (Ecos wiring)    │  hemerion_<sensor>_fmu.fmu  │  over UDP     │  flight software   │
    │  (truth)         ├──────────────────>│  noise model + quantizer    ├──────────────>│  on-target parser  │
    │                  │                   │  + packet emitter           │               │  + conversion      │
@@ -103,11 +103,30 @@ Every FMU takes its UDP destination from the environment
 (``HEMERION_<SENSOR>_FMU_UDP_HOST`` / ``HEMERION_<SENSOR>_FMU_UDP_PORT``,
 with ``<SENSOR>`` one of ``GPS``, ``IMU``, ``BARO``, ``RADALT``, ``MAG``),
 defaulting to ``127.0.0.1`` and the port above. The four register-count
-sensors expose a ``sample_rate_hz`` FMI parameter: each ``fmi2DoStep`` emits
-``round(step · rate)`` frames, so the sensor rate is decoupled from the
-co-simulation communication step. The GPS FMU instead emits exactly one
+sensors expose a ``sample_rate_hz`` FMI parameter: each communication step
+emits ``round(step · rate)`` frames, so the sensor rate is decoupled from
+the co-simulation communication step. The GPS FMU instead emits exactly one
 NAV-PVT frame per communication step, matching a receiver's navigation
 epoch.
+
+None of the five implements the FMI interface itself. Each
+``include/Hemerion/<sensor>/fmu/fmu_main.cpp`` derives one class from
+``fmu4cpp::fmu_base``, registers the variables named above and implements
+``do_step()``; the vendored fmu4cpp export layer (:file:`vendor/fmu4cpp/`)
+supplies the entry points, and ``generateFMU()``
+(:file:`cmake/generate_fmu.cmake`) compiles the two together, generates
+``modelDescription.xml`` from the registered variables at build time, and
+packages the archive.
+
+Because the model code is FMI-version-agnostic, each sensor is exported
+**twice from the same sources** — ``<build>/fmus/fmi2/`` and
+``<build>/fmus/fmi3/`` both hold a ``hemerion_<sensor>_fmu.fmu``, so a
+master on either FMI generation can load these simulators. The registered
+variable names above are identical in both descriptions; only the container
+differs (FMI 3.0 spells the reals ``Float64`` and calls the GUID an
+``instantiationToken``). Variable *names* are therefore the stable interface
+an FMI master wires against; value references are assigned by the export
+layer and should not be hard-coded.
 
 The shared error-model form
 ---------------------------
@@ -198,12 +217,163 @@ values — so the flight software sees an honest receiver.
      - 3D fix
      - constant fix type reported
 
-FMI inputs (value references in parentheses): ``latitude_deg`` (0),
-``longitude_deg`` (1), ``altitude_m`` (2), ``ground_speed_mps`` (3),
-``course_deg`` (4), ``v_north_mps`` (5), ``v_east_mps`` (6),
-``v_down_mps`` (7). When NED velocity is wired, the FMU derives
+FMI inputs: ``latitude_deg``, ``longitude_deg``, ``altitude_m``,
+``ground_speed_mps``, ``course_deg``, ``v_north_mps``, ``v_east_mps``,
+``v_down_mps``. When NED velocity is wired, the FMU derives
 speed-over-ground and course itself. See :ref:`rocket_gps_ecos_cosim` for a
 complete, verified wiring of this FMU against a 6-DoF plant.
+
+.. _gps_dynamics_envelope:
+
+Receiver dynamics envelope
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:file: ``modules/sensors/include/Hemerion/gps/fmu/gpsDynamicsModel.hpp``
+
+A real receiver does not keep reporting a solution however hard the vehicle
+it is bolted to accelerates, and a launch vehicle is exactly the case where
+that matters. ``GpsDynamicsModel`` gates every fix produced by the noise
+model through the two mechanisms that take the fix away on real hardware.
+
+**Navigation-engine sanity checks.** u-blox receivers validate their
+solution against the limits of the configured *dynamic platform model*
+(``CFG-NAVSPG-DYNMODEL``; ``dynModel`` in the legacy ``UBX-CFG-NAV5``
+message); a solution outside them is rejected rather than output. The
+altitude and velocity columns below are u-blox's published table,
+reproduced as-is. The acceleration column is **not** in that table: for the
+airborne models it is the g-class in the model's own name, and for the rest
+it is a representative figure for that kind of platform — an engineering
+estimate, not a datasheet number.
+
+.. list-table:: Dynamic platform models (``dynamic_platform`` = the u-blox ``dynModel`` code)
+   :header-rows: 1
+   :widths: 12 22 16 16 16 18
+
+   * - Code
+     - Platform
+     - Max altitude
+     - Max horizontal
+     - Max vertical
+     - Max acceleration
+   * - 0
+     - portable
+     - 12 000 m
+     - 310 m/s
+     - 50 m/s
+     - 2 g
+   * - 2
+     - stationary
+     - 9 000 m
+     - 10 m/s
+     - 6 m/s
+     - 0.2 g
+   * - 3
+     - pedestrian
+     - 9 000 m
+     - 30 m/s
+     - 20 m/s
+     - 1 g
+   * - 4
+     - automotive
+     - 6 000 m
+     - 100 m/s
+     - 15 m/s
+     - 1 g
+   * - 5
+     - sea
+     - 500 m
+     - 25 m/s
+     - 5 m/s
+     - 0.5 g
+   * - 6
+     - airborne <1 g
+     - 80 000 m
+     - 100 m/s
+     - 6 m/s
+     - 1 g
+   * - 7
+     - airborne <2 g
+     - 80 000 m
+     - 250 m/s
+     - 15 m/s
+     - 2 g
+   * - 8
+     - airborne <4 g *(default)*
+     - 80 000 m
+     - 500 m/s
+     - 100 m/s
+     - 4 g
+   * - 9
+     - wrist
+     - 9 000 m
+     - 30 m/s
+     - 20 m/s
+     - 4 g
+   * - 10
+     - bike
+     - 6 000 m
+     - 100 m/s
+     - 15 m/s
+     - 1 g
+   * - -1
+     - *not a u-blox code*
+     - —
+     - —
+     - —
+     - —
+
+Code ``-1`` disables the platform checks altogether (the COCOM cut-off below
+is independent of it); u-blox reserves code 1, which the FMU rejects.
+
+**COCOM export limits.** Independently of the platform model, the receiver
+stops producing navigation output when altitude *and* speed both exceed the
+export-control thresholds — 18 000 m and 515 m/s (~1000 knots). u-blox
+applies these as an AND, so a high slow balloon and a fast low sled both
+keep their fix; a sounding rocket past first-stage burnout does not. Clear
+``cocom_limits_enabled`` to model an export-licensed receiver.
+
+Both are evaluated against the **truth** state rather than the noisy fix: it
+is the vehicle's real motion that breaks carrier tracking, not the
+receiver's estimate of it. Acceleration is not an input — it is differenced
+from the truth velocity between consecutive navigation epochs,
+
+.. math::
+
+   a[k] \;=\; \frac{\big\lVert \mathbf{v}[k] - \mathbf{v}[k-1] \big\rVert}
+                   {t[k] - t[k-1]},
+   \qquad
+   \mathbf{v} = \big(v_N,\; v_E,\; v_D\big)^{\!\top}
+
+so the first epoch after instantiation or a configuration change never trips
+it. Whenever any limit is active the emitted NAV-PVT carries no fix
+(``fixType`` 0, ``gnssFixOK`` clear), zero satellites, and kilometre-scale
+``hAcc``/``vAcc``; the position and velocity fields keep carrying the
+invalid solution, as a real receiver does. Recovery is not instantaneous
+either — once the vehicle is back inside the envelope the fix stays invalid
+for ``reacquisition_time_s`` (default 2 s), representing the re-acquisition
+the receiver has to do after its tracking loops dropped lock.
+
+.. list-table:: Dynamics-envelope FMI parameters
+   :header-rows: 1
+   :widths: 34 16 50
+
+   * - Parameter
+     - Default
+     - Meaning
+   * - ``dynamic_platform``
+     - 8
+     - u-blox ``dynModel`` code from the table above
+   * - ``cocom_limits_enabled``
+     - true
+     - apply the 18 000 m + 515 m/s export cut-off
+   * - ``reacquisition_time_s``
+     - 2.0 s
+     - hold-off before a fix returns after any limit trips
+
+The defaults therefore describe a stock M9N configured for a launch vehicle,
+which is why a rocket co-simulation shows the GPS dropping out through boost
+and again above 18 km — the flight software has to survive that, and now it
+gets the chance to prove it.
 
 IMU model
 ---------
@@ -250,9 +420,9 @@ pending Aetherion's environment model), so the round trip through
      - 800 LSB/g, 16.4 LSB/(°/s)
      - register sensitivity, must match the driver's ``ImuScale``
 
-FMI inputs: ``specific_force_{x,y,z}_mps2`` (0–2),
-``angular_rate_{x,y,z}_rad_s`` (3–5), parameter ``sample_rate_hz`` (6,
-default 100 Hz).
+FMI inputs: ``f_{x,y,z}_mps2`` (body-frame specific force),
+``{p,q,r}_rad_s`` (body angular rates); parameter ``sample_rate_hz``
+(default 100 Hz).
 
 Barometer model
 ---------------
@@ -318,8 +488,8 @@ as MS5611-class parts output 24-bit compensated words.
      - 1 LSB/Pa, 100 LSB/°C
      - output sensitivity, must match the driver's ``BaroScale``
 
-FMI inputs: ``altitude_m`` (0), parameter ``sample_rate_hz`` (1, default
-50 Hz).
+FMI inputs: ``h_m`` (truth altitude above MSL); parameter
+``sample_rate_hz`` (default 50 Hz).
 
 Radar altimeter model
 ---------------------
@@ -356,8 +526,8 @@ never negative) and saturated at the 24-bit range register.
      - 100 LSB/m
      - register sensitivity, must match the driver's ``RadAltScale``
 
-FMI inputs: ``height_agl_m`` (0), parameter ``sample_rate_hz`` (1, default
-25 Hz).
+FMI inputs: ``h_agl_m`` (truth height above ground); parameter
+``sample_rate_hz`` (default 25 Hz).
 
 Magnetometer model
 ------------------
@@ -393,8 +563,8 @@ simulator family relies on.
      - 100 LSB/µT
      - register sensitivity, must match the driver's ``MagScale``
 
-FMI inputs: ``mag_{x,y,z}_ut`` (0–2), parameter ``sample_rate_hz`` (3,
-default 100 Hz).
+FMI inputs: ``b_{x,y,z}_ut`` (body-frame field); parameter
+``sample_rate_hz`` (default 100 Hz).
 
 The Hemerion sensor wire protocol
 ---------------------------------
@@ -450,6 +620,21 @@ GPS
    :members:
 
 .. doxygenclass:: hemerion::sensors::gps::fmu::GpsNoiseModel
+   :members:
+
+.. doxygenenum:: hemerion::sensors::gps::fmu::GpsDynamicPlatform
+
+.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsDynamicsLimits
+   :members:
+
+.. doxygenfunction:: hemerion::sensors::gps::fmu::limits_for
+
+.. doxygenenum:: hemerion::sensors::gps::fmu::GpsDynamicsVerdict
+
+.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsDynamicsConfig
+   :members:
+
+.. doxygenclass:: hemerion::sensors::gps::fmu::GpsDynamicsModel
    :members:
 
 IMU

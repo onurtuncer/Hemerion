@@ -26,6 +26,7 @@
 #include <unistd.h>
 #endif
 
+#include <cstdlib>
 #include <utility>
 
 namespace hemerion::sensors::gps::fmu
@@ -117,6 +118,42 @@ std::optional<UdpSender> UdpSender::create(const std::string& peer_address, std:
   result.handle_ = native;
   return result;
 #endif
+}
+
+std::optional<UdpSender> UdpSender::create_from_env(const char* host_variable,
+                                                   const char* port_variable,
+                                                   const std::string& default_host,
+                                                   std::uint16_t default_port)
+{
+  // std::getenv is flagged deprecated by the Windows SDK headers (in favour of _dupenv_s) purely as an MSVC CRT
+  // "insecure function" nag, not a real portability issue -- std::getenv is the standard, portable way to do this.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+  const char* host_env = std::getenv(host_variable);
+  const char* port_env = std::getenv(port_variable);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+
+  std::uint16_t port = default_port;
+  if (port_env != nullptr)
+  {
+    // A garbage or out-of-range setting falls back to the default rather than silently wrapping to some other port.
+    const long parsed = std::strtol(port_env, nullptr, 10);
+    if (parsed > 0 && parsed <= 65535)
+    {
+      port = static_cast<std::uint16_t>(parsed);
+    }
+  }
+
+  return create((host_env != nullptr) ? std::string(host_env) : default_host, port);
 }
 
 UdpSender::UdpSender(UdpSender&& other) noexcept { *this = std::move(other); }

@@ -42,6 +42,7 @@ struct GpsTruthSample
   float altitude_m = 0.0F;         ///< True altitude above mean sea level [m].
   float ground_speed_mps = 0.0F;   ///< True speed over ground [m/s].
   float course_deg = 0.0F;         ///< True course over ground [degrees].
+  float v_down_mps = 0.0F;         ///< True vertical velocity, NED convention: positive downwards [m/s].
   std::uint64_t timestamp_us = 0;  ///< Simulation clock at this step [microseconds].
 };
 

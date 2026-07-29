@@ -5,7 +5,7 @@ Reusable firmware libraries. Each module is an independent CMake subdirectory th
 | Artifact | Preset family | Output |
 |---|---|---|
 | Static library | `cross-*`, `renode-*` | `libhemerion_<module>.a` linked into an app |
-| FMU shared library | `fmu-native` | `<module>.fmu` consumed by Aetherion or any FMI 2.0 master |
+| Co-simulation FMU | `fmu-native` | `<module>.fmu` (FMI 2.0 and 3.0) consumed by Aetherion or any FMI master |
 | Test binary | `test-native` | Native executable run by CTest |
 
 ---
@@ -36,15 +36,18 @@ modules/<name>/
 │   └── hemerion/<name>/   # Public headers only — no implementation details
 ├── src/                    # Implementation files
 ├── fmu/
-│   ├── CMakeLists.txt      # Wraps the module as an FMI 2.0 shared library
-│   ├── fmu_main.cpp        # fmi2Instantiate / fmi2DoStep entry points
-│   └── model_description.xml
+│   ├── CMakeLists.txt      # One generateFMU() call — builds and packages the .fmu
+│   └── fmu_main.cpp        # Variable registrations + do_step(), on fmu4cpp
 └── test/
     ├── CMakeLists.txt
     └── test_<name>.cpp     # Unity test cases; compiled for native host
 ```
 
 The `fmu/` and `test/` subdirectories are added to the build only when the corresponding preset is active. Cross-compiled firmware builds skip both.
+
+There is no hand-written FMI plumbing: `fmu_main.cpp` derives one class from `fmu4cpp::fmu_base`, registers its variables by name and implements `do_step()`. The vendored fmu4cpp export layer (`vendor/fmu4cpp/`) supplies the complete entry-point table for both FMI generations, and `generateFMU()` (`cmake/generate_fmu.cmake`) compiles the two together **once per FMI version listed in its `FMI_VERSIONS`**, generates each archive's `modelDescription.xml` from the registered variables at build time, and zips the result into `<build>/fmus/<fmiVersion>/<name>.fmu`.
+
+The sensor FMUs list `fmi2 fmi3`, so one `cmake --build` produces both an FMI 2.0 and an FMI 3.0 archive from a single set of sources — the model code is version-agnostic, and the same registered variable *names* appear in both descriptions. One binary cannot export both ABIs, so each version gets its own shared library (`<name>_fmi2`, `<name>_fmi3`), and that per-version target name is also the `modelIdentifier` inside its description.
 
 ---
 

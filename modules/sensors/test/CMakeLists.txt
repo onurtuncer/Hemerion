@@ -41,6 +41,16 @@ target_link_libraries(test_hemerion_sensors_ubx_emitter PRIVATE hemerion_sensors
 add_test(NAME sensors.ubx_emitter COMMAND test_hemerion_sensors_ubx_emitter)
 set_tests_properties(sensors.ubx_emitter PROPERTIES LABELS "unit")
 
+# Receiver dynamics envelope of the GPS FMU simulator (platform-model limits, COCOM cut-off, re-acquisition hold-off).
+# Pulls in ubxEmitter.cpp for the same reason as the test above: the last case checks what the on-target UbxParser
+# decodes from an out-of-envelope epoch.
+add_executable(test_hemerion_sensors_gps_dynamics test_gps_dynamics.cpp
+                                                  "${CMAKE_CURRENT_SOURCE_DIR}/../src/gps/fmu/ubxEmitter.cpp")
+target_link_libraries(test_hemerion_sensors_gps_dynamics PRIVATE hemerion_sensors)
+
+add_test(NAME sensors.gps_dynamics COMMAND test_hemerion_sensors_gps_dynamics)
+set_tests_properties(sensors.gps_dynamics PROPERTIES LABELS "unit")
+
 # Round-trip test for the IMU FMU simulator (imu/fmu/). imu_packet_emitter.cpp is compiled directly into this test
 # binary rather than via hemerion_sensors, since the emitter is sim-only code gated behind HEMERION_BUILD_FMU in
 # imu/fmu/CMakeLists.txt and must not be linked into cross-compiled firmware.
@@ -53,8 +63,8 @@ set_tests_properties(sensors.imu_packet PROPERTIES LABELS "unit")
 
 # Round-trip tests for the barometer, radar altimeter and magnetometer FMU simulators (baro/fmu/, radalt/fmu/,
 # mag/fmu/). Like ubxEmitter.cpp and imu_packet_emitter.cpp above, each emitter is compiled directly into its test
-# binary rather than via hemerion_sensors, since the emitters are sim-only code gated behind HEMERION_BUILD_FMU and
-# must not be linked into cross-compiled firmware.
+# binary rather than via hemerion_sensors, since the emitters are sim-only code gated behind HEMERION_BUILD_FMU and must
+# not be linked into cross-compiled firmware.
 add_executable(test_hemerion_sensors_baro_packet test_baro_packet.cpp
                                                  "${CMAKE_CURRENT_SOURCE_DIR}/../src/baro/fmu/baro_packet_emitter.cpp")
 target_link_libraries(test_hemerion_sensors_baro_packet PRIVATE hemerion_sensors)
@@ -62,9 +72,8 @@ target_link_libraries(test_hemerion_sensors_baro_packet PRIVATE hemerion_sensors
 add_test(NAME sensors.baro_packet COMMAND test_hemerion_sensors_baro_packet)
 set_tests_properties(sensors.baro_packet PROPERTIES LABELS "unit")
 
-add_executable(
-  test_hemerion_sensors_radalt_packet test_radalt_packet.cpp
-                                      "${CMAKE_CURRENT_SOURCE_DIR}/../src/radalt/fmu/radalt_packet_emitter.cpp")
+add_executable(test_hemerion_sensors_radalt_packet
+               test_radalt_packet.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/radalt/fmu/radalt_packet_emitter.cpp")
 target_link_libraries(test_hemerion_sensors_radalt_packet PRIVATE hemerion_sensors)
 
 add_test(NAME sensors.radalt_packet COMMAND test_hemerion_sensors_radalt_packet)

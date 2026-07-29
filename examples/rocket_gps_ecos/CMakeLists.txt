@@ -15,10 +15,16 @@
 # only the C++ library target `libecos` is consumed.
 # ------------------------------------------------------------------------------
 
-if(NOT TARGET hemerion_gps_fmu_package OR NOT TARGET hemerion_imu_fmu_package)
-  message(FATAL_ERROR "examples/rocket_gps_ecos requires the GPS and IMU FMU package targets -- configure with "
+# The sensor FMUs are exported for both FMI generations; Ecos imports through fmi4c, so this example consumes the FMI
+# 2.0 pair. generateFMU() names its shared-library targets <modelIdentifier>_<fmiVersion> and packages each .fmu as a
+# POST_BUILD step, so depending on the fmi2 targets is what guarantees those archives exist before this example runs.
+if(NOT TARGET hemerion_gps_fmu_fmi2 OR NOT TARGET hemerion_imu_fmu_fmi2)
+  message(FATAL_ERROR "examples/rocket_gps_ecos requires the FMI 2.0 GPS and IMU FMU targets -- configure with "
                       "HEMERION_BUILD_FMU=ON (use the examples-native preset)")
 endif()
+
+set(HEMERION_GPS_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_gps_fmu.fmu")
+set(HEMERION_IMU_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_imu_fmu.fmu")
 
 include(FetchContent)
 
@@ -79,7 +85,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # ecos/logger/logger.hpp pulls the bundled fmt into consumers too -- same consteval workaround as above.
   target_compile_definitions(rocket_gps_cosim PRIVATE FMT_CONSTEVAL=)
 endif()
-add_dependencies(rocket_gps_cosim hemerion_gps_fmu_package hemerion_imu_fmu_package)
+add_dependencies(rocket_gps_cosim hemerion_gps_fmu_fmi2 hemerion_imu_fmu_fmi2)
 
 add_executable(gps_flight_computer flight_computer_main.cpp udpReceiver.cpp)
 target_link_libraries(gps_flight_computer PRIVATE hemerion_sensors)
