@@ -11,17 +11,19 @@
 /// Topology (see examples/rocket_gps_ecos/README.md):
 ///
 ///   TwoStageRocket.fmu ──(FMI variables, Ecos connections)──> hemerion_gps_fmu.fmu
-///        truth: lat/lon/alt, NED velocity        │              noise + UBX-NAV-PVT
-///               body rates, forces, mass         │                    │ UDP 127.0.0.1:5762
+///        truth: lat/lon/alt, NED velocity        │              noise + dynamics envelope
+///               body rates, forces, mass         │              + UBX-NAV-PVT
+///                                                │                    │ UDP 127.0.0.1:5762
 ///                                                │                    v
 ///                                                └──────────> hemerion_imu_fmu.fmu
 ///                                                               noise + raw-count frames
-///                                                                     │ UDP 127.0.0.1:5763
+///                                                                     │ SPI over shared memory
 ///                                                                     v
 ///                                                          gps_flight_computer
-///                                                    (GpsDriver/UbxParser + ImuPacketParser/
-///                                                     convert_raw_to_si, the same stacks
-///                                                     that run on the STM32H743)
+///                                                    (GpsDriver/UbxParser + ImuSpiDriver/
+///                                                     ImuPacketParser/convert_raw_to_si,
+///                                                     the same stacks that run on the
+///                                                     STM32H743)
 ///
 /// The rocket reports geodetic latitude/longitude in radians and NED velocity
 /// in m/s; the GPS FMU takes degrees and NED velocity directly, so the two
@@ -31,8 +33,17 @@
 /// f = (thrust + F_aero) / m from the rocket's outputs after every step and
 /// writes it to the IMU's inputs through Ecos properties (same one-step
 /// transport delay as an Ecos connection). Body rates p/q/r connect 1:1.
-/// Neither sensor FMU has FMI outputs -- their effect is the UDP side
-/// channels consumed by gps_flight_computer.
+///
+/// Neither sensor FMU has FMI outputs -- their effect is the sensor bus each
+/// part really uses: a UDP stand-in for the GPS receiver's UART, and a
+/// shared-memory SPI bus (sim/spi_shm) the IMU answers as a peripheral. Both
+/// are consumed by gps_flight_computer.
+///
+/// The GPS FMU's receiver dynamics envelope is configured here rather than
+/// left at its defaults, because it is the single most visible thing about
+/// this scenario: a launch vehicle configured as airborne <4 g loses its fix
+/// through boost, and the COCOM export limits keep it dark above 18 km and
+/// 515 m/s. See --dyn-model / --no-cocom.
 ///
 /// Rocket truth is logged through Ecos' csv_writer so the flight computer's
 /// decoded fixes and IMU samples can be compared against it
@@ -84,22 +95,34 @@ struct Options
   double step_s = 0.1;           // communication step == GPS output period (10 Hz)
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double realtime_factor = 0.0;  // 0 = run as fast as possible
+  // Receiver dynamics envelope. 8 is the u-blox dynModel code for airborne
+  // <4 g -- the setting a launch vehicle is configured with, and the least
+  // restrictive one a COTS receiver offers.
+  int dynamic_platform = 8;
+  bool cocom_limits = true;
+  double reacquisition_time_s = 2.0;
 };
 
 void print_usage()
 {
   std::cout << "usage: rocket_gps_cosim [--rocket <TwoStageRocket.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
                "                        [--imu <hemerion_imu_fmu.fmu>] [--imu-rate <hz>]\n"
+               "                        [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                        [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
                "\n"
-               "  --rocket   path to Aetherion's TwoStageRocket.fmu (default: configure-time location)\n"
-               "  --gps      path to the packaged hemerion_gps_fmu.fmu (default: build-tree artifact)\n"
-               "  --imu      path to the packaged hemerion_imu_fmu.fmu (default: build-tree artifact)\n"
-               "  --imu-rate IMU output data rate [Hz] (default 100)\n"
-               "  --stop     simulation stop time [s] (default 240; the rocket holds state after apogee ~232 s)\n"
-               "  --step     communication step size [s]; also the GPS fix period (default 0.1)\n"
-               "  --csv      rocket truth output CSV (default results/rocket_truth.csv)\n"
-               "  --rtf      real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
+               "  --rocket    path to Aetherion's TwoStageRocket.fmu (default: configure-time location)\n"
+               "  --gps       path to the packaged hemerion_gps_fmu.fmu (default: build-tree artifact)\n"
+               "  --imu       path to the packaged hemerion_imu_fmu.fmu (default: build-tree artifact)\n"
+               "  --imu-rate  IMU output data rate [Hz] (default 100)\n"
+               "  --dyn-model u-blox dynModel code for the receiver's platform model (default 8 = airborne <4 g;\n"
+               "              -1 disables the platform envelope entirely)\n"
+               "  --no-cocom  clear the COCOM export cut-off, as on an export-licensed receiver (default: in force,\n"
+               "              so navigation output stops above 18000 m AND 515 m/s)\n"
+               "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
+               "  --stop      simulation stop time [s] (default 240; the rocket holds state after apogee ~232 s)\n"
+               "  --step      communication step size [s]; also the GPS fix period (default 0.1)\n"
+               "  --csv       rocket truth output CSV (default results/rocket_truth.csv)\n"
+               "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
 }
 
 bool parse_args(int argc, char** argv, Options& options)
@@ -129,6 +152,18 @@ bool parse_args(int argc, char** argv, Options& options)
     else if (arg == "--imu-rate" && (value = next()))
     {
       options.imu_rate_hz = std::stod(value);
+    }
+    else if (arg == "--dyn-model" && (value = next()))
+    {
+      options.dynamic_platform = std::stoi(value);
+    }
+    else if (arg == "--no-cocom")
+    {
+      options.cocom_limits = false;
+    }
+    else if (arg == "--reacq" && (value = next()))
+    {
+      options.reacquisition_time_s = std::stod(value);
     }
     else if (arg == "--stop" && (value = next()))
     {
@@ -221,8 +256,15 @@ int main(int argc, char** argv)
     launch_site["rocket::azimuth0_deg"] = 90.0;
     launch_site["rocket::pitch0_deg"] = 55.22;
     // Not launch-site geometry, but sim->init() applies exactly one named
-    // parameter set, so the IMU's output data rate rides along here.
+    // parameter set, so the sensor configuration rides along here.
     launch_site["imu::sample_rate_hz"] = options.imu_rate_hz;
+    // Written explicitly even though these match the GPS FMU's own defaults:
+    // whether the receiver keeps a fix through this flight is the scenario's
+    // most consequential setting, and it should be readable here rather than
+    // inherited silently from modelDescription.xml.
+    launch_site["gps::dynamic_platform"] = options.dynamic_platform;
+    launch_site["gps::cocom_limits_enabled"] = options.cocom_limits;
+    launch_site["gps::reacquisition_time_s"] = options.reacquisition_time_s;
     ss.add_parameter_set("launchSite", launch_site);
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(options.step_s));
@@ -285,7 +327,10 @@ int main(int argc, char** argv)
               << "[cosim] gps:    " << options.gps_fmu.string() << "\n"
               << "[cosim] imu:    " << options.imu_fmu.string() << "\n"
               << "[cosim] step " << options.step_s << " s (" << 1.0 / options.step_s << " Hz GPS, "
-              << options.imu_rate_hz << " Hz IMU), stop " << options.stop_s << " s\n";
+              << options.imu_rate_hz << " Hz IMU), stop " << options.stop_s << " s\n"
+              << "[cosim] receiver: dynModel " << options.dynamic_platform << ", COCOM limits "
+              << (options.cocom_limits ? "in force (18000 m AND 515 m/s)" : "disabled") << ", re-acquisition "
+              << options.reacquisition_time_s << " s\n";
 
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time
@@ -328,9 +373,11 @@ int main(int argc, char** argv)
     sim->terminate();
 
     const long imu_frames_per_step = std::lround(options.step_s * options.imu_rate_hz);
+    // One NAV-PVT frame per step regardless of fix validity -- a receiver
+    // outside its envelope keeps talking, it just stops claiming a solution.
     std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
-              << " UBX-NAV-PVT frames and " << sim->iterations() * std::max(1L, imu_frames_per_step)
-              << " IMU frames emitted\n"
+              << " UBX-NAV-PVT frames emitted and " << sim->iterations() * std::max(1L, imu_frames_per_step)
+              << " IMU samples buffered for the SPI controller\n"
               << "[cosim] apogee " << apogee_m << " m at t=" << apogee_time_s << " s";
     if (staging_time_s >= 0.0)
     {

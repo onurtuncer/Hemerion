@@ -3,12 +3,13 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-# examples/rocket_gps_ecos -- Ecos co-simulation of Aetherion's TwoStageRocket.fmu feeding Hemerion's GPS UBX
-# hardware-simulator FMU, whose UBX-NAV-PVT UDP stream is decoded by the same GpsDriver/UbxParser stack that runs on the
-# STM32H743 flight computer. See README.md and doc/rocket_gps_ecos_cosim.rst.
+# examples/rocket_gps_ecos -- Ecos co-simulation of Aetherion's TwoStageRocket.fmu feeding Hemerion's GPS and IMU
+# hardware-simulator FMUs, whose sensor buses (UBX-NAV-PVT over UDP, and a shared-memory SPI bus) are driven by the same
+# GpsDriver/UbxParser and ImuSpiDriver/ImuPacketParser stacks that run on the STM32H743 flight computer. See README.md
+# and doc/rocket_gps_ecos_cosim.rst.
 #
-# Two host executables: rocket_gps_cosim    -- Ecos master: loads both FMUs, wires truth -> GPS, logs rocket truth to
-# CSV gps_flight_computer -- consumes the FMU's UBX UDP stream with the on-target GPS stack, logs decoded fixes
+# Two host executables: rocket_gps_cosim    -- Ecos master: loads all three FMUs, wires truth -> sensors, logs rocket
+# truth to CSV gps_flight_computer -- drives both sensor buses with the on-target stacks, logs decoded fixes and samples
 #
 # The Ecos platform library (github.com/Ecos-platform/ecos) is fetched and built from source here; its own CMake fetches
 # everything else it needs (fmi4c for FMU loading, header-only utilities). CLI/C-bindings/proxyfmu are switched off --
@@ -87,8 +88,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 add_dependencies(rocket_gps_cosim hemerion_gps_fmu_fmi2 hemerion_imu_fmu_fmi2)
 
+# hemerion_sensors supplies the on-target stacks (GpsDriver/UbxParser, ImuSpiDriver, ImuPacketParser,
+# convert_raw_to_si); hemerion_spi_shm supplies only the *board* under the IMU driver -- the controller end of the
+# shared-memory SPI bus the IMU FMU answers on. udpReceiver.cpp is the equivalent stand-in for the GPS receiver's UART.
 add_executable(gps_flight_computer flight_computer_main.cpp udpReceiver.cpp)
-target_link_libraries(gps_flight_computer PRIVATE hemerion_sensors)
+target_link_libraries(gps_flight_computer PRIVATE hemerion_sensors hemerion_spi_shm)
 target_compile_features(gps_flight_computer PRIVATE cxx_std_23)
 if(WIN32)
   target_link_libraries(gps_flight_computer PRIVATE ws2_32)

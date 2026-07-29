@@ -6,9 +6,10 @@
 # modules/sensors -- IMU/baro/radalt/mag raw-to-SI unit conversion + Hemerion packet parsers, GPS NMEA/UBX parsing.
 #
 # The raw-count-to-SI-unit conversions and Hemerion wire-protocol packet parsers for the IMU, barometer, radar altimeter
-# and magnetometer, plus the GPS NMEA/UBX parsers + driver, are implemented. include/Hemerion/<sensor>/fmu/ subtrees are
-# per-sensor hardware simulator FMUs (truth state in, noisy raw sensor bytes over UDP out): gps/fmu/ emits UBX-NAV-PVT,
-# and imu/fmu/, baro/fmu/, radalt/fmu/ and mag/fmu/ emit the matching Hemerion raw-sample frames -- see their
+# and magnetometer, plus the GPS NMEA/UBX parsers + driver and the IMU SPI driver, are implemented.
+# include/Hemerion/<sensor>/fmu/ subtrees are per-sensor hardware simulator FMUs (truth state in, noisy raw sensor bytes
+# out on the bus the real part uses): gps/fmu/ emits UBX-NAV-PVT over UDP, baro/fmu/, radalt/fmu/ and mag/fmu/ emit the
+# matching Hemerion raw-sample frames the same way, and imu/fmu/ answers a simulated SPI bus -- see their
 # CMakeLists.txt; none of them is the generic whole-module numeric-variable FMU export package.xml's <artifact
 # type="fmu"> describes, which remains unbuilt. None of this has a hardware dependency, so this target needs no
 # peripheral/bus libraries -- cmake/hemerion_module.cmake (the documented hemerion_add_module() helper) does not exist
@@ -20,6 +21,7 @@ add_library(
   hemerion_sensors STATIC
   src/imu/imu_conversion.cpp
   src/imu/imu_packet.cpp
+  src/imu/imu_spi_driver.cpp
   src/baro/baro_conversion.cpp
   src/baro/baro_packet.cpp
   src/radalt/radalt_conversion.cpp
@@ -38,7 +40,8 @@ endif()
 
 # ------------------------------------------------------------------------------
 # Per-sensor hardware simulator FMUs. Each subdirectory is one generateFMU() call; the socket libraries are collected
-# here because all five emit their raw sensor bytes over the same UdpSender, and only Windows needs an explicit link.
+# here because the four UDP-emitting simulators share the same UdpSender, and only Windows needs an explicit link. (The
+# IMU simulator is the exception -- it is an SPI part and links sim/spi_shm instead of a socket library.)
 # ------------------------------------------------------------------------------
 if(HEMERION_BUILD_FMU)
   if(WIN32)

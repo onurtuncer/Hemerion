@@ -15,7 +15,9 @@
 # * the FMI2/FMI3 macros on the shared fmu4cpp object libraries are defined once in vendor/CMakeLists.txt, where those
 #   targets are created; this function only defines them on the model target it builds itself;
 # * VERSION_DEFS is cleared per FMI version -- upstream clears a misspelled VERSIONS_DEFS, so a model built for both
-#   fmi2 and fmi3 compiled the second one with both macros defined.
+#   fmi2 and fmi3 compiled the second one with both macros defined;
+# * static libraries are not "bundled" next to the model binary -- a static library is linked into that binary and has
+#   no runtime artifact, so copying it only buried a .a/.lib inside the packaged archive.
 #
 # Usage:
 #
@@ -190,7 +192,8 @@ endmacro()
 
 # ------------------------------------------------------------------------------
 # Copies each linked dependency's runtime artifact next to the model binary, so the FMU stays loadable once unzipped
-# somewhere else. INTERFACE libraries and bare system link flags (e.g. ws2_32) have no runtime file and are skipped.
+# somewhere else. INTERFACE libraries, STATIC libraries (linked into the model binary itself) and bare system link flags
+# (e.g. ws2_32) have no runtime file and are skipped.
 # ------------------------------------------------------------------------------
 macro(_bundle_link_libraries)
   foreach(dep IN LISTS FMU_LINK_TARGETS)
@@ -198,8 +201,8 @@ macro(_bundle_link_libraries)
       get_target_property(target_type ${dep} TYPE)
       if(NOT
          "${target_type}"
-         STREQUAL
-         "INTERFACE_LIBRARY")
+         MATCHES
+         "^(INTERFACE|STATIC)_LIBRARY$")
         add_custom_command(
           TARGET ${versionTarget}
           POST_BUILD

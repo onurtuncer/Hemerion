@@ -61,6 +61,18 @@ target_link_libraries(test_hemerion_sensors_imu_packet PRIVATE hemerion_sensors)
 add_test(NAME sensors.imu_packet COMMAND test_hemerion_sensors_imu_packet)
 set_tests_properties(sensors.imu_packet PROPERTIES LABELS "unit")
 
+# The IMU's SPI path with both ends against each other: the simulator's register/FIFO model (imu/fmu/imu_spi_slave.cpp,
+# sim-only, hence compiled in directly like the emitters above) answering the on-target ImuSpiDriver that ships in
+# hemerion_sensors. Proves the FIFO round trip is byte-identical to the frames the emitter produced -- the property the
+# transport change from UDP to SPI rests on.
+add_executable(
+  test_hemerion_sensors_imu_spi test_imu_spi.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_spi_slave.cpp"
+                                "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_packet_emitter.cpp")
+target_link_libraries(test_hemerion_sensors_imu_spi PRIVATE hemerion_sensors)
+
+add_test(NAME sensors.imu_spi COMMAND test_hemerion_sensors_imu_spi)
+set_tests_properties(sensors.imu_spi PROPERTIES LABELS "unit")
+
 # Round-trip tests for the barometer, radar altimeter and magnetometer FMU simulators (baro/fmu/, radalt/fmu/,
 # mag/fmu/). Like ubxEmitter.cpp and imu_packet_emitter.cpp above, each emitter is compiled directly into its test
 # binary rather than via hemerion_sensors, since the emitters are sim-only code gated behind HEMERION_BUILD_FMU and must
