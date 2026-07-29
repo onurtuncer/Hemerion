@@ -57,7 +57,7 @@
       "name": "fmu-native",
       "inherits": "native-base",
       "displayName": "FMU (native)",
-      "description": "Builds every module as an x86 FMI 2.0 shared library for Aetherion co-simulation",
+      "description": "Builds every module as an x86 FMI 2.0 and FMI 3.0 co-simulation FMU for Aetherion co-simulation",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "HEMERION_BSP": "native_linux",

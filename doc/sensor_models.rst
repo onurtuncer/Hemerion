@@ -11,7 +11,7 @@ Sensor Models (``modules/sensors``)
 ===================================
 
 ``modules/sensors`` ships five *hardware-simulator FMUs* — GPS, IMU,
-barometer, radar altimeter, and magnetometer — each packaged as an FMI 2.0
+barometer, radar altimeter, and magnetometer — each packaged as an FMI
 co-simulation slave. Every one follows the same pattern established by the
 GPS FMU in :ref:`rocket_gps_ecos_cosim`:
 
@@ -31,7 +31,7 @@ GPS FMU in :ref:`rocket_gps_ecos_cosim`:
 
 .. code-block:: text
 
-   ┌──────────────────┐  FMI 2.0 inputs   ┌─────────────────────────────┐  raw frames   ┌────────────────────┐
+   ┌──────────────────┐    FMI inputs     ┌─────────────────────────────┐  raw frames   ┌────────────────────┐
    │  6-DoF plant     │  (Ecos wiring)    │  hemerion_<sensor>_fmu.fmu  │  over UDP     │  flight software   │
    │  (truth)         ├──────────────────>│  noise model + quantizer    ├──────────────>│  on-target parser  │
    │                  │                   │  + packet emitter           │               │  + conversion      │
@@ -116,9 +116,17 @@ None of the five implements the FMI interface itself. Each
 supplies the entry points, and ``generateFMU()``
 (:file:`cmake/generate_fmu.cmake`) compiles the two together, generates
 ``modelDescription.xml`` from the registered variables at build time, and
-packages ``<build>/fmus/fmi2/hemerion_<sensor>_fmu.fmu``. Variable *names*
-are therefore the stable interface an FMI master wires against; value
-references are assigned by the export layer and should not be hard-coded.
+packages the archive.
+
+Because the model code is FMI-version-agnostic, each sensor is exported
+**twice from the same sources** — ``<build>/fmus/fmi2/`` and
+``<build>/fmus/fmi3/`` both hold a ``hemerion_<sensor>_fmu.fmu``, so a
+master on either FMI generation can load these simulators. The registered
+variable names above are identical in both descriptions; only the container
+differs (FMI 3.0 spells the reals ``Float64`` and calls the GUID an
+``instantiationToken``). Variable *names* are therefore the stable interface
+an FMI master wires against; value references are assigned by the export
+layer and should not be hard-coded.
 
 The shared error-model form
 ---------------------------

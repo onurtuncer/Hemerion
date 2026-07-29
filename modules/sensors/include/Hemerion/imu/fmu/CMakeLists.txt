@@ -12,7 +12,7 @@
 # duplicating it here would only invite drift. imu_packet.cpp (the parser) is deliberately NOT compiled in: the FMU only
 # emits; the parser is on-target code living in the hemerion_sensors library.
 #
-# The packaged archive lands in ${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_imu_fmu.fmu, which is what
+# The packaged archive lands in ${HEMERION_FMU_OUTPUT_DIR}/{fmi2,fmi3}/hemerion_imu_fmu.fmu, which is what
 # examples/rocket_gps_ecos consumes.
 # ------------------------------------------------------------------------------
 
@@ -20,7 +20,7 @@ set(_hemerion_sensors_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../src")
 
 generateFMU(
   hemerion_imu_fmu
-  FMI_VERSIONS fmi2
+  FMI_VERSIONS fmi2 fmi3
   SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/fmu_main.cpp" "${_hemerion_sensors_src_dir}/imu/fmu/imu_packet_emitter.cpp"
           "${_hemerion_sensors_src_dir}/gps/fmu/udpSender.cpp"
   INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/../../.."

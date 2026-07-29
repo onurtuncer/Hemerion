@@ -12,14 +12,14 @@
 # duplicating it here would only invite drift. radalt_packet.cpp (the parser) is deliberately NOT compiled in: the FMU
 # only emits; the parser is on-target code living in the hemerion_sensors library.
 #
-# The packaged archive lands in ${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_radalt_fmu.fmu.
+# The packaged archive lands in ${HEMERION_FMU_OUTPUT_DIR}/{fmi2,fmi3}/hemerion_radalt_fmu.fmu.
 # ------------------------------------------------------------------------------
 
 set(_hemerion_sensors_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../src")
 
 generateFMU(
   hemerion_radalt_fmu
-  FMI_VERSIONS fmi2
+  FMI_VERSIONS fmi2 fmi3
   SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/fmu_main.cpp" "${_hemerion_sensors_src_dir}/radalt/fmu/radalt_packet_emitter.cpp"
           "${_hemerion_sensors_src_dir}/gps/fmu/udpSender.cpp"
   INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/../../.."

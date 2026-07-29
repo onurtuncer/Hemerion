@@ -70,8 +70,11 @@ This produces, under `build/examples-native/`:
 |---|---|
 | `rocket_gps_cosim` | `examples/rocket_gps_ecos/` |
 | `gps_flight_computer` | `examples/rocket_gps_ecos/` |
-| `hemerion_gps_fmu.fmu` | `fmus/fmi2/` |
-| `hemerion_imu_fmu.fmu` | `fmus/fmi2/` |
+| `hemerion_gps_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
+| `hemerion_imu_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
+
+Each sensor FMU is exported for both FMI generations from the same sources. This example uses the **FMI 2.0**
+pair, since Ecos imports through fmi4c; `--gps`/`--imu` can point at any archive you like.
 
 ## Running
 

@@ -46,7 +46,7 @@ endif()
 # Build mode options -- named CMakePresets bind these to concrete configurations
 # ------------------------------------------------------------------------------
 option(HEMERION_BUILD_APPS "Build firmware app executables (apps/)" ON)
-option(HEMERION_BUILD_FMU "Build modules as x86 FMI 2.0 shared libraries for Aetherion co-simulation" OFF)
+option(HEMERION_BUILD_FMU "Build modules as x86 FMI 2.0 + 3.0 co-simulation FMUs for Aetherion co-simulation" OFF)
 option(HEMERION_BUILD_TESTS "Build native unit/integration tests" OFF)
 option(HEMERION_BUILD_SIM "Build host-side simulation targets (sim/) -- never cross-compiled" OFF)
 option(HEMERION_BUILD_EXAMPLES "Build host-side co-simulation examples (examples/) -- requires HEMERION_BUILD_FMU" OFF)
@@ -85,7 +85,7 @@ if(HEMERION_BSP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/free
 endif()
 
 # ------------------------------------------------------------------------------
-# Vendored dependencies (git submodules) -- no source copies live in this tree
+# Vendored dependencies -- git submodules where upstream's layout allows it (see vendor/CMakeLists.txt)
 # ------------------------------------------------------------------------------
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CMakeLists.txt")
   add_subdirectory(vendor)

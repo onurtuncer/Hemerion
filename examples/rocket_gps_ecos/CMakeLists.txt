@@ -15,8 +15,9 @@
 # only the C++ library target `libecos` is consumed.
 # ------------------------------------------------------------------------------
 
-# generateFMU() names its shared-library targets <modelIdentifier>_<fmiVersion> and packages the .fmu as a POST_BUILD
-# step, so depending on the fmi2 target is what guarantees the archive exists before this example runs.
+# The sensor FMUs are exported for both FMI generations; Ecos imports through fmi4c, so this example consumes the FMI
+# 2.0 pair. generateFMU() names its shared-library targets <modelIdentifier>_<fmiVersion> and packages each .fmu as a
+# POST_BUILD step, so depending on the fmi2 targets is what guarantees those archives exist before this example runs.
 if(NOT TARGET hemerion_gps_fmu_fmi2 OR NOT TARGET hemerion_imu_fmu_fmi2)
   message(FATAL_ERROR "examples/rocket_gps_ecos requires the FMI 2.0 GPS and IMU FMU targets -- configure with "
                       "HEMERION_BUILD_FMU=ON (use the examples-native preset)")

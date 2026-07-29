@@ -171,13 +171,18 @@ the FMU at runtime):
 
 Besides the two example executables this also produces
 ``hemerion_gps_fmu.fmu`` and ``hemerion_imu_fmu.fmu`` under
-``build/examples-native/fmus/fmi2/``. ``generateFMU()``
+``build/examples-native/fmus/``. ``generateFMU()``
 (:file:`cmake/generate_fmu.cmake`) builds each simulator against the vendored
 fmu4cpp export layer, generates its ``modelDescription.xml`` from the
-variables the model registers, and zips both into a proper FMI 2.0 archive
+variables the model registers, and zips the result into a proper archive
 (``modelDescription.xml`` at the archive root, the shared library under
-``binaries/win64/`` or ``binaries/linux64/``) as a post-build step of the
-``hemerion_gps_fmu_fmi2``/``hemerion_imu_fmu_fmi2`` targets.
+``binaries/<platform>/``) as a post-build step of the per-version targets.
+
+Both FMI generations are exported from the same sources: ``fmus/fmi2/``
+(library under ``binaries/win64`` or ``binaries/linux64``) and ``fmus/fmi3/``
+(``binaries/x86_64-windows`` or ``binaries/x86_64-linux``). **This example
+uses the FMI 2.0 pair** — Ecos imports through fmi4c — and the paths compiled
+into ``rocket_gps_cosim`` point there.
 
 Running
 -------

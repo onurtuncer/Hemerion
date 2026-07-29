@@ -13,17 +13,17 @@
 # referenced below via a relative path back into modules/sensors/src/.
 #
 # generateFMU() (cmake/generate_fmu.cmake) does the rest: it compiles these sources against the vendored fmu4cpp export
-# layer into the hemerion_gps_fmu_fmi2 shared library, generates modelDescription.xml from the variables fmu_main.cpp
-# registers, and packages both into ${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_gps_fmu.fmu so FMI masters such as Ecos can
-# load it directly. That archive is what examples/rocket_gps_ecos consumes. Adding fmi3 to FMI_VERSIONS would emit an
-# FMI 3.0 archive alongside it from the very same sources.
+# layer -- once per requested FMI version, into hemerion_gps_fmu_fmi2 and hemerion_gps_fmu_fmi3, since one binary cannot
+# export both FMI ABIs -- generates each one's modelDescription.xml from the variables fmu_main.cpp registers, and
+# packages them as ${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_gps_fmu.fmu and .../fmi3/hemerion_gps_fmu.fmu, so FMI
+# masters can load either directly. examples/rocket_gps_ecos consumes the FMI 2.0 one (Ecos imports through fmi4c).
 # ------------------------------------------------------------------------------
 
 set(_hemerion_sensors_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../src")
 
 generateFMU(
   hemerion_gps_fmu
-  FMI_VERSIONS fmi2
+  FMI_VERSIONS fmi2 fmi3
   SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/fmu_main.cpp" "${_hemerion_sensors_src_dir}/gps/fmu/ubxEmitter.cpp"
           "${_hemerion_sensors_src_dir}/gps/fmu/udpSender.cpp"
   INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/../../.."
