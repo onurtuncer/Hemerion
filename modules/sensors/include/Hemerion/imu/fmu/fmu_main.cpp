@@ -19,14 +19,24 @@
 /// produced, so the unmodified on-target ImuPacketParser +
 /// convert_raw_to_si() decode them as they would bytes from physical silicon.
 ///
-/// The bus itself is sim/spi_shm: one named shared-memory region per bus,
-/// carrying chip-select-framed transfers between two local processes. This
-/// FMU is the *peripheral* end, so it creates the region and services
-/// transfers on a background thread -- a real part answers chip select
-/// whenever it is asserted, not when its physics model happens to be stepping.
-/// The bus name comes from HEMERION_IMU_FMU_SPI_BUS, matching how the other
-/// sensor FMUs take their UDP destination from the environment (no FMI
-/// String-typed variables, retargetable without repackaging the archive).
+/// Three things have to be true for that, and each belongs somewhere
+/// different -- this file is only the third:
+///
+/// * **the datasheet** -- register map, sample FIFO, shift register:
+///   ImuSpiSlave (imu_spi_slave.h), which knows nothing about how bytes reach
+///   it and is unit-tested against the real on-target driver with no
+///   transport in the picture;
+/// * **the board** -- which bus the part sits on, when it comes up and goes
+///   down, how the data-ready line is driven: SpiPeripheralEndpoint
+///   (sim/spi_shm), sensor-agnostic and shared by any FMU that models an SPI
+///   part;
+/// * **the part number** -- which device model on which bus, plus the FMI
+///   variables and the physics feeding it. That is all this file does.
+///
+/// The bus name defaults to `hemerion_imu_spi` and is overridable through
+/// HEMERION_IMU_FMU_SPI_BUS, matching how the other sensor FMUs take their UDP
+/// destination from the environment (no FMI String-typed variables,
+/// retargetable without repackaging the archive).
 ///
 /// Unlike the 10 Hz GPS FMU, a real IMU samples much faster than a
 /// co-simulation communication step, so the `sample_rate_hz` parameter
@@ -47,16 +57,13 @@
 #include "Hemerion/imu/fmu/imu_packet_emitter.h"
 #include "Hemerion/imu/fmu/imu_spi_slave.h"
 
-#include <hemerion/sim/spi_shm/spi_shm_link.h>
+#include <hemerion/sim/spi_shm/spi_peripheral_endpoint.h>
 
 #include <fmu4cpp/fmu_base.hpp>
 #include <fmu4cpp/fmu_except.hpp>
 
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
-#include <memory>
-#include <string>
 
 namespace hemerion::sensors::imu::fmu
 {
@@ -67,47 +74,11 @@ namespace
 using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
 
-constexpr char kSpiBusVariable[] = "HEMERION_IMU_FMU_SPI_BUS";
-constexpr char kDefaultSpiBusName[] = "hemerion_imu_spi";
 constexpr double kDefaultSampleRateHz = 100.0;
 
-/// Reads one environment variable, falling back to `fallback` when unset.
-[[nodiscard]] std::string env_or(const char* name, const char* fallback)
-{
-  // std::getenv is flagged deprecated by the Windows SDK headers (in favour of _dupenv_s) purely as an MSVC CRT
-  // "insecure function" nag, not a real portability issue -- std::getenv is the standard, portable way to do this.
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-  const char* value = std::getenv(name);
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-  return (value != nullptr && value[0] != '\0') ? std::string(value) : std::string(fallback);
-}
-
-/// @brief Bridges the shared-memory bus to the part's register model.
-///
-/// ImuSpiSlave deliberately knows nothing about how bytes reach it -- it is
-/// the datasheet, not the board -- so this adapter is where the two meet.
-class SpiBusAdapter final : public sim::spi_shm::SpiPeripheral
-{
-public:
-  explicit SpiBusAdapter(ImuSpiSlave& slave) : slave_(slave) {}
-
-  void chip_select(bool asserted) override { slave_.chip_select(asserted); }
-
-  std::uint8_t shift(std::uint8_t mosi) override { return slave_.shift(mosi); }
-
-private:
-  ImuSpiSlave& slave_;
-};
+/// Where this part sits: the bus it creates, and the environment variable a
+/// launch script can retarget it with.
+const sim::spi_shm::SpiPeripheralConfig kSpiBus{ "hemerion_imu_spi", "HEMERION_IMU_FMU_SPI_BUS" };
 
 }  // namespace
 
@@ -155,23 +126,15 @@ public:
   /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
-    const std::string bus_name = env_or(kSpiBusVariable, kDefaultSpiBusName);
-    bus_ = sim::spi_shm::SpiShmPeripheral::create(bus_name);
-    if (bus_ == nullptr)
+    if (!endpoint_.attach())
     {
-      throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to create the SPI bus segment '" + bus_name +
+      throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to create the SPI bus '" + endpoint_.bus_name() +
                                  "' (already in use by another run?)");
     }
-    bus_->start(adapter_);
-    debugLog(fmiOK, "[hemerion_imu_fmu] SPI peripheral ready on bus '" + bus_name + "'");
+    debugLog(fmiOK, "[hemerion_imu_fmu] SPI peripheral ready on bus '" + endpoint_.bus_name() + "'");
   }
 
-  void terminate() override
-  {
-    // Powers the part down: the service thread stops and the bus goes to its
-    // terminal phase, so a controller mid-poll fails fast instead of hanging.
-    bus_.reset();
-  }
+  void terminate() override { endpoint_.detach(); }
 
   /// fmi2Reset equivalent. The turn-on biases ImuNoiseModel drew at
   /// construction are kept: they model this instance's physical part, which a
@@ -182,13 +145,13 @@ public:
     sample_rate_hz_ = kDefaultSampleRateHz;
     slave_.reset();
     reported_overflow_ = false;
-    bus_.reset();
+    endpoint_.detach();
   }
 
 protected:
   bool do_step(double dt) override
   {
-    if (bus_ == nullptr)
+    if (!endpoint_.attached())
     {
       throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Stepped before initialisation mode was exited");
     }
@@ -219,15 +182,14 @@ protected:
 
     // Data-ready is a level, so it is re-driven every step rather than pulsed:
     // it stays asserted for as long as the FIFO holds a sample.
-    bus_->set_data_ready(slave_.data_ready());
+    endpoint_.publish_data_ready(slave_.data_ready());
     return true;
   }
 
 private:
   ImuNoiseModel noise_model_;
   ImuSpiSlave slave_;
-  SpiBusAdapter adapter_{ slave_ };
-  std::unique_ptr<sim::spi_shm::SpiShmPeripheral> bus_;
+  sim::spi_shm::SpiPeripheralEndpoint<ImuSpiSlave> endpoint_{ slave_, kSpiBus };
   ImuTruthSample truth_;
   double sample_rate_hz_ = kDefaultSampleRateHz;
   bool reported_overflow_ = false;

@@ -179,7 +179,14 @@ public:
   {
     if (!controller_.transfer(tx, rx, length, timeout_))
     {
-      ++failed_transfers_;
+      // A transfer that fails because the part is no longer there is the
+      // co-simulation ending, not a bus fault -- the FMU's terminate() powers
+      // the peripheral down, and whichever poll is in flight at that moment
+      // sees it first. Only a failure against a *live* peripheral is a fault.
+      if (controller_.peripheral_present())
+      {
+        ++failed_transfers_;
+      }
       return false;
     }
     ++transfers_;
@@ -187,6 +194,8 @@ public:
   }
 
   [[nodiscard]] bool data_ready_line() const override { return controller_.data_ready(); }
+
+  [[nodiscard]] bool peripheral_present() const { return controller_.peripheral_present(); }
 
   [[nodiscard]] std::size_t transfers() const { return transfers_; }
   [[nodiscard]] std::size_t failed_transfers() const { return failed_transfers_; }
@@ -387,7 +396,8 @@ int main(int argc, char** argv)
       const ImuSpiDriver::PollResult result = imu_driver.poll(imu_batch.data(), imu_batch.size());
       if (result.error == ImuSpiError::kTransferFailed)
       {
-        imu_bus_failed = true;
+        // Told apart in the loop below by whether the part is still there.
+        imu_bus_failed = imu_bus.peripheral_present();
         return;
       }
       if (result.fifo_overflow)

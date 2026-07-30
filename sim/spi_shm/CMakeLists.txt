@@ -13,7 +13,7 @@
 
 find_package(Threads REQUIRED)
 
-add_library(hemerion_spi_shm STATIC src/spi_shm_link.cpp)
+add_library(hemerion_spi_shm STATIC src/spi_shm_link.cpp src/spi_peripheral_endpoint.cpp)
 
 target_include_directories(hemerion_spi_shm PUBLIC include)
 target_compile_features(hemerion_spi_shm PUBLIC cxx_std_23)
