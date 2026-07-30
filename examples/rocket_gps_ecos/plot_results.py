@@ -49,6 +49,9 @@ INK = "#0b0b0b"
 INK_2 = "#52514e"
 GRID = "#d9d8d4"
 SURFACE = "#fcfcfb"
+# Neutral wash for the epochs the receiver reported no solution for -- a
+# region of absent data, so it must read as background, not as a series.
+OUTAGE = "#eceae5"
 
 METERS_PER_DEG_LAT = 111_320.0
 
@@ -86,6 +89,47 @@ def read_fixes(path: Path) -> dict[str, list[float]]:
     if "fix_type" in fields:
         rows = [r for r in rows if float(r["fix_type"]) > 0.0]
     return {k: [float(r[k]) for r in rows] for k in fields}
+
+
+def read_outages(path: Path) -> list[tuple[float, float]]:
+    """Finds the no-fix windows the receiver's dynamics envelope produced.
+
+    Returned as (start, end) pairs in simulation time, merged across
+    consecutive epochs. Every epoch is logged whether or not it carried a
+    solution -- the receiver keeps emitting NAV-PVT throughout, it just stops
+    setting gnssFixOK -- so the gaps are directly readable from fix_type.
+    """
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        if "fix_type" not in (reader.fieldnames or []):
+            return []
+        rows = list(reader)
+
+    intervals: list[tuple[float, float]] = []
+    start: float | None = None
+    previous = 0.0
+    step = 0.1
+    times = [float(r["sim_time_s"]) for r in rows]
+    if len(times) > 1:
+        step = min(b - a for a, b in zip(times, times[1:]))
+    for row, t in zip(rows, times):
+        if float(row["fix_type"]) <= 0.0:
+            if start is None:
+                start = t
+            previous = t
+        elif start is not None:
+            intervals.append((start, previous + step))
+            start = None
+    if start is not None:
+        intervals.append((start, previous + step))
+    return intervals
+
+
+def shade_outages(ax, intervals: list[tuple[float, float]]) -> None:
+    """Marks the no-fix windows behind a time-axis plot."""
+    for index, (start, end) in enumerate(intervals):
+        ax.axvspan(start, end, color=OUTAGE, alpha=0.5, linewidth=0,
+                   zorder=0, label="no fix (dynamics envelope)" if index == 0 else None)
 
 
 def style_axis(ax) -> None:
@@ -129,8 +173,9 @@ def annotate_event(ax, x: float, label: str) -> None:
                 ha="left", va="top", fontsize=8, color=INK_2)
 
 
-def plot_altitude(truth, fixes, out: Path) -> None:
+def plot_altitude(truth, fixes, outages, out: Path) -> None:
     fig, ax = new_figure()
+    shade_outages(ax, outages)
     # GPS dots first, truth line on top -- the two overlap almost everywhere,
     # and the line must stay visible.
     ax.plot(fixes["sim_time_s"], [a / 1000.0 for a in fixes["altitude_m"]],
@@ -175,8 +220,9 @@ def plot_ground_track(truth, fixes, out: Path) -> None:
     plt.close(fig)
 
 
-def plot_velocity(truth, fixes, out: Path) -> None:
+def plot_velocity(truth, fixes, outages, out: Path) -> None:
     fig, ax = new_figure()
+    shade_outages(ax, outages)
     speed = [math.hypot(n, e) for n, e in zip(truth["v_north_m_s"], truth["v_east_m_s"])]
     ax.plot(fixes["sim_time_s"], fixes["ground_speed_mps"],
             linestyle="none", marker=".", markersize=4, alpha=0.45, color=GPS,
@@ -301,17 +347,19 @@ def main() -> None:
 
     truth = read_truth(args.truth)
     fixes = read_fixes(args.fixes)
+    outages = read_outages(args.fixes)
     args.out.mkdir(parents=True, exist_ok=True)
 
     epochs = sum(1 for _ in args.fixes.open(newline="")) - 1  # minus the header
     valid = len(fixes["sim_time_s"])
     if valid < epochs:
+        windows = ", ".join(f"{a:.1f}-{b:.1f} s" for a, b in outages)
         print(f"{epochs - valid} of {epochs} NAV-PVT epochs carried no fix "
-              f"(receiver dynamics envelope); plotting the {valid} valid ones")
+              f"(receiver dynamics envelope: {windows}); plotting the {valid} valid ones")
 
-    plot_altitude(truth, fixes, args.out)
+    plot_altitude(truth, fixes, outages, args.out)
     plot_ground_track(truth, fixes, args.out)
-    plot_velocity(truth, fixes, args.out)
+    plot_velocity(truth, fixes, outages, args.out)
     plot_gps_error(truth, fixes, args.out)
 
     figures = 4

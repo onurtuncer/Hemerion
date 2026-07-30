@@ -9,7 +9,9 @@
 ///
 /// A minimal binary framing for shipping ImuRawSample register counts off an
 /// IMU (or the imu/fmu/ hardware simulator standing in for one) over a byte
-/// stream: UART, SPI DMA drain, or the simulator's UDP side channel. The
+/// stream: a UART, or -- as both the real part and the simulator do here --
+/// bursts drained from the part's SPI sample FIFO (@ref imu_spi_protocol.h,
+/// which is the byte stream this framing rides on in practice). The
 /// framing deliberately follows the same shape as UBX (sync bytes, message
 /// id, little-endian length, payload, two-byte Fletcher checksum) so the
 /// parser structure mirrors UbxParser, but the sync bytes are distinct --

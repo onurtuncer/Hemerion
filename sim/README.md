@@ -15,6 +15,7 @@ FMUs and the Aetherion plant FMU.
 | `renode/` | Renode board definitions (`.repl`) and emulation scripts (`.resc`) for STM32H7/STM32F4 SWIL targets |
 | `fmi/` | FMI 2.0 co-simulation master: steps module FMUs and the Aetherion plant FMU in lockstep |
 | `shm_bridge/` | Shared-memory transport between the FMI master and a locally running Aetherion process |
+| `spi_shm/` | Simulated SPI bus in shared memory: sensor FMUs answer chip-select-framed transfers from host or emulated firmware |
 | `udp_bridge/` | UDP transport for the FMI master when Aetherion runs out-of-process or on a different host |
 
 ---
@@ -98,6 +99,58 @@ semaphore — acceptable for same-host steps that complete in microseconds to
 low milliseconds. `udp_bridge/` is the alternative transport for when
 Aetherion runs out-of-process on a different host, where this shared-memory
 approach doesn't apply.
+
+---
+
+## `spi_shm/` — simulated SPI bus
+
+Where `shm_bridge/` shares *variable values* between a master and a plant,
+`spi_shm/` shares a *bus*. It exists because not every sensor pushes bytes at
+a flight computer: an SPI part sits there holding samples until the MCU
+asserts chip select and comes to get them, and a hardware simulator that
+cannot be polled tests only half the driver.
+
+```
+sim/spi_shm/
+├── CMakeLists.txt
+├── include/hemerion/sim/spi_shm/
+│   ├── spi_shm_protocol.h          # SpiBusRegion wire format + BusPhase handshake
+│   ├── spi_shm_link.h              # SpiShmPeripheral / SpiShmController endpoints
+│   └── spi_peripheral_endpoint.h   # what an FMU needs to *be* an SPI peripheral
+├── src/
+└── test/
+```
+
+The peripheral (a sensor FMU) creates the segment and services transfers on a
+background thread — real silicon answers chip select whenever it is asserted,
+not when its physics model happens to be stepping. The controller (host flight
+software, or emulated firmware) attaches and issues transfers:
+
+```cpp
+auto spi = *SpiShmController::attach_within("hemerion_imu_spi", 120s);
+std::array<std::uint8_t, 4> tx{ 0x81, 0, 0, 0 };  // read STATUS, auto-increment
+std::array<std::uint8_t, 4> rx{};
+spi.transfer(tx.data(), rx.data(), tx.size(), 1000ms);
+bool drdy = spi.data_ready();                      // the part's DRDY line
+```
+
+**One transfer is one handshake.** That is the granularity a HAL SPI call has
+on the target, and the granularity at which a controller can still choose its
+MOSI bytes — a driver builds the whole TX buffer before it calls
+`HAL_SPI_TransmitReceive`, so byte *k* could not have depended on byte
+*k−1*'s answer anyway. The peripheral end still shifts the posted buffer byte
+by byte through its own state machine, so the MISO content is what per-bit
+clocking would have produced, and a device model is written the way a
+datasheet describes the part.
+
+`SpiPeripheralEndpoint` is what a sensor FMU actually holds: it owns bus
+naming (with an environment-variable override), segment lifecycle, the service
+thread and the data-ready line, and binds a device model duck-typed through
+the `SpiShiftable` concept. The FMU then declares only *which* part it is —
+see `modules/sensors/include/Hemerion/imu/fmu/` for the one consumer so far.
+
+Since the region is shared memory, both ends must be on the same host; Renode's
+emulated SPI peripheral is the path for a remote or in-emulator controller.
 
 ---
 

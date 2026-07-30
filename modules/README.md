@@ -76,6 +76,17 @@ Modules must **not** depend on:
 - Other modules (inter-module communication goes through RTOS queues defined in `rtos_core/`)
 - Any STM32 HAL header directly — always go through the BSP abstraction layer
 
+The `sim/` rule exists to keep host-only code out of cross-compiled firmware,
+so it binds the module's **library** artifact — the thing that ships on the
+vehicle. A module's `<sensor>/fmu/` subtree is not that: it is host-only
+simulation code, gated behind `HEMERION_BUILD_FMU`, never cross-compiled, and
+never linked into the module library. Those subtrees may link `sim/` targets,
+and one does: `modules/sensors/include/Hemerion/imu/fmu/` links `hemerion_spi_shm`,
+because the IMU hardware simulator is an SPI peripheral and duplicating a
+cross-platform shared-memory bus into `modules/` would be worse than the
+dependency. (Contrast `gps/fmu/`'s `udpSender`, where the duplicated surface is
+a single `sendto()` and the copy is cheaper than the coupling.)
+
 ---
 
 ## Coding standard

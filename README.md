@@ -74,6 +74,7 @@ hemerion/
 │   │   ├── master.cpp      # FMI 2.0 co-simulation master
 │   │   └── plant/          # Imports Aetherion's plant FMU via fmu4cpp
 │   ├── shm_bridge/
+│   ├── spi_shm/           # Simulated SPI bus in shared memory; sensor FMUs answer it
 │   └── udp_bridge/
 │
 ├── vendor/                 # Third-party deps, submodules where upstream allows (FreeRTOS, ETL, fmi4c, fmu4cpp, ...)

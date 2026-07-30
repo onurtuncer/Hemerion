@@ -21,36 +21,48 @@ one sensor-in-the-loop scenario, orchestrated by the
 2. **Hemerion's GPS hardware-simulator FMU** (``hemerion_gps_fmu.fmu``, from
    ``modules/sensors``) turns that truth into what a real u-blox M9N would
    report: Gaussian position/velocity noise plus the receiver's self-reported
-   accuracies, encoded as **wire-exact UBX-NAV-PVT frames** sent over UDP —
-   one frame per co-simulation step.
+   accuracies, gated through the receiver's **dynamics envelope** — an
+   airborne <4 g platform model with the COCOM export limits in force — and
+   encoded as **wire-exact UBX-NAV-PVT frames** sent over UDP, one frame per
+   co-simulation step whether or not that frame carries a solution.
 3. **Hemerion's IMU hardware-simulator FMU** (``hemerion_imu_fmu.fmu``, also
    from ``modules/sensors``) turns true body-frame specific force and angular
    rate into what a tactical-grade MEMS part would latch: per-run turn-on bias
    plus white noise, quantized to **16-bit register counts** (±40 g /
-   ±2000 °/s sensitivity) and framed as Hemerion IMU raw-sample packets over
-   UDP — 100 Hz, ten frames per co-simulation step.
-4. **The flight software sensor stacks** (``gps_flight_computer``) decode both
-   byte streams with the *unmodified* ``GpsDriver``/``UbxParser`` and
-   ``ImuPacketParser``/``convert_raw_to_si()`` from ``modules/sensors`` — the
-   same code the STM32H743 firmware cross-compiles. Only the transport differs
-   from the target: UDP sockets on the host, UART/SPI RX lines (or Renode's
-   emulated peripherals, see :ref:`swil_windows_setup`) on hardware.
+   ±2000 °/s sensitivity) and framed as Hemerion IMU raw-sample packets into
+   the part's **sample FIFO** at 100 Hz — ten per co-simulation step. It does
+   not send them anywhere: it is an **SPI peripheral**, and answers
+   chip-select-framed transfers on a bus carried in shared memory.
+4. **The flight software sensor stacks** (``gps_flight_computer``) drive both
+   buses with the *unmodified* ``GpsDriver``/``UbxParser`` and
+   ``ImuSpiDriver``/``ImuPacketParser``/``convert_raw_to_si()`` from
+   ``modules/sensors`` — the same code the STM32H743 firmware cross-compiles.
+   Only the two transport shims differ from the target: a UDP socket where the
+   receiver's UART would be, and a shared-memory SPI bus where
+   ``HAL_SPI_TransmitReceive`` plus the CS/DRDY GPIOs would be (or Renode's
+   emulated peripherals, see :ref:`swil_windows_setup`).
 
 .. code-block:: text
 
    ┌──────────────────────┐  FMI 2.0 variables    ┌──────────────────────┐  UBX-NAV-PVT    ┌────────────────────────┐
    │  TwoStageRocket.fmu  │  (Ecos connections)   │ hemerion_gps_fmu.fmu │  over UDP       │  gps_flight_computer   │
-   │  Aetherion 6-DoF     ├──────────────────────>│ u-blox M9N hardware  ├────────────────>│  GpsDriver + UbxParser │
-   │  rocket plant        │  lat, lon, alt,       │ simulator: noise +   │ 127.0.0.1:5762  │  + ImuPacketParser +   │
-   │  (truth)             │  NED velocity         │ UBX encoder          │ 1 frame / step  │  convert_raw_to_si     │
-   │                      │                       └──────────────────────┘                 │  (the code the STM32   │
-   │                      │  p/q/r (connections), ┌──────────────────────┐  raw counts     │  H743 firmware runs)   │
-   │                      │  specific force       │ hemerion_imu_fmu.fmu │  over UDP       │                        │
-   │                      ├──────────────────────>│ MEMS IMU simulator:  ├────────────────>│                        │
-   │                      │  (host-computed)      │ bias + noise +       │ 127.0.0.1:5763  │                        │
-   └──────────────────────┘                       │ register quantizer   │ 10 frames /step │                        │
-            │                                     └──────────────────────┘                 └────────────────────────┘
+   │  Aetherion 6-DoF     ├──────────────────────>│ u-blox M9N simulator │────────────────>│  GpsDriver + UbxParser │
+   │  rocket plant        │  lat, lon, alt,       │ noise + COCOM/4 g    │ 127.0.0.1:5762  │                        │
+   │  (truth)             │  NED velocity         │ envelope + UBX enc.  │ 1 frame / step  │  ImuSpiDriver +        │
+   │                      │                       └──────────────────────┘                 │  ImuPacketParser +     │
+   │                      │  p/q/r (connections), ┌──────────────────────┐   SPI transfers │  convert_raw_to_si     │
+   │                      │  specific force       │ hemerion_imu_fmu.fmu │<────────────────┤                        │
+   │                      ├──────────────────────>│ MEMS IMU simulator:  │  over shared    │  (the code the STM32   │
+   │                      │  (host-computed)      │ bias + noise + regs  │──────  memory ─>│  H743 firmware runs)   │
+   └──────────────────────┘                       │ + 16 KiB sample FIFO │  bursts of      │                        │
+            │                                     └──────────────────────┘  raw counts     └────────────────────────┘
             └───────────── rocket_gps_cosim: Ecos master, fixed step 0.1 s (10 Hz GPS, 100 Hz IMU) ────────┘
+
+The two arrow directions are the point. The receiver *talks*; the IMU is
+*polled*. Modelling both as byte streams pushed at the flight computer would
+have exercised the packet parsers and nothing else — no register map, no
+FIFO, no chip select, none of the sequence firmware actually runs against an
+inertial part.
 
 .. contents:: On this page
    :local:
@@ -155,6 +167,82 @@ converts them to SI with the same ±40 g / ±2000 °/s ``ImuScale`` the FMU
 quantized with, standing in for a driver that knows the full-scale ranges it
 configured into the part.
 
+The receiver's configuration
+----------------------------
+
+The GPS FMU's dynamics envelope is what makes this scenario interesting, so
+``rocket_gps_cosim`` writes it explicitly rather than inheriting the FMU's
+defaults silently:
+
+.. code-block:: cpp
+
+    launch_site["gps::dynamic_platform"] = 8;      // u-blox dynModel: airborne <4 g
+    launch_site["gps::cocom_limits_enabled"] = true;
+    launch_site["gps::reacquisition_time_s"] = 2.0;
+
+Those are the settings a launch vehicle actually ships with, and this vehicle
+breaks all of them. Both mechanisms are evaluated against *truth*, not against
+the noisy fix — it is the vehicle's real motion that breaks carrier tracking,
+not the receiver's estimate of it:
+
+* the **platform model** declares 80 km, 500 m/s horizontal, 100 m/s vertical
+  and 4 g; the vehicle passes 500 m/s horizontal during first-stage boost;
+* the **COCOM export limits** stop navigation output above 18 000 m *and*
+  515 m/s — an AND, which is why a high-altitude balloon and a fast low sled
+  both keep their fix and a sounding rocket past first-stage burnout does not;
+* recovery is not instantaneous either: the fix stays invalid for
+  ``reacquisition_time_s`` after the vehicle re-enters the envelope, standing
+  in for the tracking loops re-acquiring.
+
+When either trips, the fix is degraded in place — fix type drops to ``kNoFix``
+so ``UbxEmitter`` clears NAV-PVT's ``gnssFixOK`` flag, satellite count goes to
+zero, accuracies inflate — and the frame is still emitted. Position and
+velocity fields keep carrying the invalid solution, as on a real receiver, and
+consumers are expected to gate on the fix type. ``gps_flight_computer`` does,
+logs the epoch anyway with its ``fix_type`` column, and reports the window;
+``plot_results.py`` drops no-fix epochs rather than plotting position fields
+that mean nothing.
+
+``--dyn-model -1 --no-cocom`` reproduces an unrestricted stream — a waivered,
+envelope-unlocked receiver — for comparison.
+
+Driving the IMU over SPI
+------------------------
+
+The IMU side has no stream to receive. ``gps_flight_computer`` runs the
+on-target ``ImuSpiDriver`` against the simulated part, and the sequence is the
+one the firmware's IMU task performs:
+
+.. code-block:: cpp
+
+    ImuSpiDriver imu_driver(imu_bus);          // imu_bus: the only host-specific piece
+    imu_driver.probe();                        // WHO_AM_I, then CONTROL = FIFO enable | reset
+
+    while (imu_driver.data_ready())            // the part's DRDY line
+    {
+      const auto result = imu_driver.poll(batch.data(), batch.size());
+      // -> reads STATUS + FIFO_COUNT in one 4-byte transfer,
+      //    bursts the FIFO port, feeds every byte to ImuPacketParser
+    }
+
+``ImuSpiBus`` is the whole difference between running that here and running it
+on the STM32: one chip-select-framed transfer, and a read of the data-ready
+pin. On the host it wraps :file:`sim/spi_shm`'s controller; on the target it
+wraps ``HAL_SPI_TransmitReceive`` between two GPIO writes. The register map,
+the FIFO semantics and the byte-level parsing are the same object code either
+way — see :ref:`imu_spi_interface` for the part's registers and what the
+handshake granularity does and does not model.
+
+Two consequences worth knowing when reading a run:
+
+* ``probe()`` writes ``FIFO_RESET``, so any samples the FMU buffered before
+  the flight computer attached are discarded — a driver clearing whatever
+  accumulated before it took over. Start the flight computer first (it waits
+  for the bus) and nothing is lost.
+* the part's FIFO is 16 KiB, about 420 frames or four seconds at 100 Hz. A
+  controller slower than that loses whole samples, never framing, and finds
+  out through the sticky overflow bit, which the summary line reports.
+
 Building
 --------
 
@@ -188,8 +276,12 @@ Running
 -------
 
 Two terminals, both in ``build/examples-native/examples/rocket_gps_ecos/``.
-The flight computer starts first, since it binds the sensor FMUs' default UDP
-destinations (5762/GPS, 5763/IMU):
+Start the flight computer first: it binds the GPS FMU's UDP destination
+(5762), then waits (``--imu-wait-s``, default 120 s) for the IMU's SPI bus to
+appear, so the two processes may be started in either order. Starting it first
+is still preferable — a controller that probes after the FMU has begun
+stepping resets the part's FIFO and discards whatever was buffered before it
+took over.
 
 .. code-block:: console
 
@@ -201,6 +293,35 @@ navigation rate. Staging occurs at t ≈ 37 s, apogee (≈ 780 km) at t ≈ 232 
 the Scenario 17 plant holds its state constant after apogee, so longer runs
 only add a flat tail. ``--rtf 1`` paces the master to wall-clock speed to
 watch the fix stream arrive live; unpaced, the run takes about 2.5 minutes.
+
+The bus name is shared configuration: the FMU creates
+``hemerion_imu_spi`` unless ``HEMERION_IMU_FMU_SPI_BUS`` says otherwise, and
+the flight computer attaches to whatever ``--imu-bus`` names. Set both to run
+two co-simulations side by side on one machine.
+
+.. important::
+
+   **The console transcripts and figures below were captured from an earlier
+   revision of this example** — before the GPS FMU grew its
+   :ref:`receiver dynamics envelope <gps_dynamics_envelope>`, and while the
+   IMU still pushed frames over UDP rather than answering an SPI bus. They are
+   kept because the trajectory, the injected noise and the IMU physics they
+   show are unchanged, and regenerating them needs an Aetherion install for
+   ``TwoStageRocket.fmu``. What a current run prints differently:
+
+   * the flight computer opens with the SPI probe
+     (``IMU identified on SPI (WHO_AM_I matched), FIFO enabled``) instead of a
+     second UDP port;
+   * the GPS stream has long, deliberate holes. The first no-fix epoch is
+     announced (``NO FIX -- receiver outside its dynamics envelope``) and the
+     summary separates *NAV-PVT epochs decoded* from *epochs that carried a
+     fix*, with the no-fix window's start and end. The ``sats=11`` at 780 km
+     and 6.7 km/s in the transcript below is exactly what no COTS receiver
+     does;
+   * the IMU summary counts SPI transfers, FIFO overflows and failed transfers
+     rather than datagrams, and the run ends on
+     ``IMU powered down (FMU terminated)`` when the master calls
+     ``fmi2Terminate``.
 
 Ecos master console
 ~~~~~~~~~~~~~~~~~~~
@@ -252,33 +373,21 @@ decoded from raw bytes:
 
 **2401 UBX frames and 24010 IMU frames sent, 2401 fixes and 24010 samples
 decoded, zero checksum errors on either stream** — the whole chain from 6-DoF
-truth through both noise models, both encoders, UDP, and the on-target
-parsers is lossless and wire-correct. The IMU physics also reads correctly
-off the decoded stream: ~55 m/s² of thrust acceleration at ignition rising to
-~265 m/s² at stage-2 burnout (t ≈ 100 s), then **zero specific force in free
-fall** — an accelerometer does not sense gravity.
+truth through both noise models, both encoders, the transports, and the
+on-target parsers is lossless and wire-correct. The IMU physics also reads
+correctly off the decoded stream: ~55 m/s² of thrust acceleration at ignition
+rising to ~265 m/s² at stage-2 burnout (t ≈ 100 s), then **zero specific force
+in free fall** — an accelerometer does not sense gravity.
 
-.. note::
-
-   The transcript and figures on this page were captured before the GPS FMU
-   grew its :ref:`receiver dynamics envelope <gps_dynamics_envelope>`, and show a
-   receiver still reporting ``sats=11`` at 780 km and 6.7 km/s. No COTS
-   receiver does that: with the envelope's defaults (``dynamic_platform`` 8,
-   airborne <4 g, COCOM limits in force) this vehicle loses the fix during
-   boost — past 500 m/s horizontal — and stays dark above the 18 km / 515 m/s
-   COCOM thresholds, so the GPS stream on a rerun now has long, deliberate
-   holes in it. ``plot_results.py`` drops no-fix epochs rather than plotting
-   their meaningless position fields.
-
-   That dropout is the realistic case and worth testing flight software
-   against. To reproduce the unrestricted stream shown above instead — a
-   waivered, envelope-unlocked receiver — add the two parameters to the
-   example's parameter set in ``cosim_host_main.cpp``:
-
-   .. code-block:: cpp
-
-      launch_site["gps::dynamic_platform"] = -1;        // no platform envelope
-      launch_site["gps::cocom_limits_enabled"] = false; // export-licensed receiver
+That losslessness is the property the SPI rework had to preserve, and it is
+pinned by a test rather than by a transcript: ``test_imu_spi.cpp``
+(``sensors.imu_spi`` under CTest) runs the real ``ImuSpiDriver`` against the
+real ``ImuSpiSlave`` and asserts that the bytes burst out of the sample FIFO
+are the bytes ``ImuPacketEmitter`` produced — including the case where a burst
+lands mid-frame, which is the normal one, since a controller has no way to
+align its reads to frame boundaries. ``spi_shm.link`` covers the bus itself:
+the handshake, the byte-by-byte shifting, the data-ready line, and a
+peripheral powering down under a controller mid-transfer.
 
 Results
 -------
@@ -402,22 +511,27 @@ Timing model
 ~~~~~~~~~~~~
 
 One NAV-PVT frame is emitted per communication step, so the flight computer
-maps fix index → simulation time when logging (``--fix-period``, default
-0.1 s). When the master runs faster than real time, wall-clock arrival times
-are meaningless; the index mapping is exact as long as no datagram is dropped,
-and the summary line makes loss visible (decoded counts vs. the master's step
-count). IMU frames carry the simulation clock in their payload instead, so
-their timestamps come straight off the wire. ``--rtf 1`` runs the
+maps *epoch* index → simulation time when logging (``--fix-period``, default
+0.1 s). Epoch, not fix: the receiver keeps emitting through a dynamics-envelope
+dropout, so counting only valid fixes would shift every later timestamp by the
+length of the outage. When the master runs faster than real time, wall-clock
+arrival times are meaningless; the index mapping is exact as long as no
+datagram is dropped, and the summary line makes loss visible (decoded counts
+vs. the master's step count). IMU samples carry the simulation clock in their
+payload instead, so their timestamps come straight off the wire — which is
+also what makes the SPI path timing-insensitive: a controller that polls late
+gets older samples, correctly stamped, not wrong ones. ``--rtf 1`` runs the
 co-simulation paced to the wall clock, which makes the streams realistic
 enough to demo live consumers.
 
 A real IMU samples far faster than a 10 Hz co-simulation step, so the IMU FMU
-emits ``round(step × sample_rate_hz)`` frames per ``fmi2DoStep`` (default
+buffers ``round(step × sample_rate_hz)`` frames per ``fmi2DoStep`` (default
 100 Hz → 10 frames per step), each with a fresh noise draw and its own
 timestamp. The truth inputs are zero-order-held across the step — the master
 only exchanges variables at communication points — which is the honest
 equivalent of oversampling a plant that is itself only resolved at the
-communication rate.
+communication rate. Decoupling the controller's poll rate from the sample rate
+is exactly what the part's FIFO is for, on silicon and here alike.
 
 The IMU on the same truth bus
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -432,3 +546,24 @@ Hemerion IMU frame has its own sync bytes (``0xA5 0x5A``), so an interleaved
 GPS/IMU byte stream can never desync one parser into the other's frames, and
 the payload is raw register counts — scale (±40 g, ±2000 °/s) is
 *configuration* both ends know, exactly as with real silicon, not wire data.
+
+What it does *not* share is the transport, and that boundary is drawn at the
+part rather than at the FMU. An FMU models one physical component, and an IMU
+chip genuinely is a sensing element *and* an SPI peripheral — one part number,
+one datasheet. Splitting those into two FMUs would need a byte-stream variable
+between them, which FMI 2.0 does not have (FMI 3.0's ``Binary`` type would,
+but Ecos imports through fmi4c on the 2.0 path this example runs), and would
+quantize the FIFO's contents to communication points for no gain.
+
+So the separation lives one level down, in code the FMU composes rather than
+contains:
+
+* ``ImuSpiSlave`` is the datasheet — registers, FIFO, shift register — and
+  names no transport;
+* ``SpiPeripheralEndpoint`` (:file:`sim/spi_shm/`) is the board — bus naming,
+  segment lifecycle, the service thread — and names no sensor. It binds a
+  device model duck-typed through the ``SpiShiftable`` concept, so any future
+  SPI part gets onto a bus by declaring a member;
+* ``fmu_main.cpp`` is the part number: which device model, on which bus, plus
+  the FMI variables and the physics feeding it. It mentions no shared-memory
+  type at all.
