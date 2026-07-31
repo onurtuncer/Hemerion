@@ -19,10 +19,10 @@ GPS FMU in :ref:`rocket_gps_ecos_cosim`:
   drives the FMU's input variables with noiseless truth — position, body
   rates, altitude, magnetic field — through ordinary Ecos connections.
 * **Sensor-realistic bytes out the side channel.** The FMU deliberately has
-  **no FMI output variables**. Its output is a raw byte stream over UDP,
-  exactly like a real part's UART or SPI drain: wire-exact frames carrying
-  quantized register counts, checksums and all. The flight software decodes
-  them with the *unmodified* on-target parser and conversion code.
+  **no FMI output variables**. Its output is a raw byte stream on the bus the
+  real part uses: wire-exact frames carrying quantized register counts,
+  checksums and all. The flight software decodes them with the *unmodified*
+  on-target parser and conversion code.
 * **The error model is the exact inverse of the on-target conversion.**
   Feeding the emitted counts back through the corresponding
   ``convert_raw_to_si()`` with the same scale recovers the noisy SI sample to
@@ -32,10 +32,18 @@ GPS FMU in :ref:`rocket_gps_ecos_cosim`:
 .. code-block:: text
 
    ┌──────────────────┐    FMI inputs     ┌─────────────────────────────┐  raw frames   ┌────────────────────┐
-   │  6-DoF plant     │  (Ecos wiring)    │  hemerion_<sensor>_fmu.fmu  │  over UDP     │  flight software   │
-   │  (truth)         ├──────────────────>│  noise model + quantizer    ├──────────────>│  on-target parser  │
-   │                  │                   │  + packet emitter           │               │  + conversion      │
+   │  6-DoF plant     │  (Ecos wiring)    │  hemerion_<sensor>_fmu.fmu  │  on the       │  flight software   │
+   │  (truth)         ├──────────────────>│  noise model + quantizer    ├──────────────>│  on-target driver  │
+   │                  │                   │  + packet emitter           │  sensor bus   │  + parser + conv.  │
    └──────────────────┘                   └─────────────────────────────┘               └────────────────────┘
+
+Which bus depends on the part. Four of the five are modelled as *talkers* —
+a receiver or a sensor that pushes frames down a line whenever it has them —
+and their byte stream goes out over UDP, standing in for a UART RX line (or
+Renode's emulated one). The IMU is not: it is an **SPI peripheral**, and a
+flight computer has to go and fetch its samples. It is therefore modelled as
+one, register map and all, and answers a simulated SPI bus carried in shared
+memory (:file:`sim/spi_shm/`) — see :ref:`imu_spi_interface`.
 
 The model code lives in each sensor's ``fmu/`` subtree
 (``modules/sensors/include/Hemerion/<sensor>/fmu/``), built only when
@@ -61,53 +69,58 @@ Overview of the five models
      - Truth inputs (FMI)
      - Wire protocol
      - Sync bytes
-     - UDP port
+     - Bus
      - Default rate
    * - GPS
      - u-blox M9N
      - lat, lon, alt, NED velocity
      - UBX-NAV-PVT (wire-exact)
      - ``B5 62``
-     - 5762
+     - UDP 5762
      - 1 frame / step
    * - IMU
      - ADIS16470-class MEMS
      - specific force, angular rate (body)
      - Hemerion IMU frame
      - ``A5 5A``
-     - 5763
+     - SPI ``hemerion_imu_spi``
      - 100 Hz
    * - Barometer
      - MS5611-class
      - geometric altitude MSL
      - Hemerion baro frame
      - ``B7 7B``
-     - 5764
+     - UDP 5764
      - 50 Hz
    * - Radar altimeter
      - small FMCW altimeter
      - height above ground
      - Hemerion radalt frame
      - ``C9 9C``
-     - 5765
+     - UDP 5765
      - 25 Hz
    * - Magnetometer
      - RM3100 / IIS2MDC-class
      - body-frame field [µT]
      - Hemerion mag frame
      - ``D1 1D``
-     - 5766
+     - UDP 5766
      - 100 Hz
 
-Every FMU takes its UDP destination from the environment
+The four UDP FMUs take their destination from the environment
 (``HEMERION_<SENSOR>_FMU_UDP_HOST`` / ``HEMERION_<SENSOR>_FMU_UDP_PORT``,
-with ``<SENSOR>`` one of ``GPS``, ``IMU``, ``BARO``, ``RADALT``, ``MAG``),
-defaulting to ``127.0.0.1`` and the port above. The four register-count
-sensors expose a ``sample_rate_hz`` FMI parameter: each communication step
-emits ``round(step · rate)`` frames, so the sensor rate is decoupled from
-the co-simulation communication step. The GPS FMU instead emits exactly one
-NAV-PVT frame per communication step, matching a receiver's navigation
-epoch.
+with ``<SENSOR>`` one of ``GPS``, ``BARO``, ``RADALT``, ``MAG``), defaulting
+to ``127.0.0.1`` and the port above; the IMU takes its bus name from
+``HEMERION_IMU_FMU_SPI_BUS`` the same way. Doing this through the environment
+rather than through FMI String parameters keeps every simulator free of
+String-typed variables, and lets a launch script retarget a stream without
+repackaging the archive.
+
+The four register-count sensors expose a ``sample_rate_hz`` FMI parameter:
+each communication step produces ``round(step · rate)`` frames, so the sensor
+rate is decoupled from the co-simulation communication step. The GPS FMU
+instead emits exactly one NAV-PVT frame per communication step, matching a
+receiver's navigation epoch.
 
 None of the five implements the FMI interface itself. Each
 ``include/Hemerion/<sensor>/fmu/fmu_main.cpp`` derives one class from
@@ -424,6 +437,100 @@ FMI inputs: ``f_{x,y,z}_mps2`` (body-frame specific force),
 ``{p,q,r}_rad_s`` (body angular rates); parameter ``sample_rate_hz``
 (default 100 Hz).
 
+.. _imu_spi_interface:
+
+The IMU's SPI interface
+~~~~~~~~~~~~~~~~~~~~~~~
+
+:file: ``modules/sensors/include/Hemerion/imu/`` — ``imu_spi_protocol.h``,
+   ``imu_spi_driver.h``, ``fmu/imu_spi_slave.h``; and :file:`sim/spi_shm/`
+
+An inertial part does not push samples at a flight computer; the flight
+computer goes and gets them. Modelling the IMU as a UDP talker like the other
+four would have exercised the packet parser and nothing else — no register
+map, no FIFO, no chip select, none of the polling sequence firmware actually
+runs. So the IMU simulator is an SPI peripheral, and the pieces split three
+ways along the boundaries a real design has:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 30 48
+
+   * - Layer
+     - Where it lives
+     - What it is
+   * - the datasheet
+     - ``imu/fmu/imu_spi_slave.h``
+     - register file, sample FIFO, shift register. Knows nothing about how
+       bytes reach it, which is why it can be unit-tested against the real
+       on-target driver with no transport in the picture.
+   * - the board
+     - :file:`sim/spi_shm/`
+     - one named shared-memory region per bus, carrying chip-select-framed
+       transfers between two local processes, plus the ``SpiPeripheralEndpoint``
+       that puts any device model on one.
+   * - the controller
+     - ``imu/imu_spi_driver.h``
+     - **on-target code**: probe ``WHO_AM_I``, sample the data-ready line, read
+       ``STATUS``/``FIFO_COUNT``, burst the FIFO port, feed every byte to
+       ``ImuPacketParser``.
+
+The register map is deliberately the shape most MEMS parts share:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 16 70
+
+   * - Address
+     - Register
+     - Behaviour
+   * - ``0x00``
+     - ``WHO_AM_I``
+     - reads ``0x6A``; how a driver proves the bus is wired and the part is
+       the one it expects
+   * - ``0x01``
+     - ``STATUS``
+     - bit 0 data-ready, bit 1 FIFO overflow (sticky, cleared on read)
+   * - ``0x02``–``0x03``
+     - ``FIFO_COUNT``
+     - fill level [bytes], little-endian
+   * - ``0x04``
+     - ``CONTROL``
+     - bit 0 FIFO enable, bit 1 FIFO reset (self-clearing)
+   * - ``0x7F``
+     - ``FIFO_DATA``
+     - burst port; does **not** auto-increment, so N bytes read pops N bytes
+
+Every transfer opens with a command byte — bit 7 read/write, bits 6..0 the
+address — during which the part shifts out a don't-care, exactly as the
+silicon does while that byte is still arriving. Successive bytes walk up the
+map, which is what lets ``STATUS`` and both ``FIFO_COUNT`` bytes come out of
+one four-byte transfer.
+
+**What the FIFO holds is the point.** It buffers complete Hemerion IMU
+raw-sample frames from ``ImuPacketEmitter`` — the identical bytes the FMU
+would have put on a UDP socket. Frames go in whole or not at all, so a
+controller that falls behind loses *samples*, never framing, and finds out
+through the sticky overflow bit. ``test_imu_spi.cpp`` runs the real driver
+against the real device model and asserts the bytes out of the FIFO are the
+bytes the emitter produced: ``ImuPacketParser`` and ``convert_raw_to_si()``
+are byte-exact across the transport, which is exactly what makes the
+transport an implementation detail.
+
+One transfer is one shared-memory handshake. That is the granularity a HAL
+SPI call has on the target, and the granularity at which a controller can
+still choose its MOSI bytes — a driver builds the whole TX buffer before it
+calls ``HAL_SPI_TransmitReceive``, so it could not have made byte *k* depend
+on byte *k−1*'s answer either. The peripheral end still shifts the posted
+buffer byte by byte through its own state machine, so the MISO content is
+what per-bit clocking would have produced, and it does so on its own service
+thread: real silicon answers chip select whenever it is asserted, not when
+its physics model happens to be stepping.
+
+The only piece that differs between the host co-simulation, Renode and the
+STM32 is the ``ImuSpiBus`` implementation under the driver — three
+operations: a chip-select-framed transfer, and a read of the data-ready pin.
+
 Barometer model
 ---------------
 
@@ -647,6 +754,19 @@ IMU
    :members:
 
 .. doxygenclass:: hemerion::sensors::imu::fmu::ImuNoiseModel
+   :members:
+
+The SPI interface, simulator side and on-target side:
+
+.. doxygenclass:: hemerion::sensors::imu::fmu::ImuSpiSlave
+   :members:
+
+.. doxygenenum:: hemerion::sensors::imu::ImuSpiRegister
+
+.. doxygenclass:: hemerion::sensors::imu::ImuSpiBus
+   :members:
+
+.. doxygenclass:: hemerion::sensors::imu::ImuSpiDriver
    :members:
 
 Barometer

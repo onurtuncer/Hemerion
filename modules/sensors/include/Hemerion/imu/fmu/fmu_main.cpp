@@ -7,17 +7,40 @@
 /// @file fmu_main.cpp
 /// @brief IMU hardware simulator, exported as an FMI Co-Simulation FMU.
 ///
-/// This FMU has no FMI output variables -- its effect is a UDP side
-/// channel: each step turns the current body-frame truth inputs (specific
+/// This FMU has no FMI output variables -- its effect is a **SPI side
+/// channel**. Each step turns the current body-frame truth inputs (specific
 /// force + angular rate) into noisy raw register counts (ImuNoiseModel),
 /// encodes them as Hemerion IMU raw-sample frames (ImuPacketEmitter), and
-/// sends them to a fixed UDP peer (UdpSender), so the real, unmodified
-/// ImuPacketParser + convert_raw_to_si() on the firmware side decodes them
-/// exactly as it would bytes from a physical part.
+/// pushes them into the simulated part's sample FIFO (ImuSpiSlave). A
+/// controller -- the host flight computer in examples/rocket_gps_ecos, or
+/// emulated firmware under Renode -- then reads them out the way it would read
+/// a real part: sample the data-ready line, read STATUS/FIFO_COUNT, burst the
+/// FIFO port. The bytes it recovers are exactly the bytes ImuPacketEmitter
+/// produced, so the unmodified on-target ImuPacketParser +
+/// convert_raw_to_si() decode them as they would bytes from physical silicon.
+///
+/// Three things have to be true for that, and each belongs somewhere
+/// different -- this file is only the third:
+///
+/// * **the datasheet** -- register map, sample FIFO, shift register:
+///   ImuSpiSlave (imu_spi_slave.h), which knows nothing about how bytes reach
+///   it and is unit-tested against the real on-target driver with no
+///   transport in the picture;
+/// * **the board** -- which bus the part sits on, when it comes up and goes
+///   down, how the data-ready line is driven: SpiPeripheralEndpoint
+///   (sim/spi_shm), sensor-agnostic and shared by any FMU that models an SPI
+///   part;
+/// * **the part number** -- which device model on which bus, plus the FMI
+///   variables and the physics feeding it. That is all this file does.
+///
+/// The bus name defaults to `hemerion_imu_spi` and is overridable through
+/// HEMERION_IMU_FMU_SPI_BUS, matching how the other sensor FMUs take their UDP
+/// destination from the environment (no FMI String-typed variables,
+/// retargetable without repackaging the archive).
 ///
 /// Unlike the 10 Hz GPS FMU, a real IMU samples much faster than a
 /// co-simulation communication step, so the `sample_rate_hz` parameter
-/// (default 100 Hz) makes each step emit round(step * rate) frames. The
+/// (default 100 Hz) makes each step buffer round(step * rate) frames. The
 /// truth inputs are zero-order-held across the step (the master only
 /// exchanges variables at communication points), so the sub-step samples
 /// differ in noise draw and timestamp only -- the honest equivalent of
@@ -29,21 +52,20 @@
 /// export layer (vendor/fmu4cpp). This file only registers the variables and
 /// implements do_step(); see cmake/generate_fmu.cmake for how the two halves
 /// are compiled and packaged into an .fmu archive.
-///
-/// UdpSender is reused from the GPS FMU one module subtree over
-/// (Hemerion/gps/fmu/) -- it is sensor-agnostic and lives in the same
-/// module, so duplicating it here would only invite drift.
 
-#include "Hemerion/gps/fmu/udpSender.hpp"
 #include "Hemerion/imu/fmu/imu_noise_model.h"
 #include "Hemerion/imu/fmu/imu_packet_emitter.h"
+#include "Hemerion/imu/fmu/imu_spi_slave.h"
+
+#include <hemerion/sim/spi_shm/spi_peripheral_endpoint.h>
 
 #include <fmu4cpp/fmu_base.hpp>
 #include <fmu4cpp/fmu_except.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <optional>
+#include <thread>
 
 namespace hemerion::sensors::imu::fmu
 {
@@ -53,18 +75,22 @@ namespace
 
 using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
-using hemerion::sensors::gps::fmu::UdpSender;
 
-constexpr char kUdpHostVariable[] = "HEMERION_IMU_FMU_UDP_HOST";
-constexpr char kUdpPortVariable[] = "HEMERION_IMU_FMU_UDP_PORT";
-constexpr char kDefaultUdpHost[] = "127.0.0.1";
-constexpr std::uint16_t kDefaultUdpPort = 5763;
 constexpr double kDefaultSampleRateHz = 100.0;
+
+/// How long terminate() lets a controller finish draining the sample FIFO.
+/// Long enough for a poll cycle of any sane controller, short enough that a
+/// scripted co-simulation never appears to hang on teardown.
+constexpr auto kDrainTimeout = std::chrono::seconds(2);
+
+/// Where this part sits: the bus it creates, and the environment variable a
+/// launch script can retarget it with.
+const sim::spi_shm::SpiPeripheralConfig kSpiBus{ "hemerion_imu_spi", "HEMERION_IMU_FMU_SPI_BUS" };
 
 }  // namespace
 
-/// @brief Co-simulation slave turning body-frame truth into a stream of raw
-/// IMU register frames on a UDP socket.
+/// @brief Co-simulation slave turning body-frame truth into raw IMU register
+/// frames a controller reads over a simulated SPI bus.
 class ImuSimulatorFmu final : public fmu4cpp::fmu_base
 {
 public:
@@ -98,22 +124,38 @@ public:
     register_real("sample_rate_hz", &sample_rate_hz_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::TUNABLE)
-        .setDescription("Sensor output data rate [Hz]; each step emits round(step * rate) frames, at least one");
+        .setDescription("Sensor output data rate [Hz]; each step buffers round(step * rate) samples, at least one");
   }
 
-  /// Opens the UDP socket. Deliberately not done in the constructor: the
-  /// build-time modelDescription.xml generator instantiates the model purely
-  /// to enumerate its variables, and that must not touch the network.
+  /// Brings the simulated part up on its bus. Deliberately not done in the
+  /// constructor: the build-time modelDescription.xml generator instantiates
+  /// the model purely to enumerate its variables, and that must not create
+  /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
-    sender_ = UdpSender::create_from_env(kUdpHostVariable, kUdpPortVariable, kDefaultUdpHost, kDefaultUdpPort);
-    if (!sender_.has_value())
+    if (!endpoint_.attach())
     {
-      throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to open the raw-sample UDP socket");
+      throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to create the SPI bus '" + endpoint_.bus_name() +
+                                 "' (already in use by another run?)");
     }
+    debugLog(fmiOK, "[hemerion_imu_fmu] SPI peripheral ready on bus '" + endpoint_.bus_name() + "'");
   }
 
-  void terminate() override { sender_.reset(); }
+  /// Powers the part down -- but not out from under a controller that is
+  /// still reading it. A real part keeps answering chip select until the board
+  /// loses power, so the sample stream should end where the simulation does,
+  /// not wherever the controller's last poll happened to land. Bounded, and
+  /// abandoned immediately if nobody is left on the bus.
+  void terminate() override
+  {
+    const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+    while (slave_.fifo_used() > 0 && endpoint_.controller_attached() &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    endpoint_.detach();
+  }
 
   /// fmi2Reset equivalent. The turn-on biases ImuNoiseModel drew at
   /// construction are kept: they model this instance's physical part, which a
@@ -122,18 +164,20 @@ public:
   {
     truth_ = ImuTruthSample{};
     sample_rate_hz_ = kDefaultSampleRateHz;
-    sender_.reset();
+    slave_.reset();
+    reported_overflow_ = false;
+    endpoint_.detach();
   }
 
 protected:
   bool do_step(double dt) override
   {
-    if (!sender_.has_value())
+    if (!endpoint_.attached())
     {
       throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Stepped before initialisation mode was exited");
     }
 
-    // Truth is zero-order-held over the step; emit one frame per sensor
+    // Truth is zero-order-held over the step; latch one sample per sensor
     // sample period that elapses within it, each with a fresh noise draw and
     // its own timestamp.
     const long samples = std::lround(dt * sample_rate_hz_);
@@ -145,22 +189,31 @@ protected:
       const double sample_time_s = currentTime() + static_cast<double>(k) * sample_period_s;
       truth_.timestamp_us = static_cast<std::uint64_t>(sample_time_s * 1e6);
       const ImuPacketEmitter::Frame frame = ImuPacketEmitter::encode_raw_sample(noise_model_.apply(truth_));
-      if (!sender_->send(frame.data(), frame.size()))
+      if (!slave_.push_frame(frame.data(), frame.size()) && !reported_overflow_)
       {
-        // A dropped datagram is a dropped sensor byte, not a simulation
-        // error -- warn and keep stepping rather than returning false, which
-        // fmu4cpp maps to "discard this step and terminate".
-        debugLog(fmiWarning, "[hemerion_imu_fmu] Raw-sample frame could not be sent");
+        // A controller too slow to drain the FIFO loses samples, exactly as it
+        // would on the real part -- that is a property of the system under
+        // test, not a simulation error, so warn once and keep stepping rather
+        // than returning false (which fmu4cpp maps to "discard this step and
+        // terminate"). The sticky STATUS bit tells the controller too.
+        debugLog(fmiWarning, "[hemerion_imu_fmu] Sample FIFO full -- the controller is not draining it fast enough");
+        reported_overflow_ = true;
       }
     }
+
+    // Data-ready is a level, so it is re-driven every step rather than pulsed:
+    // it stays asserted for as long as the FIFO holds a sample.
+    endpoint_.publish_data_ready(slave_.data_ready());
     return true;
   }
 
 private:
   ImuNoiseModel noise_model_;
-  std::optional<UdpSender> sender_;
+  ImuSpiSlave slave_;
+  sim::spi_shm::SpiPeripheralEndpoint<ImuSpiSlave> endpoint_{ slave_, kSpiBus };
   ImuTruthSample truth_;
   double sample_rate_hz_ = kDefaultSampleRateHz;
+  bool reported_overflow_ = false;
 };
 
 }  // namespace hemerion::sensors::imu::fmu

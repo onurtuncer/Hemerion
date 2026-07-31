@@ -113,6 +113,19 @@ if(HEMERION_BSP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/CMak
 endif()
 
 # ------------------------------------------------------------------------------
+# Host-side simulation targets -- Renode glue, FMI master, shm/UDP/SPI bridges.
+#
+# Added before modules/ because the IMU hardware-simulator FMU answers a shared-memory SPI bus (sim/spi_shm) instead of
+# emitting UDP like the other four sensor FMUs, so that target has to exist by the time modules/sensors is processed.
+# Nothing under sim/ depends on modules/, so the order is free. Building FMUs or examples implies the transports they
+# sit on, hence the widened condition.
+# ------------------------------------------------------------------------------
+if((HEMERION_BUILD_SIM OR HEMERION_BUILD_FMU OR HEMERION_BUILD_EXAMPLES)
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sim/CMakeLists.txt")
+  add_subdirectory(sim)
+endif()
+
+# ------------------------------------------------------------------------------
 # Modules -- reusable firmware libraries; each builds a static lib, and optionally an FMU and/or native test binary
 # depending on the options above
 # ------------------------------------------------------------------------------
@@ -138,13 +151,6 @@ unset(_hemerion_module)
 # ------------------------------------------------------------------------------
 if(HEMERION_BUILD_APPS AND NOT HEMERION_BUILD_FMU AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/apps/CMakeLists.txt")
   add_subdirectory(apps)
-endif()
-
-# ------------------------------------------------------------------------------
-# Host-side simulation targets -- Renode glue, FMI master, shm/UDP bridges
-# ------------------------------------------------------------------------------
-if(HEMERION_BUILD_SIM AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sim/CMakeLists.txt")
-  add_subdirectory(sim)
 endif()
 
 # ------------------------------------------------------------------------------

@@ -13,6 +13,6 @@ cmake --build build/examples-native
 
 | Example | What it demonstrates |
 |---|---|
-| [`rocket_gps_ecos/`](rocket_gps_ecos/) | Ecos FMI co-simulation: Aetherion's `TwoStageRocket.fmu` truth feeding Hemerion's GPS hardware-simulator FMU, whose UBX-NAV-PVT byte stream is decoded by the same GPS stack that runs on the STM32H743 flight computer |
+| [`rocket_gps_ecos/`](rocket_gps_ecos/) | Ecos FMI co-simulation: Aetherion's `TwoStageRocket.fmu` truth feeding Hemerion's GPS and IMU hardware-simulator FMUs — a COCOM-limited u-blox receiver emitting UBX-NAV-PVT over UDP, and a MEMS IMU answering a shared-memory SPI bus — both driven by the same sensor stacks that run on the STM32H743 flight computer |
 
 Each example has its own README and a matching page in the Sphinx documentation (`doc/`).

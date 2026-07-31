@@ -17,6 +17,9 @@ add_library(hemerion_shm_bridge STATIC src/shm_segment.cpp src/shm_bridge.cpp)
 target_include_directories(hemerion_shm_bridge PUBLIC include)
 target_compile_features(hemerion_shm_bridge PUBLIC cxx_std_23)
 target_link_libraries(hemerion_shm_bridge PRIVATE Threads::Threads)
+# ShmSegment reaches the sensor hardware-simulator FMUs through sim/spi_shm, and generateFMU() builds those as shared
+# libraries -- a non-PIC static library cannot go into one on Linux.
+set_target_properties(hemerion_shm_bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(UNIX AND NOT APPLE)
   # glibc < 2.34 keeps shm_open()/shm_unlink() in librt rather than libc; linking it is a no-op on newer glibc.
