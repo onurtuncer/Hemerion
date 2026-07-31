@@ -220,18 +220,22 @@ Outputs land in `results/`:
 * `rocket_truth.csv` — Ecos `csv_writer` log of the rocket's outputs (altitude, position, NED velocity, body
   rates, Mach, dynamic pressure, thrust, mass, staging flag) plus the host-computed specific force the IMU FMU
   received, at every communication point.
-* `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not: position, speed/course,
-  receiver-reported accuracies, satellite count, and the `fix_type` that says whether any of it means
-  anything.
+* `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not. Epochs that carried a
+  solution get position, speed/course, receiver-reported accuracies and satellite count; epochs the dynamics
+  envelope invalidated get **empty** position fields, keeping only the index, time and `fix_type`. A real
+  receiver does put numbers in those fields during a dropout and the parser does decode them, but they are
+  not measurements of anything, so they are not logged as if they were.
+* `rocket_truth.csv` — written by the co-simulation host rather than Ecos' `csv_writer`, at full
+  double precision. Six decimal places of a *radian* is 6.4 m of ground position, which would swamp the 1.5 m
+  the GPS noise model injects and make the decoded-fix error figure a picture of the log's own rounding.
 * `imu_samples.csv` — every IMU sample the flight software decoded, already converted back to SI units by
   `convert_raw_to_si()`: specific force and angular rate per axis, timestamped from the frame payload.
 
 ## Plots
 
 `plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
-(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, ground track,
-speed over ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates
-against truth:
+(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, speed over
+ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates against truth:
 
 ```
 python plot_results.py            # reads results/, writes plots/

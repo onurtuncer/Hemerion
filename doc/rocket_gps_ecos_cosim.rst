@@ -375,21 +375,21 @@ from raw bytes:
    [fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
    [fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi'
    [fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
-   [fc] fix     1  t=    0.1 s  lat=  0.0000144  lon=   0.0000198  alt=      0.2 m  vel=    0.1 m/s  crs=148.9 deg  sats=11
-   [fc] fix     2  t=    0.2 s  NO FIX -- receiver outside its dynamics envelope
-   [fc] imu      1  t=    0.1 s  f=[   54.27   -0.09   -0.05] m/s2  w=[  0.0011  0.0000  0.0000] rad/s
-   [fc] imu   3000  t=   30.1 s  f=[   97.82    0.02   -0.09] m/s2  w=[  0.0032 -0.0202  0.0032] rad/s
-   [fc] imu   4000  t=   40.1 s  f=[   -0.86   -0.04   -0.15] m/s2  w=[  0.0000  0.0000  0.0043] rad/s
-   [fc] imu  10000  t=  100.1 s  f=[   -0.06    0.07    0.07] m/s2  w=[ -0.0011 -0.0043  0.0011] rad/s
-   [fc] imu  14000  t=  140.1 s  f=[   56.62   -0.02   -0.09] m/s2  w=[  0.0011 -0.0021  0.0011] rad/s
-   [fc] imu  19000  t=  190.1 s  f=[  217.87    0.02    0.02] m/s2  w=[ -0.0011 -0.0011  0.0021] rad/s
-   [fc] imu  20000  t=  200.1 s  f=[    0.00   -0.01   -0.06] m/s2  w=[  0.0053 -0.0021  0.0011] rad/s
+   [fc] fix     1  t=    0.1 s  lat=  0.0000069  lon=  -0.0000058  alt=      2.1 m  vel=    0.1 m/s  crs=149.3 deg  sats=11
+   [fc] fix     2  t=    0.2 s  no fix -- receiver outside its dynamics envelope
+   [fc] imu      1  t=    0.1 s  f=[   54.28    0.02    0.02] m/s2  w=[ -0.0011  0.0000  0.0000] rad/s
+   [fc] imu   3000  t=   30.1 s  f=[   97.97    0.06   -0.06] m/s2  w=[  0.0032 -0.0181  0.0000] rad/s
+   [fc] imu   4000  t=   40.1 s  f=[   -0.96    0.02   -0.15] m/s2  w=[  0.0032  0.0000  0.0043] rad/s
+   [fc] imu  10000  t=  100.1 s  f=[   -0.06    0.10    0.05] m/s2  w=[  0.0032 -0.0053  0.0032] rad/s
+   [fc] imu  14000  t=  140.1 s  f=[   56.57   -0.05    0.04] m/s2  w=[  0.0032 -0.0021  0.0000] rad/s
+   [fc] imu  19000  t=  190.1 s  f=[  217.83    0.06   -0.05] m/s2  w=[  0.0011 -0.0021  0.0032] rad/s
+   [fc] imu  20000  t=  200.1 s  f=[    0.10   -0.06    0.05] m/s2  w=[  0.0032 -0.0043  0.0011] rad/s
    [fc] IMU powered down (FMU terminated) -- co-simulation finished
    [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 1 carried a fix, 2000 did not
    [fc] no-fix window: t=0.2 s to t=200.1 s (receiver dynamics envelope: platform model + COCOM limits)
-   [fc] 20000 IMU samples decoded over 14396 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
-   [fc] max altitude 0.247 m, max ground speed 0.085 m/s (fixes the receiver actually reported)
-   [fc] max |specific force| 264.657 m/s2, max |body rate| 0.0566544 rad/s
+   [fc] 20000 IMU samples decoded over 12808 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+   [fc] max altitude 2.086 m, max ground speed 0.073 m/s (over 1 fix carrying a solution)
+   [fc] max |specific force| 264.62 m/s2, max |body rate| 0.0566044 rad/s
    [fc] fixes written to results/gps_fixes.csv, IMU samples to results/imu_samples.csv
 
 Read the GPS line again: **one fix, out of 2001 navigation epochs.** The
@@ -404,7 +404,7 @@ ceiling holds it dark for the rest of the flight. Flight software that assumes
 GNSS through boost has just been shown otherwise.
 
 The IMU line is the other half: **20000 of 20010 samples decoded, zero
-checksum errors, zero FIFO overflows, zero failed transfers**, across 14396
+checksum errors, zero FIFO overflows, zero failed transfers**, across 12808
 chip-select-framed SPI transfers. The ten missing samples are the ones the FMU
 buffered before the flight computer probed — ``probe()`` writes ``FIFO_RESET``,
 exactly as a driver clearing whatever accumulated before it took over. Every
@@ -515,14 +515,6 @@ the flight computer's fix and IMU-sample logs — into the figures below:
    *Envelope-unlocked run.* Truth altitude and the fixes the flight software
    decoded. At this scale the two are indistinguishable — which is the point.
 
-.. figure:: _static/rocket_gps_ecos/ground_track.png
-   :width: 100%
-   :alt: Ground track heading east along the equator from the prime meridian, truth and GPS fixes overlaid
-
-   *Envelope-unlocked run.* Ground track: Scenario 17 launches from the
-   equator on the prime meridian and fires due east. ``--lat0``/``--lon0``
-   move the pad, at the cost of no longer being comparable to the published
-   check case.
 
 .. figure:: _static/rocket_gps_ecos/velocity_vs_time.png
    :width: 100%
@@ -537,11 +529,17 @@ the flight computer's fix and IMU-sample logs — into the figures below:
    :width: 100%
    :alt: Horizontal and vertical decoded-fix error vs truth, flat noise band around the 1.5 m one-sigma line
 
-   *Envelope-unlocked run.* Decoded-fix error against truth. The band is flat
-   across three decades of altitude and speed and matches the configured
-   receiver noise (``GpsNoiseConfig``: 1.5 m horizontal / 3 m vertical,
-   1-sigma) — the error the flight software sees is *exactly* the error that
-   was injected, with no distortion added by the encode/transmit/parse chain.
+   *Envelope-unlocked run.* Decoded-fix error against truth: every fix as a
+   faint point, with a 10 s rolling RMS over it. One panel per component,
+   because the two have different scales and whichever was drawn second simply
+   hid the other.
+
+   The RMS lines are the check. ``GpsNoiseConfig`` injects 1.5 m 1-sigma
+   independently into north and east, so the *magnitude* of the horizontal
+   error has RMS :math:`1.5\sqrt{2} = 2.12` m; vertical is a single axis at
+   3 m. Both lines sit on those values across three decades of altitude and
+   speed — the error the flight software sees is *exactly* the error that was
+   injected, with no distortion added by the encode/transmit/parse chain.
 
 .. figure:: _static/rocket_gps_ecos/imu_specific_force.png
    :width: 100%
@@ -655,6 +653,38 @@ the last poll landed. And the flight computer drains its UDP socket after the
 loop exits, since the IMU powering down is what ends that loop while the last
 NAV-PVT datagrams are still queued in the kernel. Before those, an unpaced run
 truncated both streams several seconds early and dropped 78 GPS epochs.
+
+Two ways to measure your own logging instead of your system
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both of these were found by looking at a figure and asking why a number was
+the value it was, and both had produced entirely plausible-looking output.
+
+**The truth log was quantised at 6.4 m.** Ecos' ``csv_writer`` formats reals
+with a default-configured ostringstream — six decimal places. For metres that
+is sub-micron and fine; but the rocket reports geodetic position in *radians*,
+where the sixth decimal is 6.4 m on the ground. The decoded-fix error figure
+was therefore comparing 1.5 m-noise fixes against a reference rounded to four
+times that, and its horizontal RMS read 2.81 m instead of 2.12 m — the excess
+being exactly the :math:`6.37/\sqrt{12} = 1.84` m RMS of uniform rounding on
+the longitude axis, the latitude axis being unaffected because Scenario 17
+launches from the equator and its latitude rounds to zero cleanly.
+
+``rocket_gps_cosim`` now writes the truth log itself, at
+``max_digits10`` precision, through a small ``TruthLogger`` — it already read
+every one of those properties each step for the specific-force computation, so
+this costs nothing and puts the format under the example's control. The header
+and separator deliberately match ``csv_writer``'s, so nothing downstream
+needed a special case.
+
+**No-fix epochs carried numbers that were not measurements.** A real receiver
+keeps filling NAV-PVT's position and velocity fields through a dropout, and
+``UbxParser`` faithfully decodes whatever is in them — but with the envelope in
+force that is 2000 epochs of meaningless coordinates in the log, one
+``read_fixes`` filter away from being plotted as a trajectory. The flight
+computer now writes those epochs with **empty** position fields: the row
+survives, because its index carries the time mapping and ``fix_type`` marks the
+outage, but there is no data in it to misread.
 
 Timing model
 ~~~~~~~~~~~~

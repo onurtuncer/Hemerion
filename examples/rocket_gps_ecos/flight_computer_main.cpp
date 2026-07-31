@@ -354,17 +354,25 @@ int main(int argc, char** argv)
         const double sim_time_s = static_cast<double>(fix_count) * options.fix_period_s;
         if (fix.fix_type == GpsFixType::kNoFix)
         {
-          // The dynamics envelope took the fix away: position and velocity
-          // fields still carry an invalid solution, as on a real receiver, so
-          // nothing here may be treated as a measurement.
+          // The dynamics envelope took the fix away. A real receiver keeps
+          // filling NAV-PVT's position and velocity fields through a dropout,
+          // and the parser faithfully decodes whatever is in them -- but they
+          // are not a measurement of anything, so they are not logged as one.
+          // The epoch is still recorded (its index carries the time mapping,
+          // and fix_type marks the outage); it simply has no data in it.
+          // Leaving the numbers in would invite exactly the mistake of
+          // plotting them, which is how a 236 km "position" ends up in a
+          // figure.
           if (first_outage_s < 0.0)
           {
             first_outage_s = sim_time_s;
-            std::printf("[fc] fix %5ld  t=%7.1f s  NO FIX -- receiver outside its dynamics envelope\n",
+            std::printf("[fc] fix %5ld  t=%7.1f s  no fix -- receiver outside its dynamics envelope\n",
                         fix_count,
                         sim_time_s);
           }
           last_outage_s = sim_time_s;
+          gps_csv << fix_count << ',' << sim_time_s << ",,,,,,,," << static_cast<unsigned>(fix.num_satellites) << ','
+                  << static_cast<unsigned>(fix.fix_type) << '\n';
         }
         else
         {
@@ -375,11 +383,11 @@ int main(int argc, char** argv)
           {
             print_fix(fix_count, sim_time_s, fix);
           }
+          gps_csv << fix_count << ',' << sim_time_s << ',' << fix.latitude_deg << ',' << fix.longitude_deg << ','
+                  << fix.altitude_m << ',' << fix.ground_speed_mps << ',' << fix.course_deg << ','
+                  << fix.horizontal_accuracy_m << ',' << fix.vertical_accuracy_m << ','
+                  << static_cast<unsigned>(fix.num_satellites) << ',' << static_cast<unsigned>(fix.fix_type) << '\n';
         }
-        gps_csv << fix_count << ',' << sim_time_s << ',' << fix.latitude_deg << ',' << fix.longitude_deg << ','
-                << fix.altitude_m << ',' << fix.ground_speed_mps << ',' << fix.course_deg << ','
-                << fix.horizontal_accuracy_m << ',' << fix.vertical_accuracy_m << ','
-                << static_cast<unsigned>(fix.num_satellites) << ',' << static_cast<unsigned>(fix.fix_type) << '\n';
       }
       else if (result == GpsParseError::kChecksumMismatch)
       {
@@ -514,10 +522,20 @@ int main(int argc, char** argv)
   }
   std::cout << "[fc] " << imu_sample_count << " IMU samples decoded over " << imu_bus.transfers() << " SPI transfers ("
             << imu_checksum_errors << " checksum errors, " << imu_fifo_overflows << " FIFO overflows, "
-            << imu_bus.failed_transfers() << " failed transfers)\n"
-            << "[fc] max altitude " << max_altitude_m << " m, max ground speed " << max_speed_mps << " m/s (fixes the "
-            << "receiver actually reported)\n"
-            << "[fc] max |specific force| " << max_specific_force_mps2 << " m/s2, max |body rate| "
+            << imu_bus.failed_transfers() << " failed transfers)\n";
+  // With a launch-vehicle envelope in force the receiver can hold no usable
+  // fix at all, and "max altitude 0 m" would read as a measurement rather than
+  // as the absence of one.
+  if (valid_fix_count > 0)
+  {
+    std::cout << "[fc] max altitude " << max_altitude_m << " m, max ground speed " << max_speed_mps << " m/s (over "
+              << valid_fix_count << (valid_fix_count == 1 ? " fix" : " fixes") << " carrying a solution)\n";
+  }
+  else
+  {
+    std::cout << "[fc] no position summary: the receiver never reported a usable fix\n";
+  }
+  std::cout << "[fc] max |specific force| " << max_specific_force_mps2 << " m/s2, max |body rate| "
             << max_body_rate_rad_s << " rad/s\n"
             << "[fc] fixes written to " << options.gps_csv_path.string() << ", IMU samples to "
             << options.imu_csv_path.string() << "\n";

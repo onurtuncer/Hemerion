@@ -50,7 +50,6 @@
 /// (plot_results.py).
 
 #include "ecos/algorithm/fixed_step_algorithm.hpp"
-#include "ecos/listeners/csv_writer.hpp"
 #include "ecos/logger/logger.hpp"
 #include "ecos/structure/simulation_structure.hpp"
 
@@ -67,13 +66,18 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <numbers>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -322,6 +326,97 @@ bool parse_args(int argc, char** argv, Options& options)
   return false;
 }
 
+/// @brief Truth log, written by the host rather than by Ecos' ``csv_writer``.
+///
+/// ``csv_writer`` formats every real with a default-configured ostringstream:
+/// six decimal places. For metres that is sub-micron and perfectly fine, but
+/// the rocket reports geodetic position in **radians**, where the sixth
+/// decimal is 6.4 m on the ground. Comparing the flight computer's decoded
+/// fixes against a reference rounded that coarsely measures the log's
+/// quantisation rather than the receiver's noise -- and it dominates it, since
+/// GpsNoiseModel injects 1.5 m per axis. (Before this, the horizontal error
+/// figure sat at 2.8 m RMS: exactly sqrt(1.5^2 + (1.5^2 + (6.37/sqrt(12))^2))
+/// once the rounding is accounted for.)
+///
+/// The host already reads these properties every step for the specific-force
+/// computation, so writing the row itself costs nothing and puts the format
+/// under our control. The header and separator deliberately match
+/// ``csv_writer``'s so plot_results.py and verify_trajectory.py need no
+/// special case.
+class TruthLogger
+{
+public:
+  /// @param path            Destination CSV; parent directories are created.
+  /// @param sim             Loaded simulation to read properties from.
+  /// @param real_variables  Ecos identifiers of the reals to log, in order.
+  /// @param bool_variables  Ecos identifiers of the booleans to log, in order.
+  TruthLogger(const std::filesystem::path& path,
+              const ecos::simulation& sim,
+              const std::vector<std::string>& real_variables,
+              const std::vector<std::string>& bool_variables)
+  {
+    if (path.has_parent_path())
+    {
+      std::filesystem::create_directories(path.parent_path());
+    }
+    out_.open(path);
+    if (!out_)
+    {
+      throw std::runtime_error("cannot open " + path.string() + " for writing");
+    }
+    // Round-trip precision: the point of this class is that nothing is lost
+    // between the plant's state and the file.
+    out_ << std::setprecision(std::numeric_limits<double>::max_digits10);
+
+    // ecos::variable_identifier is constructible from const char* but not from
+    // std::string, hence the c_str(). A name the simulation does not know
+    // yields a null property, which would only show up as a crash on the first
+    // row -- name it here instead.
+    out_ << "iterations, time";
+    for (const std::string& name : real_variables)
+    {
+      auto* property = sim.get_real_property(name.c_str());
+      if (property == nullptr)
+      {
+        throw std::runtime_error("no such real variable to log: " + name);
+      }
+      reals_.push_back(property);
+      out_ << ", " << name << "[REAL]";
+    }
+    for (const std::string& name : bool_variables)
+    {
+      auto* property = sim.get_bool_property(name.c_str());
+      if (property == nullptr)
+      {
+        throw std::runtime_error("no such boolean variable to log: " + name);
+      }
+      bools_.push_back(property);
+      out_ << ", " << name << "[BOOL]";
+    }
+    out_ << "\n";
+  }
+
+  /// Appends one communication point.
+  void write_row(std::uint64_t iterations, double time_s)
+  {
+    out_ << iterations << ", " << time_s;
+    for (const auto* property : reals_)
+    {
+      out_ << ", " << property->get_value();
+    }
+    for (const auto* property : bools_)
+    {
+      out_ << ", " << (property->get_value() ? 1 : 0);
+    }
+    out_ << "\n";
+  }
+
+private:
+  std::ofstream out_;
+  std::vector<ecos::property_t<double>*> reals_;
+  std::vector<ecos::property_t<bool>*> bools_;
+};
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -413,34 +508,34 @@ int main(int argc, char** argv)
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(options.step_s));
 
-    auto csv = std::make_unique<ecos::csv_writer>(options.csv_path);
-    ecos::csv_config& csv_config = csv->config();
-    for (const char* variable : { "rocket::out.alt_m",
-                                  "rocket::out.lat_rad",
-                                  "rocket::out.lon_rad",
-                                  "rocket::out.v_north_m_s",
-                                  "rocket::out.v_east_m_s",
-                                  "rocket::out.v_down_m_s",
-                                  "rocket::out.p_rad_s",
-                                  "rocket::out.q_rad_s",
-                                  "rocket::out.r_rad_s",
-                                  "rocket::out.mach",
-                                  "rocket::out.qbar_Pa",
-                                  "rocket::out.thrust_N",
-                                  "rocket::out.mass_kg",
-                                  "rocket::out.staged",
-                                  // What the IMU FMU actually receives: the host-computed
-                                  // body-frame specific force (one step behind rocket truth,
-                                  // like every other connection).
-                                  "imu::f_x_mps2",
-                                  "imu::f_y_mps2",
-                                  "imu::f_z_mps2" })
-    {
-      csv_config.register_variable(variable);
-    }
-    sim->add_listener("csv_writer", std::move(csv));
-
     sim->init("launchSite");
+
+    // Logged by TruthLogger rather than Ecos' csv_writer -- see the class
+    // comment: six decimal places of a *radian* is 6.4 m of ground position,
+    // which would swamp the 1.5 m the GPS noise model injects and make the
+    // decoded-fix error figure a picture of the log's own rounding.
+    TruthLogger truth_log(options.csv_path,
+                          *sim,
+                          { "rocket::out.alt_m",
+                            "rocket::out.lat_rad",
+                            "rocket::out.lon_rad",
+                            "rocket::out.v_north_m_s",
+                            "rocket::out.v_east_m_s",
+                            "rocket::out.v_down_m_s",
+                            "rocket::out.p_rad_s",
+                            "rocket::out.q_rad_s",
+                            "rocket::out.r_rad_s",
+                            "rocket::out.mach",
+                            "rocket::out.qbar_Pa",
+                            "rocket::out.thrust_N",
+                            "rocket::out.mass_kg",
+                            // What the IMU FMU actually receives: the host-computed
+                            // body-frame specific force (one step behind rocket truth,
+                            // like every other connection).
+                            "imu::f_x_mps2",
+                            "imu::f_y_mps2",
+                            "imu::f_z_mps2" },
+                          { "rocket::out.staged" });
 
     auto* altitude = sim->get_real_property("rocket::out.alt_m");
     auto* mach = sim->get_real_property("rocket::out.mach");
@@ -480,6 +575,7 @@ int main(int argc, char** argv)
 
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time
+    truth_log.write_row(sim->iterations(), sim->time());           // the state at t = 0, before any stepping
     while (sim->time() < options.stop_s)
     {
       sim->step();
@@ -491,6 +587,10 @@ int main(int argc, char** argv)
         imu_fy->set_value(aero_fy->get_value() / mass_kg);
         imu_fz->set_value(aero_fz->get_value() / mass_kg);
       }
+      // After the specific-force write, so the logged imu:: inputs are the ones
+      // the FMU will sample on the next step -- matching what csv_writer
+      // recorded as a post-step listener.
+      truth_log.write_row(sim->iterations(), sim->time());
 
       const double altitude_m = altitude->get_value();
       if (altitude_m > apogee_m)

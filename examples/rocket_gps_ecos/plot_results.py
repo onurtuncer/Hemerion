@@ -11,7 +11,6 @@ simulation time, and renders the figures embedded in
 doc/rocket_gps_ecos_cosim.rst:
 
     altitude_vs_time.png     truth altitude + decoded GPS fixes + staging marker
-    ground_track.png         truth ground track + decoded GPS fixes
     velocity_vs_time.png     truth speed over ground + GPS-reported speed
     gps_error.png            horizontal/vertical decoded-fix error vs truth
     gps_availability.png     why the receiver dropped out: truth vs. its envelope
@@ -62,6 +61,12 @@ OUTAGE = "#eceae5"
 # Threshold lines are annotation, not data: warm enough to read against the
 # categorical blues without competing with them for attention.
 LIMIT = "#b4632a"
+
+# Decoded-sensor markers, sized so a dense cloud still reads as points laid
+# over the truth line rather than as a second line. Sensor samples outnumber
+# truth points 10:1 on the IMU plots, so those stay smaller.
+MARKER_GPS = 5.0
+MARKER_IMU = 2.5
 
 METERS_PER_DEG_LAT = 111_320.0
 
@@ -173,6 +178,15 @@ def legend(ax) -> None:
         text.set_color(INK_2)
 
 
+def rolling_rms(values: list[float], window: int = 101) -> list[float]:
+    """Centred rolling RMS, for reading a noise level off a cloud of samples."""
+    out: list[float] = []
+    for i in range(len(values)):
+        chunk = values[max(0, i - window // 2):min(len(values), i + window // 2 + 1)]
+        out.append(math.sqrt(sum(v * v for v in chunk) / len(chunk)))
+    return out
+
+
 def staging_time(truth: dict[str, list[float]]) -> float | None:
     for t, staged in zip(truth["time"], truth["staged"]):
         if staged > 0.5:
@@ -191,10 +205,13 @@ def plot_altitude(truth, fixes, outages, out: Path) -> None:
     fig, ax = new_figure()
     shade_outages(ax, outages)
     # GPS dots first, truth line on top -- the two overlap almost everywhere,
-    # and the line must stay visible.
+    # and the line must stay visible. The markers are deliberately wider than
+    # the line so the fix cloud reads as a distinct band around it rather than
+    # disappearing under it; at 2001 fixes anything smaller is indistinguishable
+    # from a slightly thicker line.
     ax.plot(fixes["sim_time_s"], [a / 1000.0 for a in fixes["altitude_m"]],
-            linestyle="none", marker=".", markersize=4, alpha=0.45, color=GPS,
-            label="GPS fixes decoded by flight computer")
+            linestyle="none", marker="o", markersize=MARKER_GPS, alpha=0.5, color=GPS,
+            markeredgewidth=0, label="GPS fixes decoded by flight computer")
     ax.plot(truth["time"], [a / 1000.0 for a in truth["alt_m"]],
             color=TRUTH, linewidth=1.6, label="rocket truth (TwoStageRocket.fmu)")
     t_stage = staging_time(truth)
@@ -218,33 +235,13 @@ def plot_altitude(truth, fixes, outages, out: Path) -> None:
     plt.close(fig)
 
 
-def plot_ground_track(truth, fixes, out: Path) -> None:
-    fig, ax = new_figure()
-    lat = [math.degrees(v) for v in truth["lat_rad"]]
-    lon = [math.degrees(v) for v in truth["lon_rad"]]
-    ax.plot(fixes["longitude_deg"], fixes["latitude_deg"],
-            linestyle="none", marker=".", markersize=4, alpha=0.45, color=GPS,
-            label="GPS fixes")
-    ax.plot(lon, lat, color=TRUTH, linewidth=1.6, label="rocket truth")
-    ax.plot(lon[0], lat[0], marker="^", markersize=9, color=TRUTH)
-    ax.annotate("launch", xy=(lon[0], lat[0]), xytext=(8, 4),
-                textcoords="offset points", fontsize=8, color=INK_2)
-    ax.set_xlabel("longitude [deg]")
-    ax.set_ylabel("latitude [deg]")
-    ax.set_title("Ground track, firing due east over the Atlantic")
-    legend(ax)
-    fig.tight_layout()
-    fig.savefig(out / "ground_track.png", facecolor=SURFACE)
-    plt.close(fig)
-
-
 def plot_velocity(truth, fixes, outages, out: Path) -> None:
     fig, ax = new_figure()
     shade_outages(ax, outages)
     speed = [math.hypot(n, e) for n, e in zip(truth["v_north_m_s"], truth["v_east_m_s"])]
     ax.plot(fixes["sim_time_s"], fixes["ground_speed_mps"],
-            linestyle="none", marker=".", markersize=4, alpha=0.45, color=GPS,
-            label="GPS-reported speed over ground")
+            linestyle="none", marker="o", markersize=MARKER_GPS, alpha=0.5, color=GPS,
+            markeredgewidth=0, label="GPS-reported speed over ground")
     ax.plot(truth["time"], speed, color=TRUTH, linewidth=1.6,
             label="truth speed over ground")
     t_stage = staging_time(truth)
@@ -338,11 +335,6 @@ def plot_gps_error(truth, fixes, step: float, out: Path) -> None:
         j = truth_by_time.get(round(t - step, 3))
         if j is None:
             continue
-        # Break the line across a dropout rather than drawing a chord over it.
-        if times and t - times[-1] > 1.5 * step:
-            times.append(t - step)
-            horizontal.append(float("nan"))
-            vertical.append(float("nan"))
         lat_t = math.degrees(truth["lat_rad"][j])
         lon_t = math.degrees(truth["lon_rad"][j])
         dlat_m = (fixes["latitude_deg"][i] - lat_t) * METERS_PER_DEG_LAT
@@ -351,20 +343,37 @@ def plot_gps_error(truth, fixes, step: float, out: Path) -> None:
         horizontal.append(math.hypot(dlat_m, dlon_m))
         vertical.append(abs(fixes["altitude_m"][i] - truth["alt_m"][j]))
 
-    fig, ax = new_figure()
-    ax.plot(times, horizontal, color=TRUTH, linewidth=0.9, alpha=0.9,
-            label="horizontal error")
-    ax.plot(times, vertical, color=GPS, linewidth=0.9, alpha=0.9,
-            label="vertical error")
-    ax.axhline(1.5, color=INK_2, linewidth=1.0, linestyle="--", alpha=0.7)
-    ax.annotate("receiver-reported 1-sigma horizontal accuracy (1.5 m)",
-                xy=(0.99, 1.5), xycoords=("axes fraction", "data"),
-                xytext=(0, 4), textcoords="offset points",
-                ha="right", fontsize=8, color=INK_2)
-    ax.set_xlabel("simulation time [s]")
-    ax.set_ylabel("decoded fix error vs. truth [m]")
-    ax.set_title("GPS error injected by GpsNoiseModel, recovered end-to-end")
-    legend(ax)
+    # One panel per component, rather than two lines fighting over one axis:
+    # they have different scales (1.5 m per horizontal axis against 3 m
+    # vertical) and the one drawn second simply hid the other. Per-fix values
+    # as a faint scatter, with a rolling RMS on top -- the RMS is what can
+    # actually be compared against the configured sigma, since a cloud of
+    # samples has no visible mean.
+    fig, (ax_h, ax_v) = plt.subplots(2, 1, figsize=(8.0, 5.0), dpi=150, sharex=True)
+    fig.patch.set_facecolor(SURFACE)
+    for ax in (ax_h, ax_v):
+        style_axis(ax)
+
+    # Horizontal error is the magnitude of two independent axes, so its RMS is
+    # sigma*sqrt(2), not sigma. Vertical is a single axis and lands on sigma.
+    horizontal_sigma = 1.5
+    vertical_sigma = 3.0
+    for ax, series, color, expected, name in (
+            (ax_h, horizontal, TRUTH, horizontal_sigma * math.sqrt(2.0), "horizontal"),
+            (ax_v, vertical, GPS, vertical_sigma, "vertical")):
+        ax.plot(times, series, linestyle="none", marker=".", markersize=2, alpha=0.25,
+                color=color, label=f"{name} error, per fix")
+        ax.plot(times, rolling_rms(series), color=color, linewidth=1.6,
+                label=f"{name} RMS, 10 s window")
+        ax.axhline(expected, color=INK_2, linewidth=1.0, linestyle="--", alpha=0.7)
+        ax.annotate(f"expected RMS {expected:.2f} m", xy=(0.995, expected),
+                    xycoords=("axes fraction", "data"), xytext=(0, 4),
+                    textcoords="offset points", ha="right", fontsize=8, color=INK_2)
+        ax.set_ylabel(f"{name} error [m]")
+        ax.set_ylim(bottom=0.0)
+        legend(ax)
+    ax_h.set_title("GPS error injected by GpsNoiseModel, recovered end-to-end")
+    ax_v.set_xlabel("simulation time [s]")
     fig.tight_layout()
     fig.savefig(out / "gps_error.png", facecolor=SURFACE)
     plt.close(fig)
@@ -446,12 +455,11 @@ def main() -> None:
     # envelope really can leave fewer than that, so skip rather than crash.
     if valid >= 2:
         plot_altitude(truth, fixes, outages, args.out)
-        plot_ground_track(truth, fixes, args.out)
         plot_velocity(truth, fixes, outages, args.out)
         plot_gps_error(truth, fixes, step, args.out)
-        figures += 4
+        figures += 3
     else:
-        print(f"only {valid} epoch(s) carried a fix -- skipping the four fix-dependent figures. "
+        print(f"only {valid} epoch(s) carried a fix -- skipping the three fix-dependent figures. "
               f"Rerun the co-simulation with --dyn-model -1 --no-cocom for a receiver that keeps one.")
 
     if args.imu.exists():
