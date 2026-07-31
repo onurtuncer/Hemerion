@@ -197,9 +197,23 @@ Useful knobs (`--help` lists all):
   name, default `hemerion_imu_spi`. Set both to run two co-simulations side by side on one machine. A
   shared-memory bus is local by construction; a remote consumer needs Renode's emulated SPI instead.
 
-On Windows, Ecos unzips each `.fmu` by shelling out to `tar`. With Git for Windows ahead of `System32` on
-`PATH` that resolves to GNU tar, which reads `C:\...` as *host* `C:` plus path and fails with
-`tar: Cannot connect to C: resolve failed`. Put `C:\Windows\System32` first so the bundled bsdtar wins.
+Ecos does not link a zip library — it spawns `tar`, or `unzip` when `SHELL` names a bash — and reports any
+failure as `Failed to unzip ... to tempdir`, which says nothing about why. Two environmental traps produce
+that, both common on Windows: Git for Windows puts a **GNU tar** on `PATH` ahead of `System32`'s bsdtar, and
+GNU tar reads the leading `C:` of an absolute path as an rsh-style *host* (`tar: Cannot connect to C: resolve
+failed`); or running from Git Bash sets `SHELL`, which makes Ecos pick `unzip`, which Git for Windows does
+not always ship.
+
+`rocket_gps_cosim` checks for both before the run starts — it extracts one FMU with Ecos' own `unzip()` into
+a temporary directory and, if that fails, names the archiver it used and the fix:
+
+```
+error: cannot unpack C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gps_fmu.fmu
+       Ecos unpacks every .fmu by spawning 'tar'; that call failed before the simulation started.
+       Most likely a GNU tar (Git for Windows' usr\bin) is ahead of Windows' own
+       tar on PATH. ...
+           set PATH=C:\Windows\System32;%PATH%
+```
 
 Outputs land in `results/`:
 

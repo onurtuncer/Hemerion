@@ -54,6 +54,14 @@
 #include "ecos/logger/logger.hpp"
 #include "ecos/structure/simulation_structure.hpp"
 
+// Deliberately one of Ecos' *internal* headers (its src/ tree, put on this
+// target's include path by CMakeLists.txt). Preflighting FMU extraction is only
+// worth anything if it runs the same code Ecos will -- reimplementing the
+// choice of archiver here would drift, and drift in a diagnostic is worse than
+// no diagnostic. The Ecos version is pinned, so if upstream ever moves this
+// header the build fails loudly rather than the check silently rotting.
+#include "util/unzipper.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -223,6 +231,97 @@ bool parse_args(int argc, char** argv, Options& options)
   return true;
 }
 
+/// @brief Which external archiver Ecos will spawn to unpack an .fmu.
+///
+/// Mirrors ecos::detail::make_args(): on Windows it uses `unzip` when SHELL
+/// names a bash and `tar` otherwise; elsewhere it is always `unzip`. Only used
+/// to word the diagnostic below -- the check itself calls Ecos' own code.
+[[nodiscard]] const char* ecos_archiver()
+{
+#if defined(_WIN32)
+  // std::getenv is flagged deprecated by the Windows SDK headers (in favour of _dupenv_s) purely as an MSVC CRT
+  // "insecure function" nag, not a real portability issue -- std::getenv is the standard, portable way to do this.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+  const char* shell = std::getenv("SHELL");
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+  return (shell != nullptr && std::string(shell).find("bash") != std::string::npos) ? "unzip" : "tar";
+#else
+  return "unzip";
+#endif
+}
+
+/// @brief Proves an .fmu can actually be unpacked before the run starts.
+///
+/// Ecos does not link a zip library: it shells out to `tar` or `unzip` and
+/// reports a failure as "Failed to unzip ... to tempdir", which says nothing
+/// about *why*. The two ways it goes wrong on a developer machine are both
+/// environmental and both invisible from that message:
+///
+/// * Git for Windows puts a GNU `tar` on PATH ahead of the `tar.exe` shipped in
+///   System32 (bsdtar). GNU tar reads a leading `C:` as an rsh-style *host*, so
+///   every absolute Windows path fails with "Cannot connect to C: resolve
+///   failed".
+/// * Ecos switches to `unzip` when SHELL names a bash -- but Git for Windows
+///   does not ship `unzip`, so running from Git Bash picks a program that is
+///   not there.
+///
+/// Rather than infer either from PATH, this extracts a real archive with Ecos'
+/// own unzip() into a temporary directory and reports what to do if that fails.
+///
+/// @param archive An .fmu that is known to exist.
+/// @return True if extraction succeeded.
+[[nodiscard]] bool preflight_fmu_extraction(const std::filesystem::path& archive)
+{
+  std::error_code ec;
+  const std::filesystem::path probe_dir =
+      std::filesystem::temp_directory_path(ec) /
+      ("hemerion_unzip_probe_" +
+       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  if (ec || !std::filesystem::create_directories(probe_dir, ec) || ec)
+  {
+    // Not being able to make a temp directory is a different problem, and Ecos
+    // is about to hit it too -- let it report that one itself.
+    return true;
+  }
+
+  const bool extracted = ecos::unzip(archive, probe_dir);
+  std::filesystem::remove_all(probe_dir, ec);
+  if (extracted)
+  {
+    return true;
+  }
+
+  const std::string archiver = ecos_archiver();
+  std::cerr << "error: cannot unpack " << archive.string() << "\n"
+            << "       Ecos unpacks every .fmu by spawning '" << archiver
+            << "'; that call failed before the simulation started.\n";
+  if (archiver == "tar")
+  {
+    std::cerr << "       Most likely a GNU tar (Git for Windows' usr\\bin) is ahead of Windows' own\n"
+                 "       tar on PATH. GNU tar reads the leading 'C:' of an absolute path as a remote\n"
+                 "       host -- 'Cannot connect to C: resolve failed'. Put C:\\Windows\\System32\n"
+                 "       first on PATH so the bundled bsdtar wins:\n"
+                 "           set PATH=C:\\Windows\\System32;%PATH%\n";
+  }
+  else
+  {
+    std::cerr << "       Ecos picks 'unzip' over 'tar' whenever SHELL names a bash, and Git for\n"
+                 "       Windows does not ship an unzip. Either install one, or clear SHELL for\n"
+                 "       this process so Ecos falls back to tar.\n";
+  }
+  return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -242,6 +341,13 @@ int main(int argc, char** argv)
       std::cerr << "error: " << label << " FMU not found at '" << path.string() << "' -- pass --" << label << "\n";
       return EXIT_FAILURE;
     }
+  }
+
+  // All three archives take the same extraction path, so one probe settles it.
+  // Cheapest to use our own GPS FMU: it is small and always in the build tree.
+  if (!preflight_fmu_extraction(options.gps_fmu))
+  {
+    return EXIT_FAILURE;
   }
 
   ecos::log::set_logging_level(ecos::log::level::info);

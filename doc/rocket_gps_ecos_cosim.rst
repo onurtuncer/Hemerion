@@ -316,11 +316,22 @@ two co-simulations side by side on one machine.
 
 .. note::
 
-   Ecos unzips each ``.fmu`` by shelling out to ``tar``. On Windows with Git
-   for Windows ahead of ``System32`` on ``PATH``, that resolves to GNU tar,
-   which reads ``C:\...`` as *host* ``C:`` plus path and fails with
-   ``tar: Cannot connect to C: resolve failed``. Put ``C:\Windows\System32``
-   first so the bundled bsdtar wins.
+   Ecos does not link a zip library — it spawns ``tar``, or ``unzip`` when
+   ``SHELL`` names a bash — and reports any failure as ``Failed to unzip ... to
+   tempdir``, which says nothing about why. Two environmental traps produce it,
+   both common on Windows:
+
+   * Git for Windows puts a **GNU tar** on ``PATH`` ahead of the ``tar.exe`` in
+     ``System32`` (bsdtar). GNU tar reads the leading ``C:`` of an absolute path
+     as an rsh-style *host*, so every FMU fails with ``tar: Cannot connect to
+     C: resolve failed``. Put ``C:\Windows\System32`` first.
+   * Running from Git Bash sets ``SHELL``, which makes Ecos choose ``unzip`` —
+     and Git for Windows does not always ship one.
+
+   ``rocket_gps_cosim`` checks for both before the run starts: it extracts one
+   FMU with Ecos' own ``unzip()`` into a temporary directory and, if that
+   fails, names the archiver it used and the fix. Failing in the first second
+   with a remedy beats failing three FMU loads later without one.
 
 Ecos master console
 ~~~~~~~~~~~~~~~~~~~

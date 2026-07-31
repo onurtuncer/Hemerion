@@ -78,6 +78,10 @@ endif()
 add_executable(rocket_gps_cosim cosim_host_main.cpp)
 target_link_libraries(rocket_gps_cosim PRIVATE libecos)
 target_compile_features(rocket_gps_cosim PRIVATE cxx_std_23)
+# Ecos keeps src/ off its public include path. cosim_host_main.cpp reaches into it for util/unzipper.hpp so its
+# FMU-extraction preflight runs the same code Ecos will rather than a reimplementation that could drift -- see the
+# comment on that include. Ecos is pinned, so a moved header fails the build instead of rotting the check.
+target_include_directories(rocket_gps_cosim PRIVATE "${ecos_SOURCE_DIR}/src")
 target_compile_definitions(
   rocket_gps_cosim
   PRIVATE HEMERION_ROCKET_FMU_PATH="${HEMERION_TWO_STAGE_ROCKET_FMU}"
