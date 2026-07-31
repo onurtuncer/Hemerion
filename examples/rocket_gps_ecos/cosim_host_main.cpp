@@ -118,10 +118,20 @@ struct Options
   double step_s = 0.1;           // communication step == GPS output period (10 Hz)
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double realtime_factor = 0.0;  // 0 = run as fast as possible
-  // Receiver dynamics envelope. 8 is the u-blox dynModel code for airborne
-  // <4 g -- the setting a launch vehicle is configured with, and the least
-  // restrictive one a COTS receiver offers.
-  int dynamic_platform = 8;
+  // Receiver dynamics envelope. The platform model is off by default and
+  // COCOM is on, which isolates the mechanism that is not a configuration
+  // choice: COCOM is export control, present in any receiver you can buy,
+  // whereas dynModel is a register a firmware engineer writes.
+  //
+  // Leaving the platform model in place hides that. Even its least
+  // restrictive airborne setting (code 8, <4 g) trips on the *second*
+  // navigation epoch of this flight -- thrust alone is ~54 m/s^2, so
+  // coordinate acceleration off the pad is ~4.6 g -- and the receiver then
+  // reports one usable fix in 2001 epochs, with COCOM never getting to be the
+  // reason for anything. With it disabled the export limits alone give 312
+  // fixes and a clean cut-off at 31.2 s, which is the behaviour worth
+  // studying. Pass --dyn-model 8 to put the platform envelope back.
+  int dynamic_platform = -1;
   bool cocom_limits = true;
   double reacquisition_time_s = 2.0;
 };
@@ -138,8 +148,9 @@ void print_usage()
                "  --gps       path to the packaged hemerion_gps_fmu.fmu (default: build-tree artifact)\n"
                "  --imu       path to the packaged hemerion_imu_fmu.fmu (default: build-tree artifact)\n"
                "  --imu-rate  IMU output data rate [Hz] (default 100)\n"
-               "  --dyn-model u-blox dynModel code for the receiver's platform model (default 8 = airborne <4 g;\n"
-               "              -1 disables the platform envelope entirely)\n"
+               "  --dyn-model u-blox dynModel code for the receiver's platform model (default -1 = no platform\n"
+               "              envelope, leaving COCOM as the only limit; 8 = airborne <4 g, whose acceleration\n"
+               "              limit trips on the second epoch of this flight and masks everything else)\n"
                "  --no-cocom  clear the COCOM export cut-off, as on an export-licensed receiver (default: in force,\n"
                "              so navigation output stops above 18000 m AND 515 m/s)\n"
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"

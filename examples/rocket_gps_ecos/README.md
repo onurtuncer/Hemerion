@@ -67,33 +67,33 @@ inheriting the defaults silently — whether the receiver keeps a fix through th
 consequential setting:
 
 ```cpp
-launch_site["gps::dynamic_platform"] = 8;      // u-blox dynModel: airborne <4 g
+launch_site["gps::dynamic_platform"] = -1;     // no platform envelope: COCOM alone
 launch_site["gps::cocom_limits_enabled"] = true;
 launch_site["gps::reacquisition_time_s"] = 2.0;
 ```
 
-Those are the settings a launch vehicle ships with, and this vehicle breaks all of them: the platform model
-caps horizontal velocity at 500 m/s (passed during first-stage boost), and the **COCOM export limits** stop
+The FMU models two independent mechanisms and the example enables only one. **COCOM export limits** stop
 navigation output above 18 000 m *and* 515 m/s — an AND, which is why a high-altitude balloon and a fast low
-sled both keep their fix while a sounding rocket past first-stage burnout does not. Both are evaluated against
-*truth*, not against the noisy fix: it is the vehicle's real motion that breaks carrier tracking, not the
-receiver's estimate of it.
+sled both keep their fix while a sounding rocket does not. That is not a configuration choice; it is in every
+receiver you can buy. The **navigation-engine platform model** (`dynModel`) is a choice — a register a
+firmware engineer writes — and it is off here. Both are evaluated against *truth*, not against the noisy fix:
+it is the vehicle's real motion that breaks carrier tracking, not the receiver's estimate of it.
 
-The receiver keeps emitting one NAV-PVT frame per epoch throughout. It just stops claiming a solution — fix
-type drops to `kNoFix`, satellites to zero, accuracies inflate — and the position fields keep carrying the
-invalid solution, as on a real part. The flight computer gates on fix type, logs the epoch anyway, and reports
-the outage window; `plot_results.py` drops no-fix epochs rather than plotting numbers that mean nothing.
+**What COCOM costs, measured: 312 fixes out of 2001 epochs, the last at t = 31.2 s.** The receiver works
+normally for 31 seconds — position, speed, course, `sats=11` — then stops at 17.9 km and 1.6 km/s and never
+reports again, leaving the remaining 169 s including all of stage 2 unnavigated. The AND is what sets the
+moment: 515 m/s is passed at t = 10.1 s with nothing happening, because the vehicle is only 2 km up.
 
-**What that costs, measured:** one fix out of 2001 navigation epochs. The receiver reports a solution on the
-pad and loses it 0.1 s later — thrust alone is ~54 m/s², so coordinate acceleration off the pad is ~4.6 g and
-the platform model's 4 g limit trips on the second epoch. By the time the vehicle is back inside that
-envelope it is past 18 km and 515 m/s, where COCOM takes over; past 80 km the platform model's altitude
-ceiling holds it dark for the rest of the flight. A stock COTS receiver gives this vehicle 0.1 seconds of
-GPS, and flight software that assumes otherwise has just been shown so.
+Adding the platform model back (`--dyn-model 8`, airborne <4 g, what a launch vehicle ships with) is more
+realistic and says much less: its acceleration limit trips on the **second** epoch, because thrust alone is
+~54 m/s² and coordinate acceleration off the pad is ~4.6 g, so the receiver reports one usable fix in 2001
+epochs and COCOM never gets to be the reason for anything.
 
-`--dyn-model -1 --no-cocom` gives the unrestricted stream of a waivered receiver — 2001 of 2001 epochs with a
-fix. It is a knob for exercising the fix stream (the GPS noise round-trip is only measurable when there are
-fixes to measure), not a configuration anyone flies, so no figure in the documentation is drawn from it.
+The receiver keeps emitting one NAV-PVT frame per epoch throughout, it just stops claiming a solution — fix
+type drops to `kNoFix`, satellites to zero, accuracies inflate. The flight computer gates on fix type, logs
+the epoch with its `fix_type` but without the meaningless position, and reports the outage window.
+
+`--no-cocom` clears the export limits too, for a waivered receiver that reports through the whole flight.
 
 ## The plant is checked, not assumed
 
@@ -235,22 +235,21 @@ Outputs land in `results/`:
 ## Plots
 
 `plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
-(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, and the decoded IMU
-specific force and body rates against truth.
+(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, speed over
+ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates against truth.
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
 
-Those three are what a realistic configuration can show. With the envelope in force this flight yields one
-usable fix, so the altitude, speed-over-ground and decoded-fix-error figures have nothing to draw and are
-skipped rather than drawn empty. The script will produce all six from an envelope-unlocked run
-(`--dyn-model -1 --no-cocom`, with `--csv`/`--imu-csv` pointing elsewhere) if you want to exercise the fix
-stream — but that receiver is not one anyone flies, so none of its output is documented as a result.
+All six come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
+the rest of the flight as the outage it is; the script skips a fix-dependent figure rather than drawing it
+empty if a configuration leaves fewer than two usable epochs (`--dyn-model 8` leaves one).
 
 Every figure is stamped at the foot with the receiver configuration that produced it, read from the `.config`
-sidecar `rocket_gps_cosim` writes next to the truth log. A plot showing GPS across a whole launch is not
-wrong, it is just from the other configuration, and it should not take a caption to know which.
+sidecar `rocket_gps_cosim` writes next to the truth log. Run the same script against `--no-cocom` output and
+you get plots identical in form that say the opposite thing; a PNG detached from its caption has no other way
+to tell you which it is.
 
 ## Notes and design decisions
 

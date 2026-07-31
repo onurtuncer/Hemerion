@@ -21,8 +21,8 @@ one sensor-in-the-loop scenario, orchestrated by the
 2. **Hemerion's GPS hardware-simulator FMU** (``hemerion_gps_fmu.fmu``, from
    ``modules/sensors``) turns that truth into what a real u-blox M9N would
    report: Gaussian position/velocity noise plus the receiver's self-reported
-   accuracies, gated through the receiver's **dynamics envelope** — an
-   airborne <4 g platform model with the COCOM export limits in force — and
+   accuracies, gated through the receiver's **dynamics envelope** — the COCOM
+   export limits, which stop navigation output above 18 km *and* 515 m/s — and
    encoded as **wire-exact UBX-NAV-PVT frames** sent over UDP, one frame per
    co-simulation step whether or not that frame carries a solution.
 3. **Hemerion's IMU hardware-simulator FMU** (``hemerion_imu_fmu.fmu``, also
@@ -47,7 +47,7 @@ one sensor-in-the-loop scenario, orchestrated by the
    ┌──────────────────────┐  FMI 2.0 variables    ┌──────────────────────┐  UBX-NAV-PVT    ┌────────────────────────┐
    │  TwoStageRocket.fmu  │  (Ecos connections)   │ hemerion_gps_fmu.fmu │  over UDP       │  gps_flight_computer   │
    │  Aetherion 6-DoF     ├──────────────────────>│ u-blox M9N simulator │────────────────>│  GpsDriver + UbxParser │
-   │  rocket plant        │  lat, lon, alt,       │ noise + COCOM/4 g    │ 127.0.0.1:5762  │                        │
+   │  rocket plant        │  lat, lon, alt,       │ noise + COCOM        │ 127.0.0.1:5762  │                        │
    │  (truth)             │  NED velocity         │ envelope + UBX enc.  │ 1 frame / step  │  ImuSpiDriver +        │
    │                      │                       └──────────────────────┘                 │  ImuPacketParser +     │
    │                      │  p/q/r (connections), ┌──────────────────────┐   SPI transfers │  convert_raw_to_si     │
@@ -176,35 +176,42 @@ defaults silently:
 
 .. code-block:: cpp
 
-    launch_site["gps::dynamic_platform"] = 8;      // u-blox dynModel: airborne <4 g
+    launch_site["gps::dynamic_platform"] = -1;     // no platform envelope: COCOM alone
     launch_site["gps::cocom_limits_enabled"] = true;
     launch_site["gps::reacquisition_time_s"] = 2.0;
 
-Those are the settings a launch vehicle actually ships with, and this vehicle
-breaks all of them. Both mechanisms are evaluated against *truth*, not against
-the noisy fix — it is the vehicle's real motion that breaks carrier tracking,
-not the receiver's estimate of it:
+The GPS FMU models two independent mechanisms, and the example deliberately
+enables only one of them:
 
-* the **platform model** declares 80 km, 500 m/s horizontal, 100 m/s vertical
-  and 4 g; the vehicle passes 500 m/s horizontal during first-stage boost;
 * the **COCOM export limits** stop navigation output above 18 000 m *and*
-  515 m/s — an AND, which is why a high-altitude balloon and a fast low sled
-  both keep their fix and a sounding rocket past first-stage burnout does not;
+  515 m/s. An AND, which is why a high-altitude balloon and a fast low-altitude
+  sled both keep their fix while a sounding rocket does not. Not a
+  configuration choice — it is in every receiver you can buy;
+* the **navigation-engine platform model** (``dynModel``) declares a maximum
+  altitude, horizontal and vertical velocity, and the acceleration its tracking
+  loops are tuned for. This *is* a configuration choice: a register a firmware
+  engineer writes. Disabled here, and ``--dyn-model 8`` restores the airborne
+  <4 g setting a launch vehicle ships with;
 * recovery is not instantaneous either: the fix stays invalid for
   ``reacquisition_time_s`` after the vehicle re-enters the envelope, standing
   in for the tracking loops re-acquiring.
 
-When either trips, the fix is degraded in place — fix type drops to ``kNoFix``
-so ``UbxEmitter`` clears NAV-PVT's ``gnssFixOK`` flag, satellite count goes to
-zero, accuracies inflate — and the frame is still emitted. Position and
-velocity fields keep carrying the invalid solution, as on a real receiver, and
-consumers are expected to gate on the fix type. ``gps_flight_computer`` does,
-logs the epoch anyway with its ``fix_type`` column, and reports the window;
-``plot_results.py`` drops no-fix epochs rather than plotting position fields
-that mean nothing.
+Enabling both is more realistic and much less informative. The 4 g model's
+acceleration limit trips on the second navigation epoch of this flight —
+thrust alone is ~54 m/s², so coordinate acceleration off the pad is ~4.6 g —
+and from there the receiver reports **one** usable fix in 2001 epochs, with
+COCOM never getting to be the reason for anything. Isolating the export limits
+gives 312 fixes and a clean cut-off, and a dropout you can see the shape of.
 
-``--dyn-model -1 --no-cocom`` reproduces an unrestricted stream — a waivered,
-envelope-unlocked receiver — for comparison.
+Both mechanisms are evaluated against *truth*, not against the noisy fix — it
+is the vehicle's real motion that breaks carrier tracking, not the receiver's
+estimate of it. When either trips, the fix is degraded in place: fix type drops
+to ``kNoFix`` so ``UbxEmitter`` clears NAV-PVT's ``gnssFixOK`` flag, satellite
+count goes to zero, accuracies inflate — and the frame is still emitted.
+Position and velocity fields keep carrying the invalid solution, as on a real
+receiver, and consumers are expected to gate on the fix type.
+``gps_flight_computer`` does, logs the epoch with its ``fix_type`` column but
+without the meaningless position, and reports the window.
 
 Driving the IMU over SPI
 ------------------------
@@ -343,7 +350,7 @@ Ecos master console
    [cosim] imu:    C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
    [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU), stop 200 s
    [cosim] plant: launch 0 deg N / 0 deg E at 0 m, stage 2 ignition at t=131.8 s
-   [cosim] receiver: dynModel 8, COCOM limits in force (18000 m AND 515 m/s), re-acquisition 2 s
+   [cosim] receiver: dynModel -1, COCOM limits in force (18000 m AND 515 m/s), re-acquisition 2 s
    [cosim] t=10 s  alt=1826.71 m  mach=1.52891  mass=265846 kg
    [cosim] t=20 s  alt=7249.12 m  mach=3.63603  mass=217693 kg
    [cosim] t=30 s  alt=16639.8 m  mach=6.52317  mass=169539 kg
@@ -375,36 +382,55 @@ from raw bytes:
    [fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
    [fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi'
    [fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
-   [fc] fix     1  t=    0.1 s  lat=  0.0000125  lon=  -0.0000173  alt=     -0.9 m  vel=    0.1 m/s  crs=150.3 deg  sats=11
+   [fc] fix     1  t=    0.1 s  lat=  0.0000065  lon=  -0.0000007  alt=     -3.9 m  vel=    0.0 m/s  crs=147.8 deg  sats=11
    [fc] imu      1  t=    0.1 s  f=[   54.27    0.01   -0.05] m/s2  w=[ -0.0021  0.0000 -0.0021] rad/s
-   [fc] fix     2  t=    0.2 s  no fix -- receiver outside its dynamics envelope
-   [fc] imu   3000  t=   30.1 s  f=[   97.89    0.00   -0.17] m/s2  w=[ -0.0021 -0.0202 -0.0032] rad/s
+   [fc] fix    50  t=    5.0 s  lat=  0.0000069  lon=   0.0034391  alt=    432.2 m  vel=  156.7 m/s  crs= 89.2 deg  sats=11
+   [fc] fix   100  t=   10.0 s  lat= -0.0000131  lon=   0.0145416  alt=   1791.7 m  vel=  351.4 m/s  crs= 88.1 deg  sats=11
+   [fc] fix   300  t=   30.0 s  lat=  0.0000148  lon=   0.1733980  alt=  16525.6 m  vel= 1522.4 m/s  crs= 88.2 deg  sats=11
+   [fc] fix   313  t=   31.3 s  no fix -- receiver outside its dynamics envelope
    [fc] imu   4000  t=   40.1 s  f=[   -0.92   -0.04   -0.18] m/s2  w=[  0.0000  0.0000 -0.0032] rad/s
    [fc] imu  10000  t=  100.1 s  f=[    0.01    0.01    0.10] m/s2  w=[  0.0000 -0.0043  0.0011] rad/s
    [fc] imu  14000  t=  140.1 s  f=[   56.55   -0.10    0.07] m/s2  w=[  0.0032 -0.0021 -0.0021] rad/s
    [fc] imu  19000  t=  190.1 s  f=[  217.88    0.02    0.04] m/s2  w=[  0.0000 -0.0032  0.0032] rad/s
    [fc] imu  20000  t=  200.1 s  f=[    0.02    0.04   -0.04] m/s2  w=[  0.0021 -0.0032 -0.0043] rad/s
    [fc] IMU powered down (FMU terminated) -- co-simulation finished
-   [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 1 carried a fix, 2000 did not
-   [fc] no-fix window: t=0.2 s to t=200.1 s (receiver dynamics envelope: platform model + COCOM limits)
-   [fc] 20000 IMU samples decoded over 12355 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
-   [fc] max altitude 0 m, max ground speed 0.084 m/s (over 1 fix carrying a solution)
-   [fc] max |specific force| 264.706 m/s2, max |body rate| 0.0564441 rad/s
+   [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 312 carried a fix, 1689 did not
+   [fc] no-fix window: t=31.3 s to t=200.1 s (receiver outside its dynamics envelope)
+   [fc] 20000 IMU samples decoded over 14173 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+   [fc] max altitude 17955.1 m, max ground speed 1617.16 m/s (over 312 fixes carrying a solution)
+   [fc] max |specific force| 264.657 m/s2, max |body rate| 0.0574879 rad/s
    [fc] fixes written to results/gps_fixes.csv, IMU samples to results/imu_samples.csv
 
-Read the GPS line again: **one fix, out of 2001 navigation epochs.** The
-receiver reports a solution on the pad, loses it 0.1 s later, and never gets it
-back. That is not a bug in the model — it is what a stock COTS receiver does
-to a launch vehicle, and it is the single most useful thing this example has to
-say. The 4 g platform acceleration limit trips on the second epoch (thrust
-alone is ~54 m/s², so coordinate acceleration is ~4.6 g off the pad); by the
-time the vehicle has decelerated into that envelope it is past 18 km and
-515 m/s, where COCOM takes over; and past 80 km the platform model's altitude
-ceiling holds it dark for the rest of the flight. Flight software that assumes
-GNSS through boost has just been shown otherwise.
+Read the GPS lines again: **312 fixes out of 2001 navigation epochs, and the
+last one at 31.2 s.** The receiver works normally through the first 31 seconds
+of flight — position, speed and course all good, ``sats=11`` — and then stops,
+17.9 km up and doing 1.6 km/s, and never reports again. The remaining 169 s of
+this flight, including all of stage 2, are unnavigated.
+
+That is not a bug in the model, it is export control. COCOM stops navigation
+output above 18 000 m **and** 515 m/s, and the AND is what sets the moment: the
+vehicle passes 515 m/s at t = 10.1 s and nothing happens because it is only
+2 km up, then crosses 18 km at t = 31.2 s with both conditions true from there
+to the end. Flight software that assumes GNSS through boost has just been shown
+otherwise, and it has been shown the useful version of it — with the 31 seconds
+of good data it does get, which is what an initialisation or a launch-detect
+routine has to work with.
+
+.. note::
+
+   The receiver's *platform model* is deliberately disabled here
+   (``--dyn-model -1``), leaving COCOM as the only limit. That is not the
+   configuration a launch vehicle ships, and ``--dyn-model 8`` puts the
+   airborne <4 g model back — but it makes the example say much less. Its
+   acceleration limit trips on the **second** navigation epoch, because thrust
+   alone is ~54 m/s² and coordinate acceleration off the pad is ~4.6 g, so the
+   receiver reports exactly one usable fix in 2001 epochs and COCOM never gets
+   to be the reason for anything. The export limits are the interesting
+   mechanism because they are not a configuration choice: dynModel is a
+   register a firmware engineer writes, COCOM is in every receiver you can buy.
 
 The IMU line is the other half: **20000 of 20010 samples decoded, zero
-checksum errors, zero FIFO overflows, zero failed transfers**, across 12355
+checksum errors, zero FIFO overflows, zero failed transfers**, across 14173
 chip-select-framed SPI transfers. The ten missing samples are the ones the FMU
 buffered before the flight computer probed — ``probe()`` writes ``FIFO_RESET``,
 exactly as a driver clearing whatever accumulated before it took over. Every
@@ -481,40 +507,55 @@ the flight computer's fix and IMU-sample logs — into the figures below:
 
 Every figure is stamped with the receiver configuration that produced it —
 ``rocket_gps_cosim`` writes a ``.config`` sidecar next to the truth log and
-``plot_results.py`` puts it at the foot of each plot. That matters because
-``plot_results.py`` will happily draw a full GPS fix stream from an
-envelope-unlocked run, and a PNG showing one, detached from whatever caption
-accompanied it, reads as a flat contradiction of everything below. The three
-figures shipped here all come from the default configuration and say so.
+``plot_results.py`` puts it at the foot of each plot. The GPS figures below
+are meaningless without it: the same script run against ``--no-cocom`` output
+produces plots that look identical in form and say the opposite thing, and a
+PNG detached from its caption has no other way to tell you which it is.
 
 .. figure:: _static/rocket_gps_ecos/gps_availability.png
    :width: 100%
-   :alt: Two panels, altitude and speed against time on log axes, with the COCOM and platform-model thresholds marked and the whole flight shaded as a no-fix window
+   :alt: Two panels, altitude and speed against time on log axes, with the COCOM thresholds marked and everything past 31 s shaded as a no-fix window
 
-   **The default configuration, envelope in force.** Altitude and speed against
-   the limits that took the fix away; the shading is every epoch the receiver
-   reported no solution, which is all of them but the first. Neither threshold
-   explains that first loss — the 4 g platform *acceleration* limit trips on
-   the second navigation epoch, before the vehicle has cleared 20 m — but
-   between them they explain why it never comes back: above 18 km *and*
-   515 m/s the COCOM cut-off holds, and above 80 km so does the platform
-   model's altitude ceiling.
+   Altitude and speed against the export thresholds, with every epoch the
+   receiver reported no solution shaded. The **AND** is the whole point: the
+   vehicle passes 515 m/s at t = 10.1 s and nothing happens, because it is
+   only 2 km up; the fix goes when it crosses 18 km at t = 31.2 s already
+   doing 2 km/s, and from there both conditions hold to the end of the flight.
+   That is why the answer is 31.2 s and not 10.1 s.
 
-This is the only GPS figure, because it is the only honest one. A
-launch-vehicle receiver reports a single usable fix across this flight, so
-altitude, speed and decoded-fix-error plots have nothing to draw — and drawing
-them from a ``--dyn-model -1 --no-cocom`` run instead would put three figures
-full of GPS data on a page whose point is that there is none. That
-configuration exists as a knob for anyone who wants to exercise the fix stream
-(``plot_results.py`` will draw all six from it), but a receiver with its export
-limits switched off is not a vehicle anyone flies, and its output does not
-belong here as a result.
+.. figure:: _static/rocket_gps_ecos/altitude_vs_time.png
+   :width: 100%
+   :alt: Altitude vs time: truth line with decoded GPS fixes over the first 31 s only, the rest of the flight shaded as a no-fix window
 
-The injected receiver noise is still worth checking, and it can be: run with
-the envelope unlocked and ``gps_error.png`` shows the horizontal RMS on
-:math:`1.5\sqrt{2} = 2.12` m and the vertical on 3 m, matching
-``GpsNoiseConfig`` exactly — the error the flight software sees is the error
-that was injected, with no distortion from the encode/transmit/parse chain.
+   Truth altitude and the fixes the flight software decoded. The fixes stop at
+   18 km and the shading takes over for the remaining 169 s — the same story as
+   the figure above, told in the data the flight software actually received
+   rather than in the limits that produced it.
+
+.. figure:: _static/rocket_gps_ecos/velocity_vs_time.png
+   :width: 100%
+   :alt: Speed over ground vs time, truth and UBX-reported gSpeed over the first 31 s, staging marker
+
+   Speed over ground: truth vs. the NAV-PVT ``gSpeed`` field the parser
+   recovered. The receiver goes quiet at 1.6 km/s, well before staging, and
+   never sees the 8 km/s the vehicle reaches on stage 2.
+
+.. figure:: _static/rocket_gps_ecos/gps_error.png
+   :width: 100%
+   :alt: Horizontal and vertical decoded-fix error vs truth over the 31 s of available fixes, rolling RMS on the expected sigma lines
+
+   Decoded-fix error against truth: every fix as a faint point, with a 10 s
+   rolling RMS over it. One panel per component, because the two have different
+   scales and whichever was drawn second simply hid the other.
+
+   The RMS lines are the check. ``GpsNoiseConfig`` injects 1.5 m 1-sigma
+   independently into north and east, so the *magnitude* of the horizontal
+   error has RMS :math:`1.5\sqrt{2} = 2.12` m; vertical is a single axis at
+   3 m. Both lines sit on those values — the error the flight software sees is
+   *exactly* the error that was injected, with no distortion added by the
+   encode/transmit/parse chain. Note the x-axis: this is the 31 s of fixes the
+   export limits leave, and it is the whole of what a COCOM-limited receiver
+   gives you to characterise.
 
 .. figure:: _static/rocket_gps_ecos/imu_specific_force.png
    :width: 100%

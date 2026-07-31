@@ -13,9 +13,9 @@
 /// * **GPS** -- the GPS FMU's UBX-NAV-PVT stream arrives over UDP and goes
 ///   through the unmodified GpsDriver/UbxParser. On hardware those bytes come
 ///   off a UART RX line instead. The receiver's dynamics envelope is in force
-///   (airborne <4 g platform model + COCOM limits), so the stream has long,
-///   deliberate holes in it during boost and above the export thresholds --
-///   this program logs and counts them rather than pretending otherwise.
+///   -- by default the COCOM export limits alone -- so the stream stops dead
+///   partway up and never resumes; this program logs and counts the outage
+///   rather than pretending otherwise.
 /// * **IMU** -- the IMU is an SPI part, so the flight computer drives it with
 ///   the unmodified on-target ImuSpiDriver: sample the data-ready line, read
 ///   STATUS/FIFO_COUNT, burst the FIFO port, feed every byte to
@@ -24,6 +24,19 @@
 ///   chip-select-framed transfers on a shared-memory bus (sim/spi_shm) the
 ///   hardware-simulator FMU answers; on the target that same interface wraps
 ///   HAL_SPI_TransmitReceive plus the CS and DRDY GPIOs.
+///
+/// Everything *around* those two stacks is harness, not firmware, and has no
+/// counterpart on the target: the command line, the UDP socket, std::filesystem
+/// and std::ofstream, and the std::cout/std::printf progress and summary lines.
+/// On the STM32H743 this file's job is done by a pair of FreeRTOS tasks whose
+/// output goes to a telemetry downlink and flash, and whose diagnostics go to
+/// SEGGER RTT or a lock-free ring buffer drained over DMA UART -- not to
+/// iostream, which costs tens of kilobytes of flash for locale machinery,
+/// runs its static initializer before the scheduler starts, is task-safe only
+/// with configUSE_NEWLIB_REENTRANT, and blocks the calling task on the UART.
+/// The boundary is the driver layer: everything below it (GpsDriver, UbxParser,
+/// ImuSpiDriver, ImuPacketParser, convert_raw_to_si) is freestanding -- caller-
+/// owned buffers, no heap, no exceptions, no stdio -- and crosses unchanged.
 ///
 /// Every decoded fix and IMU sample is appended to a CSV so plot_results.py
 /// can compare what the flight software *believes* against the rocket truth
@@ -517,8 +530,10 @@ int main(int argc, char** argv)
             << valid_fix_count << " carried a fix, " << no_fix_epochs << " did not\n";
   if (no_fix_epochs > 0)
   {
+    // Which limit did it is the receiver's business, not the flight computer's:
+    // NAV-PVT carries a cleared gnssFixOK flag and nothing about why.
     std::cout << "[fc] no-fix window: t=" << first_outage_s << " s to t=" << last_outage_s
-              << " s (receiver dynamics envelope: platform model + COCOM limits)\n";
+              << " s (receiver outside its dynamics envelope)\n";
   }
   std::cout << "[fc] " << imu_sample_count << " IMU samples decoded over " << imu_bus.transfers() << " SPI transfers ("
             << imu_checksum_errors << " checksum errors, " << imu_fifo_overflows << " FIFO overflows, "

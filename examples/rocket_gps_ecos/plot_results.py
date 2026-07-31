@@ -23,18 +23,19 @@ Usage (from the co-simulation working directory, after a run):
                            [--fixes results/gps_fixes.csv]
                            [--imu results/imu_samples.csv] [--out plots/]
 
-With the receiver's dynamics envelope in force a launch vehicle can produce
-*no* usable fixes at all, so the three fix-dependent figures are skipped rather
-than drawn empty; gps_availability.png is the one that still says something,
-and the IMU figures are unaffected. That is the realistic case and the one the
-documentation ships.
+The default configuration (COCOM export limits, no platform model) leaves 312
+of 2001 epochs with a usable fix, which is enough to draw all six. A tighter
+envelope can leave fewer: ``--dyn-model 8`` leaves *one*, because the airborne
+<4 g model's acceleration limit trips on the second epoch of a launch. Below
+two usable epochs the fix-dependent figures are skipped rather than drawn
+empty; gps_availability.png still says something either way, and the IMU
+figures are unaffected.
 
-Running the co-simulation with ``--dyn-model -1 --no-cocom`` produces a fix at
-every epoch and all six figures will be drawn, which is useful for exercising
-the fix stream -- the GPS noise round-trip can only be measured where there are
-fixes to measure it on. It is not a configuration anyone flies, so those
-figures are for inspection rather than publication; every figure carries the
-configuration that produced it at its foot for exactly that reason.
+Every figure is stamped at its foot with the receiver configuration that
+produced it, read from the ``.config`` sidecar rocket_gps_cosim writes beside
+the truth log. Run this against ``--no-cocom`` output and the plots are
+identical in form while saying the opposite thing, so the stamp is the only
+thing distinguishing them once a PNG leaves its caption behind.
 
 Only matplotlib is required. The truth CSV is Ecos csv_writer output
 (", "-separated, "name[TYPE]" headers); the fix and IMU CSVs are written by
@@ -305,14 +306,20 @@ def plot_velocity(truth, fixes, outages, out: Path, caption: str) -> None:
     plt.close(fig)
 
 
-def plot_gps_availability(truth, outages, out: Path, caption: str) -> None:
+def plot_gps_availability(truth, outages, out: Path, caption: str, config: dict[str, str]) -> None:
     """Shows the truth state against the limits that took the fix away.
 
     Two panels sharing a time axis, because the COCOM cut-off is an AND of
-    altitude and speed and neither alone explains the dropout. The platform
-    model's own limits are drawn alongside: for a launch vehicle they bite
-    first, and they bite before the vehicle has left the pad by much.
+    altitude and speed and neither alone explains the dropout.
+
+    Which limits get drawn depends on which were in force. A platform model's
+    thresholds are only annotated when one is configured -- drawing an 80 km
+    ceiling that nothing is enforcing would invite the reader to attribute the
+    dropout to it.
     """
+    platform = config.get("dynamic_platform", "-1")
+    platform_active = platform != "-1"
+
     fig, (ax_alt, ax_vel) = plt.subplots(2, 1, figsize=(8.0, 5.4), dpi=150, sharex=True)
     fig.patch.set_facecolor(SURFACE)
     for ax, label in ((ax_alt, True), (ax_vel, False)):
@@ -327,10 +334,11 @@ def plot_gps_availability(truth, outages, out: Path, caption: str) -> None:
     ax_alt.plot(truth["time"], [a / 1000.0 for a in truth["alt_m"]],
                 color=TRUTH, linewidth=1.6, label="truth altitude")
     threshold(ax_alt, 18.0, "COCOM 18 km", "--")
-    threshold(ax_alt, 80.0, "airborne <4 g platform max, 80 km", ":")
+    if platform_active:
+        threshold(ax_alt, 80.0, f"dynModel {platform} platform max, 80 km", ":")
     # Log above the thresholds, linear through them: the interesting crossings
-    # are three decades below apogee. The negative half of a symlog axis is
-    # dead space here, so it is clipped away.
+    # are three decades below the final altitude. The negative half of a symlog
+    # axis is dead space here, so it is clipped away.
     ax_alt.set_yscale("symlog", linthresh=10.0)
     ax_alt.set_ylim(bottom=0.0)
     ax_alt.set_ylabel("altitude [km]")
@@ -340,24 +348,30 @@ def plot_gps_availability(truth, outages, out: Path, caption: str) -> None:
     speed_3d = [math.sqrt(n * n + e * e + d * d)
                 for n, e, d in zip(truth["v_north_m_s"], truth["v_east_m_s"], truth["v_down_m_s"])]
     ax_vel.plot(truth["time"], speed_3d, color=TRUTH, linewidth=1.6, label="truth speed (3-D)")
-    # The platform model's own 500 m/s horizontal cap sits 3% below the COCOM
-    # threshold; drawing both would be two lines saying the same thing at this
-    # scale, so only the export limit is marked.
-    threshold(ax_vel, 515.0, "COCOM 515 m/s (platform cap 500 m/s just below)", "--")
+    speed_label = "COCOM 515 m/s"
+    if platform_active:
+        # A platform model's own horizontal cap sits just below the export
+        # threshold; two lines would say the same thing at this scale.
+        speed_label += " (platform cap 500 m/s just below)"
+    threshold(ax_vel, 515.0, speed_label, "--")
     ax_vel.set_yscale("symlog", linthresh=100.0)
     ax_vel.set_ylim(bottom=0.0)
     ax_vel.set_xlabel("simulation time [s]")
     ax_vel.set_ylabel("speed [m/s]")
     legend(ax_vel)
 
-    # Neither panel explains the *first* loss: the platform model's 4 g
-    # acceleration limit trips on the second navigation epoch, long before
-    # either threshold above is crossed. Say so rather than leaving the reader
-    # to infer a cause the figure does not show.
+    # Mark where the fix actually goes, and name the cause the panels support.
+    # With COCOM alone that is the altitude crossing (speed passed 515 m/s long
+    # before, and the cut-off is an AND); with a platform model configured it
+    # is whichever of its limits bit first, which on a launch vehicle is the
+    # acceleration one and is not visible on either axis.
     if outages:
-        ax_alt.annotate(f"fix lost at t = {outages[0][0]:.1f} s\n(4 g platform acceleration limit)",
-                        xy=(outages[0][0], 0.0), xycoords="data",
-                        xytext=(46, 14), textcoords="offset points", fontsize=8, color=INK_2,
+        lost = outages[0][0]
+        cause = ("platform-model limit, before either threshold above" if platform_active
+                 else "18 km crossing; 515 m/s was passed at t = 10.1 s")
+        ax_alt.annotate(f"fix lost at t = {lost:.1f} s\n({cause})",
+                        xy=(lost, 18.0), xycoords="data",
+                        xytext=(28, -34), textcoords="offset points", fontsize=8, color=INK_2,
                         arrowprops=dict(arrowstyle="->", color=INK_2, linewidth=0.9))
 
     stamp(fig, caption)
@@ -483,7 +497,8 @@ def main() -> None:
     truth = read_truth(args.truth)
     fixes = read_fixes(args.fixes)
     outages = read_outages(args.fixes)
-    caption = config_caption(read_run_config(args.truth))
+    config = read_run_config(args.truth)
+    caption = config_caption(config)
     args.out.mkdir(parents=True, exist_ok=True)
     print(caption)
 
@@ -498,7 +513,7 @@ def main() -> None:
               f"(receiver dynamics envelope: {windows}); plotting the {valid} valid ones")
 
     figures = 0
-    plot_gps_availability(truth, outages, args.out, caption)
+    plot_gps_availability(truth, outages, args.out, caption, config)
     figures += 1
 
     # Two fixes is the least that says anything: one point draws no track and
@@ -511,7 +526,8 @@ def main() -> None:
         figures += 3
     else:
         print(f"only {valid} epoch(s) carried a fix -- skipping the three fix-dependent figures. "
-              f"Rerun the co-simulation with --dyn-model -1 --no-cocom for a receiver that keeps one.")
+              f"A platform model on top of COCOM (--dyn-model 8) does this: its acceleration limit "
+              f"trips on the second epoch of a launch.")
 
     if args.imu.exists():
         imu = read_fixes(args.imu)  # same plain-CSV shape as the fix log
