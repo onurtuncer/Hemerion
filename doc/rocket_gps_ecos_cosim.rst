@@ -375,21 +375,21 @@ from raw bytes:
    [fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
    [fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi'
    [fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
-   [fc] fix     1  t=    0.1 s  lat=  0.0000069  lon=  -0.0000058  alt=      2.1 m  vel=    0.1 m/s  crs=149.3 deg  sats=11
+   [fc] fix     1  t=    0.1 s  lat=  0.0000125  lon=  -0.0000173  alt=     -0.9 m  vel=    0.1 m/s  crs=150.3 deg  sats=11
+   [fc] imu      1  t=    0.1 s  f=[   54.27    0.01   -0.05] m/s2  w=[ -0.0021  0.0000 -0.0021] rad/s
    [fc] fix     2  t=    0.2 s  no fix -- receiver outside its dynamics envelope
-   [fc] imu      1  t=    0.1 s  f=[   54.28    0.02    0.02] m/s2  w=[ -0.0011  0.0000  0.0000] rad/s
-   [fc] imu   3000  t=   30.1 s  f=[   97.97    0.06   -0.06] m/s2  w=[  0.0032 -0.0181  0.0000] rad/s
-   [fc] imu   4000  t=   40.1 s  f=[   -0.96    0.02   -0.15] m/s2  w=[  0.0032  0.0000  0.0043] rad/s
-   [fc] imu  10000  t=  100.1 s  f=[   -0.06    0.10    0.05] m/s2  w=[  0.0032 -0.0053  0.0032] rad/s
-   [fc] imu  14000  t=  140.1 s  f=[   56.57   -0.05    0.04] m/s2  w=[  0.0032 -0.0021  0.0000] rad/s
-   [fc] imu  19000  t=  190.1 s  f=[  217.83    0.06   -0.05] m/s2  w=[  0.0011 -0.0021  0.0032] rad/s
-   [fc] imu  20000  t=  200.1 s  f=[    0.10   -0.06    0.05] m/s2  w=[  0.0032 -0.0043  0.0011] rad/s
+   [fc] imu   3000  t=   30.1 s  f=[   97.89    0.00   -0.17] m/s2  w=[ -0.0021 -0.0202 -0.0032] rad/s
+   [fc] imu   4000  t=   40.1 s  f=[   -0.92   -0.04   -0.18] m/s2  w=[  0.0000  0.0000 -0.0032] rad/s
+   [fc] imu  10000  t=  100.1 s  f=[    0.01    0.01    0.10] m/s2  w=[  0.0000 -0.0043  0.0011] rad/s
+   [fc] imu  14000  t=  140.1 s  f=[   56.55   -0.10    0.07] m/s2  w=[  0.0032 -0.0021 -0.0021] rad/s
+   [fc] imu  19000  t=  190.1 s  f=[  217.88    0.02    0.04] m/s2  w=[  0.0000 -0.0032  0.0032] rad/s
+   [fc] imu  20000  t=  200.1 s  f=[    0.02    0.04   -0.04] m/s2  w=[  0.0021 -0.0032 -0.0043] rad/s
    [fc] IMU powered down (FMU terminated) -- co-simulation finished
    [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 1 carried a fix, 2000 did not
    [fc] no-fix window: t=0.2 s to t=200.1 s (receiver dynamics envelope: platform model + COCOM limits)
-   [fc] 20000 IMU samples decoded over 12808 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
-   [fc] max altitude 2.086 m, max ground speed 0.073 m/s (over 1 fix carrying a solution)
-   [fc] max |specific force| 264.62 m/s2, max |body rate| 0.0566044 rad/s
+   [fc] 20000 IMU samples decoded over 12355 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+   [fc] max altitude 0 m, max ground speed 0.084 m/s (over 1 fix carrying a solution)
+   [fc] max |specific force| 264.706 m/s2, max |body rate| 0.0564441 rad/s
    [fc] fixes written to results/gps_fixes.csv, IMU samples to results/imu_samples.csv
 
 Read the GPS line again: **one fix, out of 2001 navigation epochs.** The
@@ -404,7 +404,7 @@ ceiling holds it dark for the rest of the flight. Flight software that assumes
 GNSS through boost has just been shown otherwise.
 
 The IMU line is the other half: **20000 of 20010 samples decoded, zero
-checksum errors, zero FIFO overflows, zero failed transfers**, across 12808
+checksum errors, zero FIFO overflows, zero failed transfers**, across 12355
 chip-select-framed SPI transfers. The ten missing samples are the ones the FMU
 buffered before the flight computer probed — ``probe()`` writes ``FIFO_RESET``,
 exactly as a driver clearing whatever accumulated before it took over. Every
@@ -493,6 +493,14 @@ the flight computer's fix and IMU-sample logs — into the figures below:
 .. code-block:: console
 
    $ python plot_results.py       # reads results/, writes plots/
+
+Every figure is stamped with the receiver configuration that produced it.
+That is not decoration: three of the six can only be drawn from the
+envelope-unlocked run, where the GPS reports at every epoch, and detached from
+its caption such a figure reads as a flat contradiction of the COCOM result
+below it. ``rocket_gps_cosim`` writes a ``.config`` sidecar next to the truth
+log and ``plot_results.py`` puts it at the foot of each plot, so a stray PNG
+still says which of the two runs it came from.
 
 .. figure:: _static/rocket_gps_ecos/gps_availability.png
    :width: 100%

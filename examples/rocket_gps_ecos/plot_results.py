@@ -178,6 +178,48 @@ def legend(ax) -> None:
         text.set_color(INK_2)
 
 
+def read_run_config(truth_path: Path) -> dict[str, str]:
+    """Reads the `<truth stem>.config` sidecar rocket_gps_cosim writes, if present."""
+    path = truth_path.with_suffix(".config")
+    if not path.exists():
+        return {}
+    config: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        key, _, value = line.partition("=")
+        if key and value:
+            config[key.strip()] = value.strip()
+    return config
+
+
+def config_caption(config: dict[str, str]) -> str:
+    """One line describing the receiver configuration a run used.
+
+    Every figure carries this. Without it the envelope-unlocked comparison run
+    -- which reports a fix at every epoch -- looks like a contradiction of the
+    COCOM result the default configuration produces, and there is nothing in
+    the image to tell the two apart.
+    """
+    if not config:
+        return "run configuration unknown (no .config sidecar beside the truth log)"
+
+    platform = config.get("dynamic_platform", "?")
+    cocom = config.get("cocom_limits_enabled", "?") == "1"
+    if platform == "-1" and not cocom:
+        return ("receiver dynamics envelope DISABLED (--dyn-model -1 --no-cocom): "
+                "a waivered receiver, reporting through the whole flight")
+    limits = []
+    if platform != "-1":
+        limits.append(f"u-blox dynModel {platform}")
+    limits.append("COCOM limits in force" if cocom else "COCOM limits cleared")
+    return "receiver dynamics envelope: " + ", ".join(limits)
+
+
+def stamp(fig, caption: str) -> None:
+    """Puts the run's provenance at the foot of a figure, out of the data's way."""
+    fig.tight_layout(rect=(0.0, 0.045, 1.0, 1.0))
+    fig.text(0.5, 0.012, caption, ha="center", va="bottom", fontsize=8, color=INK_2)
+
+
 def rolling_rms(values: list[float], window: int = 101) -> list[float]:
     """Centred rolling RMS, for reading a noise level off a cloud of samples."""
     out: list[float] = []
@@ -201,7 +243,7 @@ def annotate_event(ax, x: float, label: str) -> None:
                 ha="left", va="top", fontsize=8, color=INK_2)
 
 
-def plot_altitude(truth, fixes, outages, out: Path) -> None:
+def plot_altitude(truth, fixes, outages, out: Path, caption: str) -> None:
     fig, ax = new_figure()
     shade_outages(ax, outages)
     # GPS dots first, truth line on top -- the two overlap almost everywhere,
@@ -230,12 +272,12 @@ def plot_altitude(truth, fixes, outages, out: Path) -> None:
     ax.set_ylabel("altitude above MSL [km]")
     ax.set_title("Two-stage rocket ascent: truth vs. decoded GPS altitude")
     legend(ax)
-    fig.tight_layout()
+    stamp(fig, caption)
     fig.savefig(out / "altitude_vs_time.png", facecolor=SURFACE)
     plt.close(fig)
 
 
-def plot_velocity(truth, fixes, outages, out: Path) -> None:
+def plot_velocity(truth, fixes, outages, out: Path, caption: str) -> None:
     fig, ax = new_figure()
     shade_outages(ax, outages)
     speed = [math.hypot(n, e) for n, e in zip(truth["v_north_m_s"], truth["v_east_m_s"])]
@@ -251,12 +293,12 @@ def plot_velocity(truth, fixes, outages, out: Path) -> None:
     ax.set_ylabel("speed over ground [m/s]")
     ax.set_title("Speed over ground: truth vs. UBX-NAV-PVT gSpeed")
     legend(ax)
-    fig.tight_layout()
+    stamp(fig, caption)
     fig.savefig(out / "velocity_vs_time.png", facecolor=SURFACE)
     plt.close(fig)
 
 
-def plot_gps_availability(truth, outages, out: Path) -> None:
+def plot_gps_availability(truth, outages, out: Path, caption: str) -> None:
     """Shows the truth state against the limits that took the fix away.
 
     Two panels sharing a time axis, because the COCOM cut-off is an AND of
@@ -311,12 +353,12 @@ def plot_gps_availability(truth, outages, out: Path) -> None:
                         xytext=(46, 14), textcoords="offset points", fontsize=8, color=INK_2,
                         arrowprops=dict(arrowstyle="->", color=INK_2, linewidth=0.9))
 
-    fig.tight_layout()
+    stamp(fig, caption)
     fig.savefig(out / "gps_availability.png", facecolor=SURFACE)
     plt.close(fig)
 
 
-def plot_gps_error(truth, fixes, step: float, out: Path) -> None:
+def plot_gps_error(truth, fixes, step: float, out: Path, caption: str) -> None:
     # Truth rows and fixes share the 10 Hz grid (one NAV-PVT per step), so
     # align by rounded time rather than interpolating. The fix emitted at the
     # end of step k carries the truth sampled at the end of step k-1 -- the
@@ -374,12 +416,12 @@ def plot_gps_error(truth, fixes, step: float, out: Path) -> None:
         legend(ax)
     ax_h.set_title("GPS error injected by GpsNoiseModel, recovered end-to-end")
     ax_v.set_xlabel("simulation time [s]")
-    fig.tight_layout()
+    stamp(fig, caption)
     fig.savefig(out / "gps_error.png", facecolor=SURFACE)
     plt.close(fig)
 
 
-def plot_imu_specific_force(truth, imu, out: Path) -> None:
+def plot_imu_specific_force(truth, imu, out: Path, caption: str) -> None:
     # The truth CSV's f_x/f_y/f_z columns are the imu:: input variables --
     # exactly the zero-order-held value the IMU FMU sampled (already one
     # communication step behind rocket truth, like every connection), so no
@@ -400,12 +442,12 @@ def plot_imu_specific_force(truth, imu, out: Path) -> None:
     ax.set_ylabel("body-X specific force [m/s²]")
     ax.set_title("Boost-phase acceleration: truth vs. decoded IMU counts")
     legend(ax)
-    fig.tight_layout()
+    stamp(fig, caption)
     fig.savefig(out / "imu_specific_force.png", facecolor=SURFACE)
     plt.close(fig)
 
 
-def plot_imu_body_rates(truth, imu, out: Path) -> None:
+def plot_imu_body_rates(truth, imu, out: Path, caption: str) -> None:
     fig, ax = new_figure()
     for axis, color, marker_alpha in (("x", TRUTH, 0.2), ("y", GPS, 0.2), ("z", INK_2, 0.2)):
         ax.plot(imu["sim_time_s"], imu[f"gyro_{axis}_rad_s"],
@@ -418,7 +460,7 @@ def plot_imu_body_rates(truth, imu, out: Path) -> None:
     ax.set_ylabel("body angular rate [rad/s]")
     ax.set_title("Body rates: truth p/q/r vs. decoded gyroscope samples")
     legend(ax)
-    fig.tight_layout()
+    stamp(fig, caption)
     fig.savefig(out / "imu_body_rates.png", facecolor=SURFACE)
     plt.close(fig)
 
@@ -434,7 +476,9 @@ def main() -> None:
     truth = read_truth(args.truth)
     fixes = read_fixes(args.fixes)
     outages = read_outages(args.fixes)
+    caption = config_caption(read_run_config(args.truth))
     args.out.mkdir(parents=True, exist_ok=True)
+    print(caption)
 
     times = truth["time"]
     step = min(b - a for a, b in zip(times, times[1:])) if len(times) > 1 else 0.1
@@ -447,16 +491,16 @@ def main() -> None:
               f"(receiver dynamics envelope: {windows}); plotting the {valid} valid ones")
 
     figures = 0
-    plot_gps_availability(truth, outages, args.out)
+    plot_gps_availability(truth, outages, args.out, caption)
     figures += 1
 
     # Two fixes is the least that says anything: one point draws no track and
     # the error figure needs a pair to align against truth. A launch-vehicle
     # envelope really can leave fewer than that, so skip rather than crash.
     if valid >= 2:
-        plot_altitude(truth, fixes, outages, args.out)
-        plot_velocity(truth, fixes, outages, args.out)
-        plot_gps_error(truth, fixes, step, args.out)
+        plot_altitude(truth, fixes, outages, args.out, caption)
+        plot_velocity(truth, fixes, outages, args.out, caption)
+        plot_gps_error(truth, fixes, step, args.out, caption)
         figures += 3
     else:
         print(f"only {valid} epoch(s) carried a fix -- skipping the three fix-dependent figures. "
@@ -464,8 +508,8 @@ def main() -> None:
 
     if args.imu.exists():
         imu = read_fixes(args.imu)  # same plain-CSV shape as the fix log
-        plot_imu_specific_force(truth, imu, args.out)
-        plot_imu_body_rates(truth, imu, args.out)
+        plot_imu_specific_force(truth, imu, args.out, caption)
+        plot_imu_body_rates(truth, imu, args.out, caption)
         figures += 2
     print(f"wrote {figures} figures to {args.out}/")
 

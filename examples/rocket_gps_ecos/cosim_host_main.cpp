@@ -326,6 +326,42 @@ bool parse_args(int argc, char** argv, Options& options)
   return false;
 }
 
+/// @brief Records the run's configuration next to its truth log.
+///
+/// A figure that does not say which configuration produced it will eventually
+/// be read as if it came from the other one -- and with this example the two
+/// differ on whether the GPS reports anything at all, so the misreading is
+/// guaranteed rather than merely possible. plot_results.py picks this file up
+/// and stamps the receiver settings onto every figure it draws, so a stray PNG
+/// still carries its own provenance.
+///
+/// Written as `<truth log stem>.config` beside the CSV, in trivial key=value
+/// lines: it is read by one script and by humans, and nothing here justifies a
+/// parser.
+void write_run_config(const std::filesystem::path& csv_path, const Options& options)
+{
+  std::filesystem::path config_path = csv_path;
+  config_path.replace_extension(".config");
+  std::ofstream out(config_path);
+  if (!out)
+  {
+    // Losing the provenance stamp must not lose the run.
+    std::cerr << "warning: cannot write " << config_path.string() << "; figures will be unlabelled\n";
+    return;
+  }
+  out << "dynamic_platform=" << options.dynamic_platform << "\n"
+      << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
+      << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
+      << "stg2_ignition_s=" << options.stg2_ignition_s << "\n"
+      << "lat0_deg=" << options.lat0_deg << "\n"
+      << "lon0_deg=" << options.lon0_deg << "\n"
+      << "alt0_m=" << options.alt0_m << "\n"
+      << "step_s=" << options.step_s << "\n"
+      << "stop_s=" << options.stop_s << "\n"
+      << "imu_rate_hz=" << options.imu_rate_hz << "\n"
+      << "realtime_factor=" << options.realtime_factor << "\n";
+}
+
 /// @brief Truth log, written by the host rather than by Ecos' ``csv_writer``.
 ///
 /// ``csv_writer`` formats every real with a default-configured ostringstream:
@@ -536,6 +572,7 @@ int main(int argc, char** argv)
                             "imu::f_y_mps2",
                             "imu::f_z_mps2" },
                           { "rocket::out.staged" });
+    write_run_config(options.csv_path, options);
 
     auto* altitude = sim->get_real_property("rocket::out.alt_m");
     auto* mach = sim->get_real_property("rocket::out.mach");
