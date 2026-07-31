@@ -92,7 +92,8 @@ ceiling holds it dark for the rest of the flight. A stock COTS receiver gives th
 GPS, and flight software that assumes otherwise has just been shown so.
 
 `--dyn-model -1 --no-cocom` gives the unrestricted stream of a waivered receiver — 2001 of 2001 epochs with a
-fix — which is what the comparison figures in the Sphinx page are drawn from.
+fix. It is a knob for exercising the fix stream (the GPS noise round-trip is only measurable when there are
+fixes to measure), not a configuration anyone flies, so no figure in the documentation is drawn from it.
 
 ## The plant is checked, not assumed
 
@@ -234,17 +235,22 @@ Outputs land in `results/`:
 ## Plots
 
 `plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
-(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, speed over
-ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates against truth:
+(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, and the decoded IMU
+specific force and body rates against truth.
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
 
-With the envelope in force this flight yields one usable fix, so the four fix-dependent figures are skipped
-rather than drawn empty — `gps_availability.png` is the one that still says something, and the IMU figures
-are unaffected. Run the co-simulation a second time with `--dyn-model -1 --no-cocom` (and `--csv` /
-`--imu-csv` pointing elsewhere) to get a fix stream to plot against.
+Those three are what a realistic configuration can show. With the envelope in force this flight yields one
+usable fix, so the altitude, speed-over-ground and decoded-fix-error figures have nothing to draw and are
+skipped rather than drawn empty. The script will produce all six from an envelope-unlocked run
+(`--dyn-model -1 --no-cocom`, with `--csv`/`--imu-csv` pointing elsewhere) if you want to exercise the fix
+stream — but that receiver is not one anyone flies, so none of its output is documented as a result.
+
+Every figure is stamped at the foot with the receiver configuration that produced it, read from the `.config`
+sidecar `rocket_gps_cosim` writes next to the truth log. A plot showing GPS across a whole launch is not
+wrong, it is just from the other configuration, and it should not take a caption to know which.
 
 ## Notes and design decisions
 

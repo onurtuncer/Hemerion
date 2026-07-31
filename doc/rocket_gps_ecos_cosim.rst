@@ -420,21 +420,6 @@ by t = 190 s, and zero again after burnout. An accelerometer does not sense
 gravity, so free fall reads zero however fast the vehicle is actually
 accelerating toward the Earth.
 
-For comparison, the same flight with ``--dyn-model -1 --no-cocom`` — a
-waivered, envelope-unlocked receiver:
-
-.. code-block:: text
-
-   [cosim] receiver: dynModel -1, COCOM limits disabled, re-acquisition 2 s
-   ...
-   [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 2001 carried a fix, 0 did not
-   [fc] 20000 IMU samples decoded over 14339 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
-   [fc] max altitude 236495 m, max ground speed 8065.02 m/s (fixes the receiver actually reported)
-
-Four of the figures below need a fix stream to say anything at all, so they
-come from that second run; ``plot_results.py`` skips them rather than drawing
-them empty when the envelope leaves fewer than two usable epochs.
-
 .. _rocket_gps_ecos_verification:
 
 Checking the plant against the published trajectory
@@ -494,13 +479,13 @@ the flight computer's fix and IMU-sample logs — into the figures below:
 
    $ python plot_results.py       # reads results/, writes plots/
 
-Every figure is stamped with the receiver configuration that produced it.
-That is not decoration: three of the six can only be drawn from the
-envelope-unlocked run, where the GPS reports at every epoch, and detached from
-its caption such a figure reads as a flat contradiction of the COCOM result
-below it. ``rocket_gps_cosim`` writes a ``.config`` sidecar next to the truth
-log and ``plot_results.py`` puts it at the foot of each plot, so a stray PNG
-still says which of the two runs it came from.
+Every figure is stamped with the receiver configuration that produced it —
+``rocket_gps_cosim`` writes a ``.config`` sidecar next to the truth log and
+``plot_results.py`` puts it at the foot of each plot. That matters because
+``plot_results.py`` will happily draw a full GPS fix stream from an
+envelope-unlocked run, and a PNG showing one, detached from whatever caption
+accompanied it, reads as a flat contradiction of everything below. The three
+figures shipped here all come from the default configuration and say so.
 
 .. figure:: _static/rocket_gps_ecos/gps_availability.png
    :width: 100%
@@ -513,41 +498,23 @@ still says which of the two runs it came from.
    the second navigation epoch, before the vehicle has cleared 20 m — but
    between them they explain why it never comes back: above 18 km *and*
    515 m/s the COCOM cut-off holds, and above 80 km so does the platform
-   model's altitude ceiling. The remaining GPS figures need a fix stream, so
-   they come from the ``--dyn-model -1 --no-cocom`` run.
+   model's altitude ceiling.
 
-.. figure:: _static/rocket_gps_ecos/altitude_vs_time.png
-   :width: 100%
-   :alt: Altitude vs time: truth line with decoded GPS fixes overlaid, staging marker at 37.4 s, 236 km at cut-off
+This is the only GPS figure, because it is the only honest one. A
+launch-vehicle receiver reports a single usable fix across this flight, so
+altitude, speed and decoded-fix-error plots have nothing to draw — and drawing
+them from a ``--dyn-model -1 --no-cocom`` run instead would put three figures
+full of GPS data on a page whose point is that there is none. That
+configuration exists as a knob for anyone who wants to exercise the fix stream
+(``plot_results.py`` will draw all six from it), but a receiver with its export
+limits switched off is not a vehicle anyone flies, and its output does not
+belong here as a result.
 
-   *Envelope-unlocked run.* Truth altitude and the fixes the flight software
-   decoded. At this scale the two are indistinguishable — which is the point.
-
-
-.. figure:: _static/rocket_gps_ecos/velocity_vs_time.png
-   :width: 100%
-   :alt: Speed over ground vs time, truth and UBX-reported gSpeed, staging marker
-
-   *Envelope-unlocked run.* Speed over ground: truth vs. the NAV-PVT
-   ``gSpeed`` field the parser recovered. Stage 1 accelerates to ~2.4 km/s, the
-   coast bleeds a little of it off against thinning air, and stage 2 takes the
-   vehicle to ~8 km/s by burnout.
-
-.. figure:: _static/rocket_gps_ecos/gps_error.png
-   :width: 100%
-   :alt: Horizontal and vertical decoded-fix error vs truth, flat noise band around the 1.5 m one-sigma line
-
-   *Envelope-unlocked run.* Decoded-fix error against truth: every fix as a
-   faint point, with a 10 s rolling RMS over it. One panel per component,
-   because the two have different scales and whichever was drawn second simply
-   hid the other.
-
-   The RMS lines are the check. ``GpsNoiseConfig`` injects 1.5 m 1-sigma
-   independently into north and east, so the *magnitude* of the horizontal
-   error has RMS :math:`1.5\sqrt{2} = 2.12` m; vertical is a single axis at
-   3 m. Both lines sit on those values across three decades of altitude and
-   speed — the error the flight software sees is *exactly* the error that was
-   injected, with no distortion added by the encode/transmit/parse chain.
+The injected receiver noise is still worth checking, and it can be: run with
+the envelope unlocked and ``gps_error.png`` shows the horizontal RMS on
+:math:`1.5\sqrt{2} = 2.12` m and the vertical on 3 m, matching
+``GpsNoiseConfig`` exactly — the error the flight software sees is the error
+that was injected, with no distortion from the encode/transmit/parse chain.
 
 .. figure:: _static/rocket_gps_ecos/imu_specific_force.png
    :width: 100%

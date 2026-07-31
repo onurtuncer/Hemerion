@@ -24,10 +24,17 @@ Usage (from the co-simulation working directory, after a run):
                            [--imu results/imu_samples.csv] [--out plots/]
 
 With the receiver's dynamics envelope in force a launch vehicle can produce
-*no* usable fixes at all, so the four fix-dependent figures are skipped rather
+*no* usable fixes at all, so the three fix-dependent figures are skipped rather
 than drawn empty; gps_availability.png is the one that still says something,
-and the IMU figures are unaffected. Run the co-simulation a second time with
-``--dyn-model -1 --no-cocom`` to get a fix stream to compare against.
+and the IMU figures are unaffected. That is the realistic case and the one the
+documentation ships.
+
+Running the co-simulation with ``--dyn-model -1 --no-cocom`` produces a fix at
+every epoch and all six figures will be drawn, which is useful for exercising
+the fix stream -- the GPS noise round-trip can only be measured where there are
+fixes to measure it on. It is not a configuration anyone flies, so those
+figures are for inspection rather than publication; every figure carries the
+configuration that produced it at its foot for exactly that reason.
 
 Only matplotlib is required. The truth CSV is Ecos csv_writer output
 (", "-separated, "name[TYPE]" headers); the fix and IMU CSVs are written by
