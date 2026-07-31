@@ -183,6 +183,15 @@ std::optional<SpiShmController> SpiShmController::attach_within(const std::strin
 
 SpiShmController::SpiShmController(ShmSegment segment) : segment_(std::move(segment)) {}
 
+SpiShmController::~SpiShmController()
+{
+  // A moved-from controller has no mapping and must not touch the region.
+  if (segment_.data() != nullptr)
+  {
+    region().controller_attached.store(0, std::memory_order_release);
+  }
+}
+
 bool SpiShmController::transfer(const std::uint8_t* tx,
                                 std::uint8_t* rx,
                                 std::size_t length,

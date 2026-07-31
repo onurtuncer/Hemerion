@@ -89,9 +89,20 @@ struct Options
   std::filesystem::path gps_fmu = HEMERION_GPS_FMU_PATH;
   std::filesystem::path imu_fmu = HEMERION_IMU_FMU_PATH;
   std::filesystem::path csv_path = "results/rocket_truth.csv";
-  // The TwoStageRocket FMU (NASA TM-2015-218675 Scenario 17) reaches apogee around t = 232 s and holds its
-  // state constant from there on, so 240 s covers the whole interesting flight.
-  double stop_s = 240.0;
+  // NASA TM-2015-218675 Scenario 17 runs to 200 s: stage 1 burns out at 37.4 s, the vehicle coasts, stage 2
+  // ignites at 131.8 s and burns out at 193 s, and the check-case data ends 7 s later with the vehicle still
+  // climbing (it is a rocket *to orbit*, so there is no apogee inside the window). Those are the numbers the
+  // reference trajectory in Aetherion's data/Atmos_17_TwoStageRocketToOrbit/ is tabulated against.
+  double stop_s = 200.0;
+  // The FMU defaults this to 0 = "ignite stage 2 the moment stage 1 separates", which is *not* the scenario:
+  // it burns the second stage 94 s early and puts the vehicle 400 km high at t = 200 s instead of 234 km.
+  // Aetherion's own reference run derives the same figure as endTime - 7 s post-burn coast - 61.2 s burn.
+  double stg2_ignition_s = 131.8;
+  // Scenario 17's launch site is the equator on the prime meridian, pointing due east. Overridable, but the
+  // reference trajectory is only reproducible from here.
+  double lat0_deg = 0.0;
+  double lon0_deg = 0.0;
+  double alt0_m = 0.0;
   double step_s = 0.1;           // communication step == GPS output period (10 Hz)
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double realtime_factor = 0.0;  // 0 = run as fast as possible
@@ -108,6 +119,7 @@ void print_usage()
   std::cout << "usage: rocket_gps_cosim [--rocket <TwoStageRocket.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
                "                        [--imu <hemerion_imu_fmu.fmu>] [--imu-rate <hz>]\n"
                "                        [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
+               "                        [--stg2-ignition <s>] [--lat0 <deg>] [--lon0 <deg>] [--alt0 <m>]\n"
                "                        [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
                "\n"
                "  --rocket    path to Aetherion's TwoStageRocket.fmu (default: configure-time location)\n"
@@ -119,7 +131,11 @@ void print_usage()
                "  --no-cocom  clear the COCOM export cut-off, as on an export-licensed receiver (default: in force,\n"
                "              so navigation output stops above 18000 m AND 515 m/s)\n"
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
-               "  --stop      simulation stop time [s] (default 240; the rocket holds state after apogee ~232 s)\n"
+               "  --stg2-ignition  absolute time stage 2 lights [s] (default 131.8 = NASA Scenario 17; the\n"
+               "              FMU's own default of 0 means 'immediately after staging', which is a different\n"
+               "              flight profile and does not reproduce the reference trajectory)\n"
+               "  --lat0 --lon0 --alt0  launch site (default 0/0/0, Scenario 17's equatorial pad)\n"
+               "  --stop      simulation stop time [s] (default 200 = the reference trajectory's window)\n"
                "  --step      communication step size [s]; also the GPS fix period (default 0.1)\n"
                "  --csv       rocket truth output CSV (default results/rocket_truth.csv)\n"
                "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
@@ -164,6 +180,22 @@ bool parse_args(int argc, char** argv, Options& options)
     else if (arg == "--reacq" && (value = next()))
     {
       options.reacquisition_time_s = std::stod(value);
+    }
+    else if (arg == "--stg2-ignition" && (value = next()))
+    {
+      options.stg2_ignition_s = std::stod(value);
+    }
+    else if (arg == "--lat0" && (value = next()))
+    {
+      options.lat0_deg = std::stod(value);
+    }
+    else if (arg == "--lon0" && (value = next()))
+    {
+      options.lon0_deg = std::stod(value);
+    }
+    else if (arg == "--alt0" && (value = next()))
+    {
+      options.alt0_m = std::stod(value);
     }
     else if (arg == "--stop" && (value = next()))
     {
@@ -243,18 +275,24 @@ int main(int argc, char** argv)
     ss.make_connection<double>("rocket::out.q_rad_s", "imu::q_rad_s");
     ss.make_connection<double>("rocket::out.r_rad_s", "imu::r_rad_s");
 
-    // NASA Wallops Flight Facility launch range, firing due east over the
-    // Atlantic. pitch0/azimuth0 follow the FMU's NASA TM-2015-218675
-    // Scenario 17 defaults. solver.max_step_s is left at its default (0 =
+    // NASA TM-2015-218675 Scenario 17's initial conditions: equatorial pad on
+    // the prime meridian, due east, 55.22 deg nose-up. These are the
+    // conditions the published check-case trajectory
+    // (Aetherion's data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_06.csv) is
+    // tabulated from, so departing from them means the run can no longer be
+    // checked against anything. solver.max_step_s is left at its default (0 =
     // one implicit Radau step per communication step); the integrator is
     // L-stable, and capping sub-steps at 0.01 s costs ~10x the wall time for
     // no visible change in the 10 Hz GPS-grade outputs.
     ecos::parameter_set launch_site;
-    launch_site["rocket::lat0_deg"] = 37.8338;
-    launch_site["rocket::lon0_deg"] = -75.4879;
-    launch_site["rocket::alt0_m"] = 3.0;
+    launch_site["rocket::lat0_deg"] = options.lat0_deg;
+    launch_site["rocket::lon0_deg"] = options.lon0_deg;
+    launch_site["rocket::alt0_m"] = options.alt0_m;
     launch_site["rocket::azimuth0_deg"] = 90.0;
     launch_site["rocket::pitch0_deg"] = 55.22;
+    // Without this the FMU ignites stage 2 the moment stage 1 separates, which
+    // is a different flight entirely -- see the Options comment.
+    launch_site["rocket::stg2.ignition_time_s"] = options.stg2_ignition_s;
     // Not launch-site geometry, but sim->init() applies exactly one named
     // parameter set, so the sensor configuration rides along here.
     launch_site["imu::sample_rate_hz"] = options.imu_rate_hz;
@@ -328,6 +366,8 @@ int main(int argc, char** argv)
               << "[cosim] imu:    " << options.imu_fmu.string() << "\n"
               << "[cosim] step " << options.step_s << " s (" << 1.0 / options.step_s << " Hz GPS, "
               << options.imu_rate_hz << " Hz IMU), stop " << options.stop_s << " s\n"
+              << "[cosim] plant: launch " << options.lat0_deg << " deg N / " << options.lon0_deg << " deg E at "
+              << options.alt0_m << " m, stage 2 ignition at t=" << options.stg2_ignition_s << " s\n"
               << "[cosim] receiver: dynModel " << options.dynamic_platform << ", COCOM limits "
               << (options.cocom_limits ? "in force (18000 m AND 515 m/s)" : "disabled") << ", re-acquisition "
               << options.reacquisition_time_s << " s\n";
@@ -378,7 +418,10 @@ int main(int argc, char** argv)
     std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
               << " UBX-NAV-PVT frames emitted and " << sim->iterations() * std::max(1L, imu_frames_per_step)
               << " IMU samples buffered for the SPI controller\n"
-              << "[cosim] apogee " << apogee_m << " m at t=" << apogee_time_s << " s";
+              // Scenario 17 is a rocket *to orbit*: inside the reference
+              // window the vehicle is still climbing at cut-off, so this is
+              // the highest altitude reached, not an apogee.
+              << "[cosim] max altitude " << apogee_m << " m at t=" << apogee_time_s << " s";
     if (staging_time_s >= 0.0)
     {
       std::cout << ", staging at t=" << staging_time_s << " s";

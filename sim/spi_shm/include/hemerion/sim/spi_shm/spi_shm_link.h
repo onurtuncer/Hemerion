@@ -132,7 +132,9 @@ public:
   SpiShmController& operator=(const SpiShmController&) = delete;
   SpiShmController(SpiShmController&&) noexcept = default;
   SpiShmController& operator=(SpiShmController&&) noexcept = default;
-  ~SpiShmController() = default;
+  // Clears the attached flag, so a peripheral waiting for its buffers to be
+  // read out stops waiting once nobody is left to read them.
+  ~SpiShmController();
 
   // One chip-select-framed full-duplex transfer: shifts `length` bytes out of
   // `tx` and the peripheral's answer into `rx` (either may be null for a

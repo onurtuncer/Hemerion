@@ -388,6 +388,23 @@ int main(int argc, char** argv)
     }
   };
 
+  // Block briefly on the first receive, then take whatever else is already
+  // queued without blocking, so the IMU poll is never starved by a quiet GPS
+  // stream and a burst never backs up in the socket.
+  auto drain_gps = [&](std::chrono::milliseconds first_wait) {
+    for (int drained = 0; drained < 512; ++drained)
+    {
+      const auto received = gps_receiver->receive(
+          datagram.data(), datagram.size(), drained == 0 ? first_wait : std::chrono::milliseconds(0));
+      if (!received.has_value())
+      {
+        break;
+      }
+      last_sensor_data = std::chrono::steady_clock::now();
+      feed_gps(*received);
+    }
+  };
+
   // The same polling sequence the firmware's IMU task performs: DRDY, then
   // STATUS/FIFO_COUNT, then burst reads of the FIFO port.
   auto poll_imu = [&]() {
@@ -467,21 +484,24 @@ int main(int argc, char** argv)
       break;
     }
 
-    // Drain the GPS socket: block briefly on the first receive, then take
-    // whatever else is already queued without blocking, so the IMU poll below
-    // is never starved by a quiet GPS stream.
-    for (int drained = 0; drained < 512; ++drained)
-    {
-      const auto received =
-          gps_receiver->receive(datagram.data(), datagram.size(), std::chrono::milliseconds(drained == 0 ? 5 : 0));
-      if (!received.has_value())
-      {
-        break;
-      }
-      last_sensor_data = std::chrono::steady_clock::now();
-      feed_gps(*received);
-    }
+    drain_gps(std::chrono::milliseconds(5));
     poll_imu();
+  }
+
+  // The co-simulation stopping does not mean the last datagrams have been
+  // read: UDP queues them in the socket, and the IMU FMU's power-down is what
+  // ends the loop above. Take whatever is still queued before summarising, so
+  // the counts reflect what was sent rather than where the loop happened to
+  // exit.
+  for (int idle = 0; idle < 20; ++idle)
+  {
+    const long before = fix_count;
+    drain_gps(std::chrono::milliseconds(10));
+    if (fix_count == before)
+    {
+      break;
+    }
+    idle = 0;
   }
 
   const long no_fix_epochs = fix_count - valid_fix_count;

@@ -288,96 +288,180 @@ took over.
    $ ./gps_flight_computer          # terminal 1 — the "STM32" side
    $ ./rocket_gps_cosim             # terminal 2 — the Ecos master
 
-The default flight lasts 240 s at a 0.1 s communication step — a 10 Hz GPS
-navigation rate. Staging occurs at t ≈ 37 s, apogee (≈ 780 km) at t ≈ 232 s;
-the Scenario 17 plant holds its state constant after apogee, so longer runs
-only add a flat tail. ``--rtf 1`` paces the master to wall-clock speed to
-watch the fix stream arrive live; unpaced, the run takes about 2.5 minutes.
+The default flight is Scenario 17's own 200 s window at a 0.1 s communication
+step — a 10 Hz GPS navigation rate. Stage 1 burns out and separates at
+t = 37.4 s, the vehicle **coasts for 94 s**, stage 2 ignites at t = 131.8 s and
+burns out at t = 193 s, and the run ends 7 s later with the vehicle at 236 km
+and still climbing: this is a rocket *to orbit*, so there is no apogee inside
+the window. ``--rtf 1`` paces the master to wall-clock speed; the transcripts
+and figures on this page come from such a run, and
+:ref:`rocket_gps_ecos_pacing` explains why it matters for the IMU.
+
+.. warning::
+
+   Those event times are not free — they have to be *configured*, and getting
+   them wrong is silent. The ``TwoStageRocket`` FMU's ``stg2.ignition_time_s``
+   parameter defaults to 0, meaning "ignite stage 2 the moment stage 1
+   separates". That is a different mission: continuous thrust to t = 99 s, no
+   coast, and 638 km of altitude at t = 200 s against the reference's 234–251 km.
+   This example ran that way until it was checked. ``rocket_gps_cosim`` now
+   sets ``stg2.ignition_time_s`` explicitly and
+   :ref:`verifies the result <rocket_gps_ecos_verification>` against the
+   published check-case trajectory.
 
 The bus name is shared configuration: the FMU creates
 ``hemerion_imu_spi`` unless ``HEMERION_IMU_FMU_SPI_BUS`` says otherwise, and
 the flight computer attaches to whatever ``--imu-bus`` names. Set both to run
 two co-simulations side by side on one machine.
 
-.. important::
+.. note::
 
-   **The console transcripts and figures below were captured from an earlier
-   revision of this example** — before the GPS FMU grew its
-   :ref:`receiver dynamics envelope <gps_dynamics_envelope>`, and while the
-   IMU still pushed frames over UDP rather than answering an SPI bus. They are
-   kept because the trajectory, the injected noise and the IMU physics they
-   show are unchanged, and regenerating them needs an Aetherion install for
-   ``TwoStageRocket.fmu``. What a current run prints differently:
-
-   * the flight computer opens with the SPI probe
-     (``IMU identified on SPI (WHO_AM_I matched), FIFO enabled``) instead of a
-     second UDP port;
-   * the GPS stream has long, deliberate holes. The first no-fix epoch is
-     announced (``NO FIX -- receiver outside its dynamics envelope``) and the
-     summary separates *NAV-PVT epochs decoded* from *epochs that carried a
-     fix*, with the no-fix window's start and end. The ``sats=11`` at 780 km
-     and 6.7 km/s in the transcript below is exactly what no COTS receiver
-     does;
-   * the IMU summary counts SPI transfers, FIFO overflows and failed transfers
-     rather than datagrams, and the run ends on
-     ``IMU powered down (FMU terminated)`` when the master calls
-     ``fmi2Terminate``.
+   Ecos unzips each ``.fmu`` by shelling out to ``tar``. On Windows with Git
+   for Windows ahead of ``System32`` on ``PATH``, that resolves to GNU tar,
+   which reads ``C:\...`` as *host* ``C:`` plus path and fails with
+   ``tar: Cannot connect to C: resolve failed``. Put ``C:\Windows\System32``
+   first so the bundled bsdtar wins.
 
 Ecos master console
 ~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: text
 
-   [cosim] rocket: C:/Program Files/Aetherion/share/Aetherion/fmu/TwoStageRocket.fmu
-   [cosim] gps:    D:/Dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gps_fmu.fmu
-   [cosim] imu:    D:/Dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
-   [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU), stop 240 s
-   [cosim] t=10 s  alt=1828.52 m  mach=1.52854  mass=265846 kg
-   [cosim] t=20 s  alt=7244.12 m  mach=3.63514  mass=217693 kg
-   [cosim] t=30 s  alt=16616.3 m  mach=6.5223  mass=169539 kg
+   [cosim] rocket: C:\dev\Aetherion\out\build\windows-release\models\fmi2\TwoStageRocket\TwoStageRocket.fmu
+   [cosim] gps:    C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gps_fmu.fmu
+   [cosim] imu:    C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
+   [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU), stop 200 s
+   [cosim] plant: launch 0 deg N / 0 deg E at 0 m, stage 2 ignition at t=131.8 s
+   [cosim] receiver: dynModel 8, COCOM limits in force (18000 m AND 515 m/s), re-acquisition 2 s
+   [cosim] t=10 s  alt=1826.71 m  mach=1.52891  mass=265846 kg
+   [cosim] t=20 s  alt=7249.12 m  mach=3.63603  mass=217693 kg
+   [cosim] t=30 s  alt=16639.8 m  mach=6.52317  mass=169539 kg
    [cosim] t=37.4 s  stage 1 separated
-   [cosim] t=40 s  alt=30913.4 m  mach=9.31213  mass=95506.8 kg
-   [cosim] t=50 s  alt=48441.5 m  mach=10.0596  mass=82433.4 kg
+   [cosim] t=40 s  alt=30874.2 m  mach=8.87282  mass=98905.9 kg
+   [cosim] t=50 s  alt=46086.3 m  mach=8.00648  mass=98905.9 kg
    ...
-   [cosim] t=230 s  alt=770855 m  mach=29.3356  mass=18897 kg
-   [cosim] t=240 s  alt=780141 m  mach=29.3034  mass=18897 kg
-   [cosim] done: 2401 steps, 2401 UBX-NAV-PVT frames and 24010 IMU frames emitted
-   [cosim] apogee 780141 m at t=232.1 s, staging at t=37.4 s
+   [cosim] t=130 s  alt=137088 m  mach=8.23193  mass=98905.9 kg
+   [cosim] t=140 s  alt=145338 m  mach=9.68307  mass=88316.5 kg
+   ...
+   [cosim] t=190 s  alt=213472 m  mach=27.7983  mass=22949.7 kg
+   [cosim] t=200 s  alt=236494 m  mach=30.3804  mass=18897 kg
+   [cosim] done: 2001 steps, 2001 UBX-NAV-PVT frames emitted and 20010 IMU samples buffered for the SPI controller
+   [cosim] max altitude 236729 m at t=200.1 s, staging at t=37.4 s
    [cosim] rocket truth written to results/rocket_truth.csv
+
+Constant mass from t = 37.4 s to t = 140 s is the coast; Mach *falling* through
+it while altitude climbs is the vehicle decelerating in thinning air.
 
 Flight computer console
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Every 50th decoded fix and every 1000th decoded IMU sample is printed; note
-the data is what the *sensors* report — truth plus the injected noise —
-decoded from raw bytes:
+Every 50th decoded fix and every 1000th decoded IMU sample is printed; the
+data is what the *sensors* report — truth plus the injected noise — decoded
+from raw bytes:
 
 .. code-block:: text
 
-   [fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX) and IMU raw-sample frames on UDP port 5763 (ImuPacketParser)
-   [fc] fix     1  t=    0.1 s  lat= 37.8338021  lon= -75.4879018  alt=      1.7 m  vel=    0.0 m/s  crs=  0.1 deg  sats=11
-   [fc] imu      1  t=    0.0 s  f=[    0.01   -0.01    0.04] m/s2  w=[  0.0011  0.0000 -0.0032] rad/s
-   [fc] fix    50  t=    5.0 s  lat= 37.8337980  lon= -75.4836010  alt=    431.8 m  vel=  156.8 m/s  crs= 89.4 deg  sats=11
-   [fc] imu   1000  t=   10.0 s  f=[   62.95   -0.04    0.97] m/s2  w=[  0.0000 -0.0298 -0.0011] rad/s
-   [fc] imu   4000  t=   40.0 s  f=[   51.23   -0.07   -0.25] m/s2  w=[  0.0000  0.0021  0.0021] rad/s
-   [fc] imu   9000  t=   90.0 s  f=[  165.11    0.04    0.00] m/s2  w=[  0.0000 -0.0043 -0.0021] rad/s
-   [fc] imu  10000  t=  100.0 s  f=[   -0.12    0.02    0.06] m/s2  w=[ -0.0032 -0.0021  0.0000] rad/s
-   ...
-   [fc] fix  2400  t=  240.0 s  lat= 36.9722100  lon= -62.4137047  alt= 780139.9 m  vel= 6762.7 m/s  crs= 99.4 deg  sats=11
-   [fc] imu  24000  t=  240.0 s  f=[   -0.07    0.05   -0.02] m/s2  w=[ -0.0032 -0.0043  0.0000] rad/s
-   [fc] sensor streams quiet for 3000 ms -- co-simulation finished
-   [fc] summary: 2401 fixes decoded (0 checksum errors), 24010 IMU samples decoded (0 checksum errors)
-   [fc] max altitude 780152 m, max ground speed 7444.9 m/s
-   [fc] max |specific force| 264.632 m/s2, max |body rate| 0.055544 rad/s
+   [fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
+   [fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi'
+   [fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
+   [fc] fix     1  t=    0.1 s  lat=  0.0000144  lon=   0.0000198  alt=      0.2 m  vel=    0.1 m/s  crs=148.9 deg  sats=11
+   [fc] fix     2  t=    0.2 s  NO FIX -- receiver outside its dynamics envelope
+   [fc] imu      1  t=    0.1 s  f=[   54.27   -0.09   -0.05] m/s2  w=[  0.0011  0.0000  0.0000] rad/s
+   [fc] imu   3000  t=   30.1 s  f=[   97.82    0.02   -0.09] m/s2  w=[  0.0032 -0.0202  0.0032] rad/s
+   [fc] imu   4000  t=   40.1 s  f=[   -0.86   -0.04   -0.15] m/s2  w=[  0.0000  0.0000  0.0043] rad/s
+   [fc] imu  10000  t=  100.1 s  f=[   -0.06    0.07    0.07] m/s2  w=[ -0.0011 -0.0043  0.0011] rad/s
+   [fc] imu  14000  t=  140.1 s  f=[   56.62   -0.02   -0.09] m/s2  w=[  0.0011 -0.0021  0.0011] rad/s
+   [fc] imu  19000  t=  190.1 s  f=[  217.87    0.02    0.02] m/s2  w=[ -0.0011 -0.0011  0.0021] rad/s
+   [fc] imu  20000  t=  200.1 s  f=[    0.00   -0.01   -0.06] m/s2  w=[  0.0053 -0.0021  0.0011] rad/s
+   [fc] IMU powered down (FMU terminated) -- co-simulation finished
+   [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 1 carried a fix, 2000 did not
+   [fc] no-fix window: t=0.2 s to t=200.1 s (receiver dynamics envelope: platform model + COCOM limits)
+   [fc] 20000 IMU samples decoded over 14396 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+   [fc] max altitude 0.247 m, max ground speed 0.085 m/s (fixes the receiver actually reported)
+   [fc] max |specific force| 264.657 m/s2, max |body rate| 0.0566544 rad/s
    [fc] fixes written to results/gps_fixes.csv, IMU samples to results/imu_samples.csv
 
-**2401 UBX frames and 24010 IMU frames sent, 2401 fixes and 24010 samples
-decoded, zero checksum errors on either stream** — the whole chain from 6-DoF
-truth through both noise models, both encoders, the transports, and the
-on-target parsers is lossless and wire-correct. The IMU physics also reads
-correctly off the decoded stream: ~55 m/s² of thrust acceleration at ignition
-rising to ~265 m/s² at stage-2 burnout (t ≈ 100 s), then **zero specific force
-in free fall** — an accelerometer does not sense gravity.
+Read the GPS line again: **one fix, out of 2001 navigation epochs.** The
+receiver reports a solution on the pad, loses it 0.1 s later, and never gets it
+back. That is not a bug in the model — it is what a stock COTS receiver does
+to a launch vehicle, and it is the single most useful thing this example has to
+say. The 4 g platform acceleration limit trips on the second epoch (thrust
+alone is ~54 m/s², so coordinate acceleration is ~4.6 g off the pad); by the
+time the vehicle has decelerated into that envelope it is past 18 km and
+515 m/s, where COCOM takes over; and past 80 km the platform model's altitude
+ceiling holds it dark for the rest of the flight. Flight software that assumes
+GNSS through boost has just been shown otherwise.
+
+The IMU line is the other half: **20000 of 20010 samples decoded, zero
+checksum errors, zero FIFO overflows, zero failed transfers**, across 14396
+chip-select-framed SPI transfers. The ten missing samples are the ones the FMU
+buffered before the flight computer probed — ``probe()`` writes ``FIFO_RESET``,
+exactly as a driver clearing whatever accumulated before it took over. Every
+NAV-PVT frame the receiver emitted was decoded too (2001 of 2001), fix or no
+fix. The whole chain from 6-DoF truth through both noise models, both encoders,
+both transports and the on-target drivers is lossless and wire-correct.
+
+The mission profile reads straight off the decoded IMU stream, which is the
+cheapest sanity check there is on the plant: 54 m/s² at lift-off climbing to
+125 m/s² as stage 1 burns off its propellant, **zero through the 94 s coast**
+(t = 40.1 s and t = 100.1 s both read ~0), 57 m/s² when stage 2 lights, 218 m/s²
+by t = 190 s, and zero again after burnout. An accelerometer does not sense
+gravity, so free fall reads zero however fast the vehicle is actually
+accelerating toward the Earth.
+
+For comparison, the same flight with ``--dyn-model -1 --no-cocom`` — a
+waivered, envelope-unlocked receiver:
+
+.. code-block:: text
+
+   [cosim] receiver: dynModel -1, COCOM limits disabled, re-acquisition 2 s
+   ...
+   [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 2001 carried a fix, 0 did not
+   [fc] 20000 IMU samples decoded over 14339 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+   [fc] max altitude 236495 m, max ground speed 8065.02 m/s (fixes the receiver actually reported)
+
+Four of the figures below need a fix stream to say anything at all, so they
+come from that second run; ``plot_results.py`` skips them rather than drawing
+them empty when the envelope leaves fewer than two usable epochs.
+
+.. _rocket_gps_ecos_verification:
+
+Checking the plant against the published trajectory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+None of the above means anything if the truth driving the sensors is flying the
+wrong mission — a plant with the wrong staging profile still produces perfectly
+clean-looking GPS and IMU streams, which is exactly what makes the error easy
+to miss. NASA TM-2015-218675 publishes check-case output for Scenario 17, and
+Aetherion ships it under ``data/Atmos_17_TwoStageRocketToOrbit/``, so
+``verify_trajectory.py`` checks the run against it:
+
+.. code-block:: console
+
+   $ python verify_trajectory.py \
+       --reference <aetherion>/data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_04.csv \
+       --reference <aetherion>/data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_05.csv \
+       --reference <aetherion>/data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_06.csv
+   compared 2001 samples of rocket_truth.csv against 3 reference(s): Atmos_17_sim_04.csv, Atmos_17_sim_05.csv, Atmos_17_sim_06.csv
+     references disagree with each other by up to 16.97 km (at t = 200.0 s) -- the envelope is that wide
+     t=  37.4 s  stage 1 burnout / separation    ours    26.77 km   reference    26.75..26.76 km
+     t= 131.8 s  stage 2 ignition                ours   138.52 km   reference   138.24..138.34 km
+     t= 193.0 s  stage 2 burnout                 ours   220.15 km   reference   217.97..230.00 km
+   OK: every sample inside the reference envelope, within 1.0% + 100 m
+
+The criterion is the **envelope** of the three published trajectories, not any
+one of them. Those are three independent simulators run against the same case
+and they do not agree with each other: at t = 200 s sim_04 and sim_05 report
+251.4 km while sim_06 reports 234.5 km, a 7% spread. Checking against a single
+one would be checking against that simulator's idiosyncrasies as much as
+against the scenario, so the strongest claim the data supports is that the run
+lies between them — which it does, at every one of 2001 samples, and within
+20 m of all three at stage-1 burnout.
+
+This is the check that caught the ``stg2.ignition_time_s`` default. Before it,
+the same run was 638 km high at t = 200 s against a reference envelope topping
+out at 251 km, and every sensor figure on this page looked entirely
+plausible.
 
 That losslessness is the property the SPI rework had to preserve, and it is
 pinned by a test rather than by a transcript: ``test_imu_spi.cpp``
@@ -399,47 +483,68 @@ the flight computer's fix and IMU-sample logs — into the figures below:
 
    $ python plot_results.py       # reads results/, writes plots/
 
+.. figure:: _static/rocket_gps_ecos/gps_availability.png
+   :width: 100%
+   :alt: Two panels, altitude and speed against time on log axes, with the COCOM and platform-model thresholds marked and the whole flight shaded as a no-fix window
+
+   **The default configuration, envelope in force.** Altitude and speed against
+   the limits that took the fix away; the shading is every epoch the receiver
+   reported no solution, which is all of them but the first. Neither threshold
+   explains that first loss — the 4 g platform *acceleration* limit trips on
+   the second navigation epoch, before the vehicle has cleared 20 m — but
+   between them they explain why it never comes back: above 18 km *and*
+   515 m/s the COCOM cut-off holds, and above 80 km so does the platform
+   model's altitude ceiling. The remaining GPS figures need a fix stream, so
+   they come from the ``--dyn-model -1 --no-cocom`` run.
+
 .. figure:: _static/rocket_gps_ecos/altitude_vs_time.png
    :width: 100%
-   :alt: Altitude vs time: truth line with decoded GPS fixes overlaid, staging marker at 37.4 s, apogee 780.1 km
+   :alt: Altitude vs time: truth line with decoded GPS fixes overlaid, staging marker at 37.4 s, 236 km at cut-off
 
-   Truth altitude and the fixes the flight software decoded. At this scale the
-   two are indistinguishable — which is the point.
+   *Envelope-unlocked run.* Truth altitude and the fixes the flight software
+   decoded. At this scale the two are indistinguishable — which is the point.
 
 .. figure:: _static/rocket_gps_ecos/ground_track.png
    :width: 100%
-   :alt: Ground track from Wallops heading east over the Atlantic, truth and GPS fixes overlaid
+   :alt: Ground track heading east along the equator from the prime meridian, truth and GPS fixes overlaid
 
-   Ground track: launch from Wallops Flight Facility, firing due east over the
-   Atlantic. The southward curl is the J2/rotating-Earth effect on an eastward
-   suborbital arc.
+   *Envelope-unlocked run.* Ground track: Scenario 17 launches from the
+   equator on the prime meridian and fires due east. ``--lat0``/``--lon0``
+   move the pad, at the cost of no longer being comparable to the published
+   check case.
 
 .. figure:: _static/rocket_gps_ecos/velocity_vs_time.png
    :width: 100%
    :alt: Speed over ground vs time, truth and UBX-reported gSpeed, staging marker
 
-   Speed over ground: truth vs. the NAV-PVT ``gSpeed`` field the parser
-   recovered. The slope change at staging and burnout (t ≈ 100 s) is visible.
+   *Envelope-unlocked run.* Speed over ground: truth vs. the NAV-PVT
+   ``gSpeed`` field the parser recovered. Stage 1 accelerates to ~2.4 km/s, the
+   coast bleeds a little of it off against thinning air, and stage 2 takes the
+   vehicle to ~8 km/s by burnout.
 
 .. figure:: _static/rocket_gps_ecos/gps_error.png
    :width: 100%
    :alt: Horizontal and vertical decoded-fix error vs truth, flat noise band around the 1.5 m one-sigma line
 
-   Decoded-fix error against truth. The band is flat across three decades of
-   altitude and speed and matches the configured receiver noise
-   (``GpsNoiseConfig``: 1.5 m horizontal / 3 m vertical, 1-sigma) — the error
-   the flight software sees is *exactly* the error that was injected, with no
-   distortion added by the encode/transmit/parse chain.
+   *Envelope-unlocked run.* Decoded-fix error against truth. The band is flat
+   across three decades of altitude and speed and matches the configured
+   receiver noise (``GpsNoiseConfig``: 1.5 m horizontal / 3 m vertical,
+   1-sigma) — the error the flight software sees is *exactly* the error that
+   was injected, with no distortion added by the encode/transmit/parse chain.
 
 .. figure:: _static/rocket_gps_ecos/imu_specific_force.png
    :width: 100%
    :alt: Body-X specific force vs time: truth line with decoded accelerometer samples overlaid, staging marker, zero during coast
 
    Body-X specific force: truth (thrust + aero over mass) vs. the samples the
-   flight software recovered from raw register counts. Acceleration climbs as
-   propellant burns off — ~55 m/s² at ignition to ~265 m/s² at stage-2
-   burnout — and drops to exactly zero in free fall: an accelerometer does
-   not sense gravity.
+   flight software burst out of the part's FIFO and converted from raw
+   register counts. The whole Scenario 17 profile is legible in it — stage 1
+   from 54 m/s² up to 125 m/s² as propellant burns off, **exactly zero through
+   the 94 s coast**, stage 2 lighting at 131.8 s and climbing to 265 m/s² at
+   burnout, then zero again. Free fall reads zero because an accelerometer
+   does not sense gravity. This figure is from the *default* run, the one whose
+   GPS is dark throughout: the SPI sample stream is entirely unaffected by what
+   the receiver is doing, which is rather the point of carrying an IMU.
 
 .. figure:: _static/rocket_gps_ecos/imu_body_rates.png
    :width: 100%
@@ -506,6 +611,39 @@ Windows that yields an *empty* path when the FMU lives on a different drive
 than the working directory (e.g. FMU on ``C:``, build tree on ``D:``), so the
 example passes plain absolute-path *strings*, which Ecos' file resolver
 handles as-is.
+
+.. _rocket_gps_ecos_pacing:
+
+Pacing: why ``--rtf 1`` matters to the IMU
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Unpaced (the default, ``--rtf 0``) this co-simulation is not uniformly fast:
+powered, in-atmosphere flight costs real time — DAVE-ML aero table lookups on
+every implicit Radau stage — while thin air and coasting are cheap, so parts of
+the run go far faster than others. The IMU FMU keeps latching ten samples per
+step throughout, and where the master accelerates it can outrun the flight
+computer's poll loop by more than the loop recovers from: a measured unpaced
+run overran the part's 16 KiB FIFO and lost a few hundred samples out of
+20 010. The sticky overflow bit reported it, and the frames that survived were
+still frames — whole ones, correctly parsed — because the FIFO never accepts a
+partial write.
+
+That is worth seeing once, because it is a genuine property of the design: a
+FIFO decouples a consumer from a producer *up to its depth*, and past that a
+slow consumer loses samples and is told so. It is also an artifact of the
+simulation, not of the system under test — on a vehicle the plant is the real
+world and cannot outrun anything. ``--rtf 1`` removes it, and the reference run
+above is lossless.
+
+Two things about the shutdown path fell out of chasing that down, and both are
+fixed rather than tolerated. ``terminate()`` now waits (bounded, and abandoned
+if nobody is on the bus) for a controller to drain the FIFO before the
+peripheral powers down — a real part answers chip select until the board loses
+power, so the sample stream should end where the simulation does, not wherever
+the last poll landed. And the flight computer drains its UDP socket after the
+loop exits, since the IMU powering down is what ends that loop while the last
+NAV-PVT datagrams are still queued in the kernel. Before those, an unpaced run
+truncated both streams several seconds early and dropped 78 GPS epochs.
 
 Timing model
 ~~~~~~~~~~~~

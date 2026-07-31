@@ -62,8 +62,10 @@
 #include <fmu4cpp/fmu_base.hpp>
 #include <fmu4cpp/fmu_except.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <thread>
 
 namespace hemerion::sensors::imu::fmu
 {
@@ -75,6 +77,11 @@ using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
 
 constexpr double kDefaultSampleRateHz = 100.0;
+
+/// How long terminate() lets a controller finish draining the sample FIFO.
+/// Long enough for a poll cycle of any sane controller, short enough that a
+/// scripted co-simulation never appears to hang on teardown.
+constexpr auto kDrainTimeout = std::chrono::seconds(2);
 
 /// Where this part sits: the bus it creates, and the environment variable a
 /// launch script can retarget it with.
@@ -134,7 +141,21 @@ public:
     debugLog(fmiOK, "[hemerion_imu_fmu] SPI peripheral ready on bus '" + endpoint_.bus_name() + "'");
   }
 
-  void terminate() override { endpoint_.detach(); }
+  /// Powers the part down -- but not out from under a controller that is
+  /// still reading it. A real part keeps answering chip select until the board
+  /// loses power, so the sample stream should end where the simulation does,
+  /// not wherever the controller's last poll happened to land. Bounded, and
+  /// abandoned immediately if nobody is left on the bus.
+  void terminate() override
+  {
+    const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+    while (slave_.fifo_used() > 0 && endpoint_.controller_attached() &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    endpoint_.detach();
+  }
 
   /// fmi2Reset equivalent. The turn-on biases ImuNoiseModel drew at
   /// construction are kept: they model this instance's physical part, which a

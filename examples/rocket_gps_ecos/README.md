@@ -84,7 +84,49 @@ type drops to `kNoFix`, satellites to zero, accuracies inflate — and the posit
 invalid solution, as on a real part. The flight computer gates on fix type, logs the epoch anyway, and reports
 the outage window; `plot_results.py` drops no-fix epochs rather than plotting numbers that mean nothing.
 
-`--dyn-model -1 --no-cocom` gives the unrestricted stream of a waivered receiver, for comparison.
+**What that costs, measured:** one fix out of 2001 navigation epochs. The receiver reports a solution on the
+pad and loses it 0.1 s later — thrust alone is ~54 m/s², so coordinate acceleration off the pad is ~4.6 g and
+the platform model's 4 g limit trips on the second epoch. By the time the vehicle is back inside that
+envelope it is past 18 km and 515 m/s, where COCOM takes over; past 80 km the platform model's altitude
+ceiling holds it dark for the rest of the flight. A stock COTS receiver gives this vehicle 0.1 seconds of
+GPS, and flight software that assumes otherwise has just been shown so.
+
+`--dyn-model -1 --no-cocom` gives the unrestricted stream of a waivered receiver — 2001 of 2001 epochs with a
+fix — which is what the comparison figures in the Sphinx page are drawn from.
+
+## The plant is checked, not assumed
+
+None of the sensor results mean anything if the truth driving them is flying the wrong mission — and a plant
+with the wrong staging profile still produces perfectly clean-looking GPS and IMU streams, which is what makes
+that error easy to miss. NASA TM-2015-218675 publishes check-case output for Scenario 17 and Aetherion ships
+it, so `verify_trajectory.py` checks the run against it:
+
+```
+python verify_trajectory.py \
+    --reference <aetherion>/data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_04.csv \
+    --reference <aetherion>/data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_05.csv \
+    --reference <aetherion>/data/Atmos_17_TwoStageRocketToOrbit/Atmos_17_sim_06.csv
+```
+
+```
+compared 2001 samples of rocket_truth.csv against 3 reference(s)
+  references disagree with each other by up to 16.97 km (at t = 200.0 s) -- the envelope is that wide
+  t=  37.4 s  stage 1 burnout / separation    ours    26.77 km   reference    26.75..26.76 km
+  t= 131.8 s  stage 2 ignition                ours   138.52 km   reference   138.24..138.34 km
+  t= 193.0 s  stage 2 burnout                 ours   220.15 km   reference   217.97..230.00 km
+OK: every sample inside the reference envelope, within 1.0% + 100 m
+```
+
+The criterion is the **envelope** of the three published trajectories rather than any one of them: they are
+independent simulators run against the same case and they disagree with each other by 7% at t = 200 s, so
+matching one exactly would mean matching that simulator's idiosyncrasies. Our run lies between them at all
+2001 samples, and within 20 m of all three at stage-1 burnout.
+
+That check is what caught the example's worst bug. The `TwoStageRocket` FMU's `stg2.ignition_time_s`
+parameter defaults to `0` = *ignite stage 2 the moment stage 1 separates*, and this example never set it — so
+it flew continuous thrust to t = 99 s with no coast and reached 638 km at t = 200 s against a reference
+envelope topping out at 251 km. Every sensor figure still looked entirely plausible. `rocket_gps_cosim` now
+sets it explicitly (`--stg2-ignition`, default 131.8 s), along with Scenario 17's equatorial launch site.
 
 ## Building
 
@@ -124,11 +166,22 @@ whatever was buffered before it took over.
 ./rocket_gps_cosim
 ```
 
-The co-simulation runs a 240 s flight (staging at t ≈ 37 s, apogee ≈ 780 km at t ≈ 232 s; the Scenario 17
-plant holds its state constant after apogee, so longer runs only add a flat tail) at a 0.1 s communication
-step (= 10 Hz GPS, a typical u-blox navigation rate; the IMU latches at 100 Hz within each step) and needs no
-interaction. The flight computer exits by itself when the master terminates the IMU FMU — the simulated part
-powering down is a signal in its own right — or a few seconds after both streams go quiet.
+The co-simulation runs Scenario 17's own 200 s window at a 0.1 s communication step (= 10 Hz GPS, a typical
+u-blox navigation rate; the IMU latches at 100 Hz within each step) and needs no interaction. Stage 1 burns
+out and separates at t = 37.4 s, the vehicle **coasts for 94 s**, stage 2 ignites at t = 131.8 s and burns out
+at t = 193 s, and the run ends 7 s later at 236 km with the vehicle still climbing — it is a rocket *to
+orbit*, so there is no apogee inside the window. The flight computer exits by itself when the master
+terminates the IMU FMU — the simulated part powering down is a signal in its own right — or a few seconds
+after both streams go quiet.
+
+**Use `--rtf 1` for a lossless IMU stream.** Unpaced, this co-simulation is not uniformly fast: powered,
+in-atmosphere flight costs real time (DAVE-ML table lookups on every implicit Radau stage) while thin air and
+coasting are cheap. The IMU FMU keeps latching ten samples per step throughout, and where the master
+accelerates it can outrun the flight computer's poll loop by more than the loop recovers from — a measured
+unpaced run overran the part's 16 KiB FIFO and lost a few hundred of 20010 samples. The sticky overflow bit
+reports it and no frame is ever truncated, which is exactly the behaviour a FIFO plus an overflow flag exists
+to give you; it is also an artifact of the simulation rather than of the system under test, since a real
+plant cannot outrun its consumer. Paced, both reference runs are lossless.
 
 Useful knobs (`--help` lists all):
 
@@ -144,6 +197,10 @@ Useful knobs (`--help` lists all):
   name, default `hemerion_imu_spi`. Set both to run two co-simulations side by side on one machine. A
   shared-memory bus is local by construction; a remote consumer needs Renode's emulated SPI instead.
 
+On Windows, Ecos unzips each `.fmu` by shelling out to `tar`. With Git for Windows ahead of `System32` on
+`PATH` that resolves to GNU tar, which reads `C:\...` as *host* `C:` plus path and fails with
+`tar: Cannot connect to C: resolve failed`. Put `C:\Windows\System32` first so the bundled bsdtar wins.
+
 Outputs land in `results/`:
 
 * `rocket_truth.csv` — Ecos `csv_writer` log of the rocket's outputs (altitude, position, NED velocity, body
@@ -158,12 +215,18 @@ Outputs land in `results/`:
 ## Plots
 
 `plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
-(`doc/rocket_gps_ecos_cosim.rst`): altitude, ground track, speed over ground, the decoded-fix error against
-truth, and the decoded IMU specific force and body rates against truth:
+(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, ground track,
+speed over ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates
+against truth:
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
+
+With the envelope in force this flight yields one usable fix, so the four fix-dependent figures are skipped
+rather than drawn empty — `gps_availability.png` is the one that still says something, and the IMU figures
+are unaffected. Run the co-simulation a second time with `--dyn-model -1 --no-cocom` (and `--csv` /
+`--imu-csv` pointing elsewhere) to get a fix stream to plot against.
 
 ## Notes and design decisions
 

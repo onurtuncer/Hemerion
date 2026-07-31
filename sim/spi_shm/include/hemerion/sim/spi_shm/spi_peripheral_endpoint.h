@@ -121,6 +121,11 @@ public:
 
   [[nodiscard]] bool attached() const { return bus_ != nullptr; }
 
+  // True while a controller is mapped onto this bus. Lets a peripheral wait
+  // for its buffers to be read out before powering down, and stop waiting
+  // once there is nobody left to read them.
+  [[nodiscard]] bool controller_attached() const { return bus_ != nullptr && bus_->controller_attached(); }
+
   // Bus this endpoint is on (or would be on), after the environment override.
   [[nodiscard]] const std::string& bus_name() const { return bus_name_; }
 
