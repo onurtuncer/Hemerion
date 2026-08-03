@@ -180,32 +180,19 @@ defaults silently:
     launch_site["gps::cocom_limits_enabled"] = true;
     launch_site["gps::reacquisition_time_s"] = 2.0;
 
-The GPS FMU models two independent mechanisms, and the example deliberately
-enables only one of them:
+What that leaves in force is a single mechanism:
 
 * the **COCOM export limits** stop navigation output above 18 000 m *and*
   515 m/s. An AND, which is why a high-altitude balloon and a fast low-altitude
   sled both keep their fix while a sounding rocket does not. Not a
   configuration choice — it is in every receiver you can buy;
-* the **navigation-engine platform model** (``dynModel``) declares a maximum
-  altitude, horizontal and vertical velocity, and the acceleration its tracking
-  loops are tuned for. This *is* a configuration choice: a register a firmware
-  engineer writes. Disabled here, and ``--dyn-model 8`` restores the airborne
-  <4 g setting a launch vehicle ships with;
 * recovery is not instantaneous either: the fix stays invalid for
   ``reacquisition_time_s`` after the vehicle re-enters the envelope, standing
   in for the tracking loops re-acquiring.
 
-Enabling both is more realistic and much less informative. The 4 g model's
-acceleration limit trips on the second navigation epoch of this flight —
-thrust alone is ~54 m/s², so coordinate acceleration off the pad is ~4.6 g —
-and from there the receiver reports **one** usable fix in 2001 epochs, with
-COCOM never getting to be the reason for anything. Isolating the export limits
-gives 312 fixes and a clean cut-off, and a dropout you can see the shape of.
-
-Both mechanisms are evaluated against *truth*, not against the noisy fix — it
+The limit is evaluated against *truth*, not against the noisy fix — it
 is the vehicle's real motion that breaks carrier tracking, not the receiver's
-estimate of it. When either trips, the fix is degraded in place: fix type drops
+estimate of it. When it trips, the fix is degraded in place: fix type drops
 to ``kNoFix`` so ``UbxEmitter`` clears NAV-PVT's ``gnssFixOK`` flag, satellite
 count goes to zero, accuracies inflate — and the frame is still emitted.
 Position and velocity fields keep carrying the invalid solution, as on a real
@@ -350,7 +337,7 @@ Ecos master console
    [cosim] imu:    C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
    [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU), stop 200 s
    [cosim] plant: launch 0 deg N / 0 deg E at 0 m, stage 2 ignition at t=131.8 s
-   [cosim] receiver: dynModel -1, COCOM limits in force (18000 m AND 515 m/s), re-acquisition 2 s
+   [cosim] receiver: COCOM limits in force (18000 m AND 515 m/s), re-acquisition 2 s
    [cosim] t=10 s  alt=1826.71 m  mach=1.52891  mass=265846 kg
    [cosim] t=20 s  alt=7249.12 m  mach=3.63603  mass=217693 kg
    [cosim] t=30 s  alt=16639.8 m  mach=6.52317  mass=169539 kg
@@ -415,19 +402,6 @@ to the end. Flight software that assumes GNSS through boost has just been shown
 otherwise, and it has been shown the useful version of it — with the 31 seconds
 of good data it does get, which is what an initialisation or a launch-detect
 routine has to work with.
-
-.. note::
-
-   The receiver's *platform model* is deliberately disabled here
-   (``--dyn-model -1``), leaving COCOM as the only limit. That is not the
-   configuration a launch vehicle ships, and ``--dyn-model 8`` puts the
-   airborne <4 g model back — but it makes the example say much less. Its
-   acceleration limit trips on the **second** navigation epoch, because thrust
-   alone is ~54 m/s² and coordinate acceleration off the pad is ~4.6 g, so the
-   receiver reports exactly one usable fix in 2001 epochs and COCOM never gets
-   to be the reason for anything. The export limits are the interesting
-   mechanism because they are not a configuration choice: dynModel is a
-   register a firmware engineer writes, COCOM is in every receiver you can buy.
 
 The IMU line is the other half: **20000 of 20010 samples decoded, zero
 checksum errors, zero FIFO overflows, zero failed transfers**, across 14173

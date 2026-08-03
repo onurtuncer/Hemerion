@@ -617,7 +617,15 @@ int main(int argc, char** argv)
               << options.imu_rate_hz << " Hz IMU), stop " << options.stop_s << " s\n"
               << "[cosim] plant: launch " << options.lat0_deg << " deg N / " << options.lon0_deg << " deg E at "
               << options.alt0_m << " m, stage 2 ignition at t=" << options.stg2_ignition_s << " s\n"
-              << "[cosim] receiver: dynModel " << options.dynamic_platform << ", COCOM limits "
+              << "[cosim] receiver: ";
+    // Name the platform model only when there is one. Reporting "dynModel -1"
+    // on the default run announces a mechanism that is not running, which
+    // reads as a limit the reader then tries to attribute the dropout to.
+    if (options.dynamic_platform >= 0)
+    {
+      std::cout << "dynModel " << options.dynamic_platform << ", ";
+    }
+    std::cout << "COCOM limits "
               << (options.cocom_limits ? "in force (18000 m AND 515 m/s)" : "disabled") << ", re-acquisition "
               << options.reacquisition_time_s << " s\n";
 
