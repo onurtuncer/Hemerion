@@ -512,6 +512,33 @@ are meaningless without it: the same script run against ``--no-cocom`` output
 produces plots that look identical in form and say the opposite thing, and a
 PNG detached from its caption has no other way to tell you which it is.
 
+.. figure:: _static/rocket_gps_ecos/trajectory_3d.png
+   :width: 100%
+   :alt: Two 3-D panels in a local east/north/up frame — the whole 543 km by 237 km flight with a small cluster of GPS fixes at the origin, and a magnified view of the first 41 s where those fixes are resolvable
+
+   The flight in space, and the fraction of it the receiver navigated. Every
+   other GPS figure on this page plots against time, where the dropout is a
+   shaded band of a certain width. Here it is a *distance*: the flight
+   computer's entire GNSS record is the stub at the origin — 21 km downrange,
+   18 km up — of a trajectory that runs 543 km downrange and 237 km up inside
+   the 200 s window. Stage 1 separation, the 94 s coast, stage 2 ignition and
+   burnout all happen in the unnavigated part.
+
+   Hence two panels: on the overview the navigated portion is 4 % of the track
+   and about twenty pixels wide, so it cannot be drawn as a distinguishable
+   segment — the fix cloud marks its own extent instead, and the magnified
+   panel is where the 312 fixes are actually separable from the truth line
+   they sit on.
+
+   The north axis is drawn even though nothing happens on it. Scenario 17
+   launches due east from the equator and never manoeuvres, so the whole flight
+   lies in one plane to within **0.05 m over 543 km** — and an axis carrying
+   5 cm of data cannot be auto-scaled, or matplotlib magnifies the numerical
+   dust into a cross-range wander that is not there. It is fixed to a share of
+   the downrange extent and annotated with the real figure, on the principle
+   that the honest thing to do with an empty dimension is show that it is empty
+   rather than quietly project it away.
+
 .. figure:: _static/rocket_gps_ecos/gps_availability.png
    :width: 100%
    :alt: Two panels, altitude and speed against time on log axes, with the COCOM thresholds marked and everything past 31 s shaded as a no-fix window

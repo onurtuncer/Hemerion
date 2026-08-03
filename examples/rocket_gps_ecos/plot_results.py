@@ -10,6 +10,7 @@ flight computer's decoded-fix and decoded-IMU-sample logs), joins them on
 simulation time, and renders the figures embedded in
 doc/rocket_gps_ecos_cosim.rst:
 
+    trajectory_3d.png        the flight in space: navigated stub vs. dark remainder
     altitude_vs_time.png     truth altitude + decoded GPS fixes + staging marker
     velocity_vs_time.png     truth speed over ground + GPS-reported speed
     gps_error.png            horizontal/vertical decoded-fix error vs truth
@@ -24,11 +25,12 @@ Usage (from the co-simulation working directory, after a run):
                            [--imu results/imu_samples.csv] [--out plots/]
 
 The default configuration (COCOM export limits, no platform model) leaves 312
-of 2001 epochs with a usable fix, which is enough to draw all six. A tighter
+of 2001 epochs with a usable fix, which is enough to draw all seven. A tighter
 envelope can leave fewer: ``--dyn-model 8`` leaves *one*, because the airborne
 <4 g model's acceleration limit trips on the second epoch of a launch. Below
 two usable epochs the fix-dependent figures are skipped rather than drawn
-empty; gps_availability.png still says something either way, and the IMU
+empty; gps_availability.png and trajectory_3d.png still say something either
+way (both are drawn from truth, with the fixes only overlaid), and the IMU
 figures are unaffected.
 
 Every figure is stamped at its foot with the receiver configuration that
@@ -77,6 +79,10 @@ MARKER_GPS = 5.0
 MARKER_IMU = 2.5
 
 METERS_PER_DEG_LAT = 111_320.0
+# WGS-84 equatorial radius, for the local ENU frame the 3-D trajectory is drawn
+# in. A sphere is accurate enough for a picture: over this flight the
+# ellipsoidal correction is metres against hundreds of kilometres.
+EARTH_RADIUS_M = 6_378_137.0
 
 
 def read_truth(path: Path) -> dict[str, list[float]]:
@@ -249,6 +255,199 @@ def annotate_event(ax, x: float, label: str) -> None:
     ax.annotate(label, xy=(x, 1.0), xycoords=("data", "axes fraction"),
                 xytext=(4, -4), textcoords="offset points",
                 ha="left", va="top", fontsize=8, color=INK_2)
+
+
+def to_enu_km(lat_rad: float, lon_rad: float, alt_m: float,
+              origin: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Geodetic -> local east/north/up in km, on a sphere about the launch site."""
+    lat0, lon0, alt0 = origin
+    east = (lon_rad - lon0) * EARTH_RADIUS_M * math.cos(lat0)
+    north = (lat_rad - lat0) * EARTH_RADIUS_M
+    return east / 1000.0, north / 1000.0, (alt_m - alt0) / 1000.0
+
+
+def style_axis_3d(ax) -> None:
+    """The 2-D styling has no counterpart on a 3-D axes, which has panes instead."""
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.set_pane_color((1.0, 1.0, 1.0, 0.0))   # transparent panes: the box would dominate
+        axis.line.set_color(GRID)
+        axis._axinfo["grid"]["color"] = GRID
+        axis._axinfo["grid"]["linewidth"] = 0.6
+        axis.label.set_color(INK_2)
+    ax.tick_params(colors=INK_2, labelsize=8)
+    ax.title.set_color(INK)
+
+
+def plot_trajectory_3d(truth, fixes, outages, out: Path, caption: str,
+                       config: dict[str, str]) -> None:
+    """The flight in space, and the fraction of it the receiver navigated.
+
+    Every other GPS figure on this page plots against time, where the dropout
+    reads as a shaded band of a certain width. In space it reads as what it
+    actually costs: the receiver's entire contribution is a stub near the
+    origin of a trajectory that runs 543 km downrange and 237 km up, and the
+    rest of the ascent -- both staging events, all of stage 2 -- is flown with
+    no GNSS at all.
+
+    Hence two panels. On the overview the navigated portion is 4% of the track
+    and cannot be drawn as a distinguishable segment -- it is about twenty
+    pixels wide, and the fix cloud covers it -- so the truth line is one
+    continuous curve there and the fixes mark their own extent. The zoom is
+    where that stub is actually resolvable, and it is the panel that shows what
+    the flight software had to work with.
+
+    Scenario 17 launches due east from the equator with no cross-range
+    manoeuvre, so the whole flight lies in one plane to within 0.1 m over
+    543 km. The north axis is drawn anyway, and annotated, because the honest
+    thing to do with an empty dimension is to show that it is empty rather than
+    quietly project it away.
+    """
+    origin = (truth["lat_rad"][0], truth["lon_rad"][0], truth["alt_m"][0])
+    east, north, up = zip(*[to_enu_km(la, lo, al, origin)
+                            for la, lo, al in zip(truth["lat_rad"], truth["lon_rad"], truth["alt_m"])])
+    times = truth["time"]
+    t_lost = outages[0][0] if outages else None
+
+    fix_east: tuple[float, ...] = ()
+    fix_north: tuple[float, ...] = ()
+    fix_up: tuple[float, ...] = ()
+    if len(fixes["sim_time_s"]) >= 2:
+        fix_east, fix_north, fix_up = zip(
+            *[to_enu_km(math.radians(la), math.radians(lo), al, origin)
+              for la, lo, al in zip(fixes["latitude_deg"], fixes["longitude_deg"], fixes["altitude_m"])])
+
+    fig = plt.figure(figsize=(9.6, 5.0), dpi=150)
+    fig.patch.set_facecolor(SURFACE)
+    ax_all = fig.add_subplot(1, 2, 1, projection="3d")
+    ax_zoom = fig.add_subplot(1, 2, 2, projection="3d")
+
+    def draw(ax, last: int, fix_count: int) -> None:
+        """Draws the trajectory up to truth index `last` and `fix_count` fixes."""
+        ax.set_facecolor(SURFACE)
+        style_axis_3d(ax)
+        # Ground track on the floor of the box: a 3-D curve with no shadow is
+        # ambiguous about which of its dimensions is doing the climbing.
+        ax.plot(east[:last], north[:last], [0.0] * last, color=INK_2, linewidth=0.9,
+                linestyle=":", alpha=0.45, zorder=1, label="ground track (projected)")
+        # Fixes under the truth line, not over it: at 1.5 m noise on a 21 km
+        # track the two coincide, and whichever is drawn second hides the
+        # other. The line is the thinner mark, so it goes on top.
+        if fix_count:
+            ax.plot(fix_east[:fix_count], fix_north[:fix_count], fix_up[:fix_count],
+                    linestyle="none", marker="o", markersize=MARKER_GPS, alpha=0.55,
+                    color=GPS, markeredgewidth=0, zorder=2,
+                    label="GPS fixes decoded by flight computer")
+        ax.plot(east[:last], north[:last], up[:last], color=TRUTH, linewidth=1.6,
+                zorder=3, label="rocket truth (TwoStageRocket.fmu)")
+        # An axis whose data spans centimetres cannot be auto-scaled: matplotlib
+        # would zoom the numerical dust up to full width and invent a wander
+        # that is not there. Give it a share of the downrange extent instead,
+        # so the flight reads as the planar thing it is.
+        span = max(east[:last]) * 0.16
+        ax.set_xlim(0.0, max(east[:last]) * 1.02)
+        ax.set_ylim(-span, span)
+        ax.set_zlim(0.0, max(up[:last]) * 1.08)
+        ax.set_yticks([-round(span, 1), 0.0, round(span, 1)])
+        # Generous label padding: on a 3-D axes the tick labels splay out along
+        # the projected axis, and a default-padded label lands on top of them.
+        ax.set_xlabel("east of launch site [km]", labelpad=14)
+        ax.set_ylabel("north [km]", labelpad=8)
+        ax.set_zlabel("altitude [km]", labelpad=4)
+        # A shallow box in the north direction: that axis carries 5 cm of data,
+        # so giving it a third of the depth a cube would is both honest about
+        # the flight being planar and buys the other two axes the room.
+        ax.set_box_aspect((1.75, 0.5, 1.0))
+        # Oblique rather than edge-on: edge-on would look like the 2-D altitude
+        # plot and would hide the ground track under the trajectory.
+        ax.view_init(elev=20.0, azim=-58.0)
+
+    def mark(ax, index: int, text: str, offset: tuple[float, float], scale: float,
+             ha: str = "left", va: str = "bottom") -> None:
+        """Dot on the trajectory, leader line out to a label in clear space.
+
+        3-D text takes data coordinates in all three axes; the offset stays in
+        east and up only, so the label and its leader sit in the flight plane
+        rather than floating out of it.
+        """
+        x, y, z = east[index], north[index], up[index]
+        dx, dz = offset[0] * scale, offset[1] * scale
+        ax.plot([x, x + dx], [y, y], [z, z + dz], color=INK_2, linewidth=0.7,
+                alpha=0.5, zorder=4)
+        ax.plot([x], [y], [z], linestyle="none", marker="o", markersize=4.0,
+                color=INK_2, markeredgewidth=0, zorder=5)
+        ax.text(x + dx, y, z + dz, text, fontsize=7.5, color=INK_2, ha=ha, va=va, zorder=6)
+
+    # --- overview: the whole 200 s window ------------------------------------
+    draw(ax_all, len(times), len(fix_east))
+    scale = max(east) / 100.0
+    if t_lost is not None:
+        lost = next((i for i, t in enumerate(times) if t >= t_lost), len(times)) - 1
+        # The count line only when there were fixes: an envelope tight enough to
+        # leave none puts this marker on the launch pad, where "all 0 fixes are
+        # in here" is a joke the figure should not be making.
+        text = f"fix lost, t = {t_lost:.1f} s"
+        if fix_east:
+            text += f"\nall {len(fix_east)} fixes are in here"
+        mark(ax_all, lost, text, (-2.0, 17.0), scale, ha="center")
+    ignition = config.get("stg2_ignition_s")
+    if ignition is not None:
+        i = min(range(len(times)), key=lambda k: abs(times[k] - float(ignition)))
+        mark(ax_all, i, f"stage 2 ignition\nt = {float(ignition):.1f} s",
+             (7.0, -13.0), scale, va="top")
+    mark(ax_all, len(times) - 1,
+         f"t = {times[-1]:.0f} s, {up[-1]:.0f} km up\nand still climbing",
+         (-11.0, 3.0), scale, ha="right")
+    # Panel names inside the axes rather than as titles: a 3-D axes' title sits
+    # at the top of its reserved region, which is a long way above the box, and
+    # collides with the shared legend.
+    ax_all.text2D(0.0, 0.98, "the whole flight", transform=ax_all.transAxes,
+                  fontsize=10, color=INK, ha="left", va="top")
+
+    # --- zoom: the part the receiver was alive for ---------------------------
+    # A little past staging, so the zoom carries one event beyond the dropout
+    # and the reader can see the flight continuing out of the navigated stub.
+    t_stage = staging_time(truth)
+    t_zoom = (t_stage + 4.0) if t_stage is not None else (times[-1] * 0.2)
+    last = next((i for i, t in enumerate(times) if t > t_zoom), len(times))
+    draw(ax_zoom, last, len(fix_east))
+    scale = max(east[:last]) / 100.0
+    if t_lost is not None and fix_east:
+        lost = next((i for i, t in enumerate(times) if t >= t_lost), len(times)) - 1
+        mark(ax_zoom, lost, f"fix lost, t = {t_lost:.1f} s\n{up[lost]:.0f} km up, "
+                            f"{east[lost]:.0f} km downrange", (5.0, -15.0), scale, va="top")
+    if t_stage is not None:
+        i = min(range(len(times)), key=lambda k: abs(times[k] - t_stage))
+        mark(ax_zoom, i, f"stage 1 separation\nt = {t_stage:.1f} s",
+             (-13.0, 7.0), scale, ha="right")
+    ax_zoom.text2D(0.0, 0.98,
+                   f"the navigated stub (first {t_zoom:.0f} s), magnified" if fix_east
+                   else f"the first {t_zoom:.0f} s, magnified — no fix in any of it",
+                   transform=ax_zoom.transAxes, fontsize=10, color=INK, ha="left", va="top")
+
+    handles, labels = ax_all.get_legend_handles_labels()
+    leg = fig.legend(handles, labels, loc="upper center", frameon=False, fontsize=9,
+                     ncol=3, bbox_to_anchor=(0.5, 0.945))
+    for text in leg.get_texts():
+        text.set_color(INK_2)
+    fig.suptitle(f"The flight in space: {t_lost:.0f} s navigated, {times[-1] - t_lost:.0f} s dark"
+                 if t_lost is not None else "The flight in space",
+                 fontsize=12, color=INK, x=0.5, y=0.985)
+
+    cross_range_m = max(abs(n) for n in north) * 1000.0
+    fig.text(0.5, 0.062, f"cross-range over the whole flight: {cross_range_m:.2f} m — "
+                         f"Scenario 17 launches due east from the equator and never leaves that plane",
+             ha="center", fontsize=8, color=INK_2)
+    fig.tight_layout(rect=(0.01, 0.10, 0.99, 0.88))
+    # A 3-D axes reserves a square region and then draws a box that, with this
+    # box_aspect, occupies rather less than half of it. Overflowing each axes
+    # past its allotted cell is what turns that margin back into figure.
+    for ax in (ax_all, ax_zoom):
+        box = ax.get_position()
+        ax.set_position((box.x0 - box.width * 0.03, box.y0 - box.height * 0.10,
+                         box.width * 1.06, box.height * 1.24))
+    fig.text(0.5, 0.012, caption, ha="center", va="bottom", fontsize=8, color=INK_2)
+    fig.savefig(out / "trajectory_3d.png", facecolor=SURFACE)
+    plt.close(fig)
 
 
 def plot_altitude(truth, fixes, outages, out: Path, caption: str) -> None:
@@ -513,8 +712,9 @@ def main() -> None:
               f"(receiver dynamics envelope: {windows}); plotting the {valid} valid ones")
 
     figures = 0
+    plot_trajectory_3d(truth, fixes, outages, args.out, caption, config)
     plot_gps_availability(truth, outages, args.out, caption, config)
-    figures += 1
+    figures += 2
 
     # Two fixes is the least that says anything: one point draws no track and
     # the error figure needs a pair to align against truth. A launch-vehicle

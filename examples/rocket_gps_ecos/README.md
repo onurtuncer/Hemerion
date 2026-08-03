@@ -235,16 +235,18 @@ Outputs land in `results/`:
 ## Plots
 
 `plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
-(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, speed over
-ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates against truth.
+(`doc/rocket_gps_ecos_cosim.rst`): the flight in 3-D with the navigated part of it distinguished, GPS
+availability against the receiver's envelope, altitude, speed over ground, the decoded-fix error against
+truth, and the decoded IMU specific force and body rates against truth.
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
 
-All six come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
+All seven come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
 the rest of the flight as the outage it is; the script skips a fix-dependent figure rather than drawing it
-empty if a configuration leaves fewer than two usable epochs (`--dyn-model 8` leaves one).
+empty if a configuration leaves fewer than two usable epochs (`--dyn-model 8` leaves one). The 3-D trajectory
+and the availability figure survive that case, since both are drawn from truth with the fixes only overlaid.
 
 Every figure is stamped at the foot with the receiver configuration that produced it, read from the `.config`
 sidecar `rocket_gps_cosim` writes next to the truth log. Run the same script against `--no-cocom` output and
