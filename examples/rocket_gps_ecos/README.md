@@ -67,32 +67,33 @@ inheriting the defaults silently — whether the receiver keeps a fix through th
 consequential setting:
 
 ```cpp
-launch_site["gps::dynamic_platform"] = 8;      // u-blox dynModel: airborne <4 g
+launch_site["gps::dynamic_platform"] = -1;     // no platform envelope: COCOM alone
 launch_site["gps::cocom_limits_enabled"] = true;
 launch_site["gps::reacquisition_time_s"] = 2.0;
 ```
 
-Those are the settings a launch vehicle ships with, and this vehicle breaks all of them: the platform model
-caps horizontal velocity at 500 m/s (passed during first-stage boost), and the **COCOM export limits** stop
+The FMU models two independent mechanisms and the example enables only one. **COCOM export limits** stop
 navigation output above 18 000 m *and* 515 m/s — an AND, which is why a high-altitude balloon and a fast low
-sled both keep their fix while a sounding rocket past first-stage burnout does not. Both are evaluated against
-*truth*, not against the noisy fix: it is the vehicle's real motion that breaks carrier tracking, not the
-receiver's estimate of it.
+sled both keep their fix while a sounding rocket does not. That is not a configuration choice; it is in every
+receiver you can buy. The **navigation-engine platform model** (`dynModel`) is a choice — a register a
+firmware engineer writes — and it is off here. Both are evaluated against *truth*, not against the noisy fix:
+it is the vehicle's real motion that breaks carrier tracking, not the receiver's estimate of it.
 
-The receiver keeps emitting one NAV-PVT frame per epoch throughout. It just stops claiming a solution — fix
-type drops to `kNoFix`, satellites to zero, accuracies inflate — and the position fields keep carrying the
-invalid solution, as on a real part. The flight computer gates on fix type, logs the epoch anyway, and reports
-the outage window; `plot_results.py` drops no-fix epochs rather than plotting numbers that mean nothing.
+**What COCOM costs, measured: 312 fixes out of 2001 epochs, the last at t = 31.2 s.** The receiver works
+normally for 31 seconds — position, speed, course, `sats=11` — then stops at 17.9 km and 1.6 km/s and never
+reports again, leaving the remaining 169 s including all of stage 2 unnavigated. The AND is what sets the
+moment: 515 m/s is passed at t = 10.1 s with nothing happening, because the vehicle is only 2 km up.
 
-**What that costs, measured:** one fix out of 2001 navigation epochs. The receiver reports a solution on the
-pad and loses it 0.1 s later — thrust alone is ~54 m/s², so coordinate acceleration off the pad is ~4.6 g and
-the platform model's 4 g limit trips on the second epoch. By the time the vehicle is back inside that
-envelope it is past 18 km and 515 m/s, where COCOM takes over; past 80 km the platform model's altitude
-ceiling holds it dark for the rest of the flight. A stock COTS receiver gives this vehicle 0.1 seconds of
-GPS, and flight software that assumes otherwise has just been shown so.
+Adding the platform model back (`--dyn-model 8`, airborne <4 g, what a launch vehicle ships with) is more
+realistic and says much less: its acceleration limit trips on the **second** epoch, because thrust alone is
+~54 m/s² and coordinate acceleration off the pad is ~4.6 g, so the receiver reports one usable fix in 2001
+epochs and COCOM never gets to be the reason for anything.
 
-`--dyn-model -1 --no-cocom` gives the unrestricted stream of a waivered receiver — 2001 of 2001 epochs with a
-fix — which is what the comparison figures in the Sphinx page are drawn from.
+The receiver keeps emitting one NAV-PVT frame per epoch throughout, it just stops claiming a solution — fix
+type drops to `kNoFix`, satellites to zero, accuracies inflate. The flight computer gates on fix type, logs
+the epoch with its `fix_type` but without the meaningless position, and reports the outage window.
+
+`--no-cocom` clears the export limits too, for a waivered receiver that reports through the whole flight.
 
 ## The plant is checked, not assumed
 
@@ -220,27 +221,37 @@ Outputs land in `results/`:
 * `rocket_truth.csv` — Ecos `csv_writer` log of the rocket's outputs (altitude, position, NED velocity, body
   rates, Mach, dynamic pressure, thrust, mass, staging flag) plus the host-computed specific force the IMU FMU
   received, at every communication point.
-* `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not: position, speed/course,
-  receiver-reported accuracies, satellite count, and the `fix_type` that says whether any of it means
-  anything.
+* `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not. Epochs that carried a
+  solution get position, speed/course, receiver-reported accuracies and satellite count; epochs the dynamics
+  envelope invalidated get **empty** position fields, keeping only the index, time and `fix_type`. A real
+  receiver does put numbers in those fields during a dropout and the parser does decode them, but they are
+  not measurements of anything, so they are not logged as if they were.
+* `rocket_truth.csv` — written by the co-simulation host rather than Ecos' `csv_writer`, at full
+  double precision. Six decimal places of a *radian* is 6.4 m of ground position, which would swamp the 1.5 m
+  the GPS noise model injects and make the decoded-fix error figure a picture of the log's own rounding.
 * `imu_samples.csv` — every IMU sample the flight software decoded, already converted back to SI units by
   `convert_raw_to_si()`: specific force and angular rate per axis, timestamped from the frame payload.
 
 ## Plots
 
 `plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
-(`doc/rocket_gps_ecos_cosim.rst`): GPS availability against the receiver's envelope, altitude, ground track,
-speed over ground, the decoded-fix error against truth, and the decoded IMU specific force and body rates
-against truth:
+(`doc/rocket_gps_ecos_cosim.rst`): the flight in 3-D with the navigated part of it distinguished, GPS
+availability against the receiver's envelope, altitude, speed over ground, the decoded-fix error against
+truth, and the decoded IMU specific force and body rates against truth.
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
 
-With the envelope in force this flight yields one usable fix, so the four fix-dependent figures are skipped
-rather than drawn empty — `gps_availability.png` is the one that still says something, and the IMU figures
-are unaffected. Run the co-simulation a second time with `--dyn-model -1 --no-cocom` (and `--csv` /
-`--imu-csv` pointing elsewhere) to get a fix stream to plot against.
+All seven come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
+the rest of the flight as the outage it is; the script skips a fix-dependent figure rather than drawing it
+empty if a configuration leaves fewer than two usable epochs (`--dyn-model 8` leaves one). The 3-D trajectory
+and the availability figure survive that case, since both are drawn from truth with the fixes only overlaid.
+
+Every figure is stamped at the foot with the receiver configuration that produced it, read from the `.config`
+sidecar `rocket_gps_cosim` writes next to the truth log. Run the same script against `--no-cocom` output and
+you get plots identical in form that say the opposite thing; a PNG detached from its caption has no other way
+to tell you which it is.
 
 ## Notes and design decisions
 

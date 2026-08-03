@@ -13,9 +13,9 @@
 /// * **GPS** -- the GPS FMU's UBX-NAV-PVT stream arrives over UDP and goes
 ///   through the unmodified GpsDriver/UbxParser. On hardware those bytes come
 ///   off a UART RX line instead. The receiver's dynamics envelope is in force
-///   (airborne <4 g platform model + COCOM limits), so the stream has long,
-///   deliberate holes in it during boost and above the export thresholds --
-///   this program logs and counts them rather than pretending otherwise.
+///   -- by default the COCOM export limits alone -- so the stream stops dead
+///   partway up and never resumes; this program logs and counts the outage
+///   rather than pretending otherwise.
 /// * **IMU** -- the IMU is an SPI part, so the flight computer drives it with
 ///   the unmodified on-target ImuSpiDriver: sample the data-ready line, read
 ///   STATUS/FIFO_COUNT, burst the FIFO port, feed every byte to
@@ -24,6 +24,19 @@
 ///   chip-select-framed transfers on a shared-memory bus (sim/spi_shm) the
 ///   hardware-simulator FMU answers; on the target that same interface wraps
 ///   HAL_SPI_TransmitReceive plus the CS and DRDY GPIOs.
+///
+/// Everything *around* those two stacks is harness, not firmware, and has no
+/// counterpart on the target: the command line, the UDP socket, std::filesystem
+/// and std::ofstream, and the std::cout/std::printf progress and summary lines.
+/// On the STM32H743 this file's job is done by a pair of FreeRTOS tasks whose
+/// output goes to a telemetry downlink and flash, and whose diagnostics go to
+/// SEGGER RTT or a lock-free ring buffer drained over DMA UART -- not to
+/// iostream, which costs tens of kilobytes of flash for locale machinery,
+/// runs its static initializer before the scheduler starts, is task-safe only
+/// with configUSE_NEWLIB_REENTRANT, and blocks the calling task on the UART.
+/// The boundary is the driver layer: everything below it (GpsDriver, UbxParser,
+/// ImuSpiDriver, ImuPacketParser, convert_raw_to_si) is freestanding -- caller-
+/// owned buffers, no heap, no exceptions, no stdio -- and crosses unchanged.
 ///
 /// Every decoded fix and IMU sample is appended to a CSV so plot_results.py
 /// can compare what the flight software *believes* against the rocket truth
@@ -354,17 +367,25 @@ int main(int argc, char** argv)
         const double sim_time_s = static_cast<double>(fix_count) * options.fix_period_s;
         if (fix.fix_type == GpsFixType::kNoFix)
         {
-          // The dynamics envelope took the fix away: position and velocity
-          // fields still carry an invalid solution, as on a real receiver, so
-          // nothing here may be treated as a measurement.
+          // The dynamics envelope took the fix away. A real receiver keeps
+          // filling NAV-PVT's position and velocity fields through a dropout,
+          // and the parser faithfully decodes whatever is in them -- but they
+          // are not a measurement of anything, so they are not logged as one.
+          // The epoch is still recorded (its index carries the time mapping,
+          // and fix_type marks the outage); it simply has no data in it.
+          // Leaving the numbers in would invite exactly the mistake of
+          // plotting them, which is how a 236 km "position" ends up in a
+          // figure.
           if (first_outage_s < 0.0)
           {
             first_outage_s = sim_time_s;
-            std::printf("[fc] fix %5ld  t=%7.1f s  NO FIX -- receiver outside its dynamics envelope\n",
+            std::printf("[fc] fix %5ld  t=%7.1f s  no fix -- receiver outside its dynamics envelope\n",
                         fix_count,
                         sim_time_s);
           }
           last_outage_s = sim_time_s;
+          gps_csv << fix_count << ',' << sim_time_s << ",,,,,,,," << static_cast<unsigned>(fix.num_satellites) << ','
+                  << static_cast<unsigned>(fix.fix_type) << '\n';
         }
         else
         {
@@ -375,11 +396,11 @@ int main(int argc, char** argv)
           {
             print_fix(fix_count, sim_time_s, fix);
           }
+          gps_csv << fix_count << ',' << sim_time_s << ',' << fix.latitude_deg << ',' << fix.longitude_deg << ','
+                  << fix.altitude_m << ',' << fix.ground_speed_mps << ',' << fix.course_deg << ','
+                  << fix.horizontal_accuracy_m << ',' << fix.vertical_accuracy_m << ','
+                  << static_cast<unsigned>(fix.num_satellites) << ',' << static_cast<unsigned>(fix.fix_type) << '\n';
         }
-        gps_csv << fix_count << ',' << sim_time_s << ',' << fix.latitude_deg << ',' << fix.longitude_deg << ','
-                << fix.altitude_m << ',' << fix.ground_speed_mps << ',' << fix.course_deg << ','
-                << fix.horizontal_accuracy_m << ',' << fix.vertical_accuracy_m << ','
-                << static_cast<unsigned>(fix.num_satellites) << ',' << static_cast<unsigned>(fix.fix_type) << '\n';
       }
       else if (result == GpsParseError::kChecksumMismatch)
       {
@@ -509,15 +530,27 @@ int main(int argc, char** argv)
             << valid_fix_count << " carried a fix, " << no_fix_epochs << " did not\n";
   if (no_fix_epochs > 0)
   {
+    // Which limit did it is the receiver's business, not the flight computer's:
+    // NAV-PVT carries a cleared gnssFixOK flag and nothing about why.
     std::cout << "[fc] no-fix window: t=" << first_outage_s << " s to t=" << last_outage_s
-              << " s (receiver dynamics envelope: platform model + COCOM limits)\n";
+              << " s (receiver outside its dynamics envelope)\n";
   }
   std::cout << "[fc] " << imu_sample_count << " IMU samples decoded over " << imu_bus.transfers() << " SPI transfers ("
             << imu_checksum_errors << " checksum errors, " << imu_fifo_overflows << " FIFO overflows, "
-            << imu_bus.failed_transfers() << " failed transfers)\n"
-            << "[fc] max altitude " << max_altitude_m << " m, max ground speed " << max_speed_mps << " m/s (fixes the "
-            << "receiver actually reported)\n"
-            << "[fc] max |specific force| " << max_specific_force_mps2 << " m/s2, max |body rate| "
+            << imu_bus.failed_transfers() << " failed transfers)\n";
+  // With a launch-vehicle envelope in force the receiver can hold no usable
+  // fix at all, and "max altitude 0 m" would read as a measurement rather than
+  // as the absence of one.
+  if (valid_fix_count > 0)
+  {
+    std::cout << "[fc] max altitude " << max_altitude_m << " m, max ground speed " << max_speed_mps << " m/s (over "
+              << valid_fix_count << (valid_fix_count == 1 ? " fix" : " fixes") << " carrying a solution)\n";
+  }
+  else
+  {
+    std::cout << "[fc] no position summary: the receiver never reported a usable fix\n";
+  }
+  std::cout << "[fc] max |specific force| " << max_specific_force_mps2 << " m/s2, max |body rate| "
             << max_body_rate_rad_s << " rad/s\n"
             << "[fc] fixes written to " << options.gps_csv_path.string() << ", IMU samples to "
             << options.imu_csv_path.string() << "\n";
