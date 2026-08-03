@@ -1,0 +1,173 @@
+% ----------------------------------------------------------------------------
+% References for "Protocol-Accurate Sensor FMUs"
+%
+% Entries whose author/year/venue details still need checking against the
+% primary source are listed under "Open items" in README.md (BibTeX has no
+% inline comment syntax, so the flags cannot live here).
+% ----------------------------------------------------------------------------
+
+@techreport{fmi2020,
+  author      = {{Modelica Association}},
+  title       = {Functional Mock-up Interface Specification, Version 2.0.4},
+  institution = {Modelica Association Project FMI},
+  year        = {2022},
+  note        = {\url{https://fmi-standard.org}}
+}
+
+@inproceedings{blochwitz2011fmi,
+  author    = {Blochwitz, Torsten and Otter, Martin and Arnold, Martin and
+               Bausch, Constanze and Clauss, Christoph and Elmqvist, Hilding
+               and Junghanns, Andreas and Mauss, Jakob and Monteiro, Manuel and
+               Neidhold, Thomas and Neumerkel, Dietmar and Olsson, Hans and
+               Peetz, Jan-Volker and Wolf, Susann},
+  title     = {The Functional Mockup Interface for Tool Independent Exchange of
+               Simulation Models},
+  booktitle = {Proc. 8th International Modelica Conference},
+  year      = {2011},
+  pages     = {105--114},
+  doi       = {10.3384/ecp11063105}
+}
+
+@article{gomes2018cosim,
+  author  = {Gomes, Claudio and Thule, Casper and Broman, David and
+             Larsen, Peter Gorm and Vangheluwe, Hans},
+  title   = {Co-Simulation: A Survey},
+  journal = {ACM Computing Surveys},
+  volume  = {51},
+  number  = {3},
+  pages   = {1--33},
+  year    = {2018},
+  doi     = {10.1145/3179993}
+}
+
+@techreport{fmilsbus2025,
+  author      = {{Modelica Association Project FMI}},
+  title       = {{FMI} Layered Standard for Network Communication
+                 ({FMI-LS-BUS}), Version 1.0},
+  institution = {Modelica Association},
+  year        = {2025},
+  note        = {\url{https://fmi-standard.org/fmi-ls-bus/1.0.0/}}
+}
+
+@article{junghanns2022fmi3,
+  author  = {Junghanns, Andreas and Blochwitz, Torsten and Bertsch, Christian
+             and Sommer, Torsten and Wernersson, Karl and Pillekeit, Andreas
+             and others},
+  title   = {The {FMI} 3.0 Standard Interface for Clocked and Scheduled
+             Simulations},
+  journal = {Electronics},
+  volume  = {11},
+  number  = {21},
+  pages   = {3635},
+  year    = {2022},
+  doi     = {10.3390/electronics11213635}
+}
+
+@inproceedings{pedersen2016fmi,
+  author    = {Pedersen, Nicolai and Bojsen, Tom and Madsen, Jan and
+               Vejlgaard-Laursen, Morten},
+  title     = {{FMI} for Co-Simulation of Embedded Control Software and
+               Physical Models},
+  booktitle = {Proc. 1st Japanese Modelica Conference},
+  address   = {Tokyo, Japan},
+  year      = {2016},
+  doi       = {10.3384/ecp1612470}
+}
+
+@inproceedings{mikelsons2017virtual,
+  author    = {Mikelsons, Lars and Samlaus, Roland},
+  title     = {Towards Virtual Validation of {ECU} Software using {FMI}},
+  booktitle = {Proc. 12th International Modelica Conference},
+  address   = {Prague, Czech Republic},
+  year      = {2017}
+}
+
+@misc{silkit,
+  author       = {{Vector Informatik}},
+  title        = {{Vector} {SIL} {Kit}: An Open-Source Middleware for
+                  Distributed Software-in-the-Loop Integration},
+  howpublished = {\url{https://github.com/vectorgrp/sil-kit}},
+  year         = {2024},
+  note         = {Accessed 2026}
+}
+
+@misc{ecos,
+  author       = {{Ecos Platform contributors}},
+  title        = {Ecos: A Co-Simulation Platform for {FMI}},
+  howpublished = {\url{https://github.com/Ecos-platform/ecos}},
+  year         = {2024},
+  note         = {Accessed 2026}
+}
+
+@misc{fmi4c,
+  author       = {{fmi4c contributors}},
+  title        = {fmi4c: A {C} Library for Importing {FMI} 1.0, 2.0 and 3.0 {FMUs}},
+  howpublished = {\url{https://github.com/Ecos-platform/fmi4c}},
+  year         = {2024},
+  note         = {Accessed 2026}
+}
+
+@misc{fmu4cpp,
+  author       = {{fmu4cpp contributors}},
+  title        = {fmu4cpp: A {C++} Wrapper for Exporting {FMI} 2.0/3.0 Co-Simulation {FMUs}},
+  howpublished = {\url{https://github.com/Ecos-platform/fmu4cpp}},
+  year         = {2024},
+  note         = {Accessed 2026}
+}
+
+@misc{renode,
+  author       = {{Antmicro}},
+  title        = {Renode: Open Source Software Development Framework for
+                  Multi-Node Embedded Systems},
+  howpublished = {\url{https://renode.io}},
+  year         = {2024},
+  note         = {Accessed 2026}
+}
+
+@misc{freertos,
+  author       = {{Amazon Web Services}},
+  title        = {The {FreeRTOS} Kernel},
+  howpublished = {\url{https://www.freertos.org}},
+  year         = {2024},
+  note         = {Accessed 2026}
+}
+
+@techreport{nasa_tm2015,
+  author      = {Murri, Daniel G.},
+  title       = {Atmospheric Flight Dynamics Model Verification Check Cases
+                 ({NASA} {DAVE-ML} Scenarios)},
+  institution = {NASA Langley Research Center},
+  number      = {NASA/TM--2015--218675},
+  year        = {2015}
+}
+
+@inproceedings{jackson2011daveml,
+  author    = {Jackson, E. Bruce and Hildreth, Bruce L.},
+  title     = {Flight Dynamic Model Exchange Using {DAVE-ML}},
+  booktitle = {AIAA Modeling and Simulation Technologies Conference},
+  year      = {2011}
+}
+
+@misc{ublox_m9,
+  author       = {{u-blox AG}},
+  title        = {{u-blox} {M9} Standard Precision {GNSS}: Interface Description},
+  howpublished = {u-blox Document UBX-19035940},
+  year         = {2021}
+}
+
+@book{groves2013,
+  author    = {Groves, Paul D.},
+  title     = {Principles of {GNSS}, Inertial, and Multisensor Integrated
+               Navigation Systems},
+  publisher = {Artech House},
+  edition   = {2nd},
+  year      = {2013}
+}
+
+@misc{ieee952,
+  author       = {{IEEE}},
+  title        = {{IEEE} Standard Specification Format Guide and Test Procedure
+                  for Single-Axis Interferometric Fiber Optic Gyros},
+  howpublished = {IEEE Std 952-1997},
+  year         = {1998}
+}
