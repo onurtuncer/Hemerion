@@ -33,6 +33,7 @@ extern "C" {
 #define HAL_DMA_MODULE_ENABLED /* UART_HandleTypeDef references DMA_HandleTypeDef unconditionally */
 #define HAL_FLASH_MODULE_ENABLED
 #define HAL_GPIO_MODULE_ENABLED
+#define HAL_I2C_MODULE_ENABLED
 #define HAL_PWR_MODULE_ENABLED
 #define HAL_RCC_MODULE_ENABLED
 #define HAL_UART_MODULE_ENABLED
@@ -117,6 +118,11 @@ extern "C" {
 #ifdef HAL_UART_MODULE_ENABLED
 #include "stm32h7xx_hal_uart.h"
 #endif /* HAL_UART_MODULE_ENABLED */
+
+#ifdef HAL_I2C_MODULE_ENABLED
+#include "stm32h7xx_hal_i2c.h"
+#include "stm32h7xx_hal_i2c_ex.h"
+#endif /* HAL_I2C_MODULE_ENABLED */
 
 /* Exported macro ---------------------------------------------------------- */
 #ifdef USE_FULL_ASSERT

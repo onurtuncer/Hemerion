@@ -97,3 +97,13 @@ target_link_libraries(test_hemerion_sensors_mag_packet PRIVATE hemerion_sensors)
 
 add_test(NAME sensors.mag_packet COMMAND test_hemerion_sensors_mag_packet)
 set_tests_properties(sensors.mag_packet PROPERTIES LABELS "unit")
+
+# The BMP390's I2C path with both ends against each other: the simulator's register/measurement model
+# (baro/bmp390/fmu/bmp390_i2c_slave.cpp, compiled directly for the same reason as the emitters above) driven by the
+# real, on-target Bmp390Driver + Bmp390Compensator out of hemerion_sensors, with no transport in the picture.
+add_executable(test_hemerion_sensors_bmp390 test_bmp390.cpp
+                                            "${CMAKE_CURRENT_SOURCE_DIR}/../src/baro/bmp390/fmu/bmp390_i2c_slave.cpp")
+target_link_libraries(test_hemerion_sensors_bmp390 PRIVATE hemerion_sensors)
+
+add_test(NAME sensors.bmp390 COMMAND test_hemerion_sensors_bmp390)
+set_tests_properties(sensors.bmp390 PROPERTIES LABELS "unit")

@@ -15,6 +15,7 @@ foreach(
   fmi
   shm_bridge
   spi_shm
+  i2c_shm
   udp_bridge)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_sim_target}/CMakeLists.txt")
     add_subdirectory(${_hemerion_sim_target})

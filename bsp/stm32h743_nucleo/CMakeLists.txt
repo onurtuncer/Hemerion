@@ -42,6 +42,7 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/board.c"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/gpio.c"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/uart.c"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/i2c.c"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/freertos_hooks.c")
 
 target_link_libraries(hemerion_bsp_stm32h743_nucleo INTERFACE CMSIS::STM32H7 STM32H7xx::HAL)

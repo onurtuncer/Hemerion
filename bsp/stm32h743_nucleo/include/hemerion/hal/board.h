@@ -18,6 +18,8 @@
 #ifndef HEMERION_HAL_BOARD_H
 #define HEMERION_HAL_BOARD_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,6 +34,13 @@ void hal_board_init(void);
 
 /** Forces an immediate Cortex-M7 system reset (NVIC_SystemReset); does not return. */
 void hal_board_reset(void);
+
+/**
+ * Blocks for at least ms milliseconds (HAL tick granularity). Sensor
+ * bring-up settle waits; inside a FreeRTOS task prefer vTaskDelay, which
+ * yields instead of spinning.
+ */
+void hal_delay_ms(uint32_t ms);
 
 #ifdef __cplusplus
 }

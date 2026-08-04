@@ -30,3 +30,8 @@ void hal_board_reset(void)
   {
   }
 }
+
+void hal_delay_ms(uint32_t ms)
+{
+  HAL_Delay(ms);
+}
