@@ -24,6 +24,14 @@
 ///   chip-select-framed transfers on a shared-memory bus (sim/spi_shm) the
 ///   hardware-simulator FMU answers; on the target that same interface wraps
 ///   HAL_SPI_TransmitReceive plus the CS and DRDY GPIOs.
+/// * **Barometer** -- the BMP390 is an I2C part, driven with the unmodified
+///   on-target Bmp390Driver: probe CHIP_ID, soft-reset, read the calibration
+///   NVM, program OSR/ODR/INT_CTRL/PWR_CTRL, then poll STATUS and burst the
+///   shadowed data block, compensating with the part's own coefficients. The
+///   swapped piece is again only the bus: ShmI2cBus below puts the
+///   transactions on a shared-memory I2C bus (sim/i2c_shm); on the target the
+///   same interface wraps HAL_I2C_Mem_Read/Write
+///   (Hemerion/baro/bmp390/bmp390_hal_i2c_bus.h).
 ///
 /// Everything *around* those two stacks is harness, not firmware, and has no
 /// counterpart on the target: the command line, the UDP socket, std::filesystem
@@ -45,12 +53,16 @@
 /// Exits on its own once both streams go quiet (the co-simulation finished)
 /// or a hard wall-clock cap is reached, so a scripted run never hangs.
 
+#include "Hemerion/baro/baro_types.h"
+#include "Hemerion/baro/bmp390/bmp390_driver.h"
+#include "Hemerion/baro/bmp390/bmp390_registers.h"
 #include "Hemerion/gps/gpsDriver.hpp"
 #include "Hemerion/imu/fmu/imu_noise_model.h"  // ImuNoiseConfig: the simulated part's register sensitivity
 #include "Hemerion/imu/imu_conversion.h"
 #include "Hemerion/imu/imu_spi_driver.h"
 #include "udpReceiver.hpp"
 
+#include <hemerion/sim/i2c_shm/i2c_shm_link.h>
 #include <hemerion/sim/spi_shm/spi_shm_link.h>
 
 #include <algorithm>
@@ -63,13 +75,23 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
+#include <thread>
 
 namespace
 {
 
 using hemerion::examples::rocket_gps_ecos::UdpReceiver;
+using hemerion::sensors::baro::BaroSample;
+using hemerion::sensors::baro::bmp390::bmp390_odr_period_us;
+using hemerion::sensors::baro::bmp390::Bmp390Config;
+using hemerion::sensors::baro::bmp390::Bmp390Driver;
+using hemerion::sensors::baro::bmp390::Bmp390Error;
+using hemerion::sensors::baro::bmp390::Bmp390I2cBus;
+using hemerion::sensors::baro::bmp390::Bmp390ReadResult;
+using hemerion::sensors::baro::bmp390::kBmp390I2cAddressPrimary;
 using hemerion::sensors::gps::GpsDriver;
 using hemerion::sensors::gps::GpsFix;
 using hemerion::sensors::gps::GpsFixType;
@@ -82,33 +104,40 @@ using hemerion::sensors::imu::ImuSample;
 using hemerion::sensors::imu::ImuSpiBus;
 using hemerion::sensors::imu::ImuSpiDriver;
 using hemerion::sensors::imu::ImuSpiError;
+using hemerion::sim::i2c_shm::I2cShmController;
 using hemerion::sim::spi_shm::SpiShmController;
 
 struct Options
 {
-  std::uint16_t gps_port = 5762;              // GPS FMU default UDP destination
-  std::string imu_bus = "hemerion_imu_spi";   // IMU FMU default SPI bus name
-  long imu_wait_s = 120;                      // how long to wait for the IMU FMU to bring the bus up
+  std::uint16_t gps_port = 5762;                 // GPS FMU default UDP destination
+  std::string imu_bus = "hemerion_imu_spi";      // IMU FMU default SPI bus name
+  std::string baro_bus = "hemerion_bmp390_i2c";  // BMP390 FMU default I2C bus name
+  long imu_wait_s = 120;                         // how long to wait for the sensor FMUs to bring their buses up
   std::filesystem::path gps_csv_path = "results/gps_fixes.csv";
   std::filesystem::path imu_csv_path = "results/imu_samples.csv";
+  std::filesystem::path baro_csv_path = "results/baro_samples.csv";
   double fix_period_s = 0.1;   // co-sim communication step; maps fix index -> sim time for the CSV
   int print_every = 50;        // console line every N fixes (50 = every 5 s of sim time at 10 Hz)
   int imu_print_every = 1000;  // console line every N IMU samples (1000 = every 10 s at 100 Hz)
+  int baro_print_every = 500;  // console line every N baro conversions (500 = every 10 s at 50 Hz)
   long quiet_ms = 3000;        // exit after this long with no sensor data, once at least one sample arrived
   long max_wall_s = 900;       // hard wall-clock cap
 };
 
 void print_usage()
 {
-  std::cout << "usage: gps_flight_computer [--port <udp port>] [--imu-bus <name>] [--imu-wait-s <s>]\n"
-               "                           [--csv <file>] [--imu-csv <file>] [--fix-period <s>]\n"
-               "                           [--print-every <n>] [--imu-print-every <n>]\n"
+  std::cout << "usage: gps_flight_computer [--port <udp port>] [--imu-bus <name>] [--baro-bus <name>]\n"
+               "                           [--imu-wait-s <s>] [--csv <file>] [--imu-csv <file>]\n"
+               "                           [--baro-csv <file>] [--fix-period <s>]\n"
+               "                           [--print-every <n>] [--imu-print-every <n>] [--baro-print-every <n>]\n"
                "                           [--quiet-ms <ms>] [--max-wall-s <s>]\n"
                "\n"
                "  --port       UDP port the GPS FMU sends UBX-NAV-PVT to (default 5762)\n"
                "  --imu-bus    shared-memory SPI bus the IMU FMU answers on (default hemerion_imu_spi;\n"
                "               the FMU reads the same name from HEMERION_IMU_FMU_SPI_BUS)\n"
-               "  --imu-wait-s how long to wait for that bus to appear, so either process may start first\n";
+               "  --baro-bus   shared-memory I2C bus the BMP390 FMU answers on (default hemerion_bmp390_i2c;\n"
+               "               the FMU reads the same name from HEMERION_BMP390_FMU_I2C_BUS)\n"
+               "  --imu-wait-s how long to wait for those buses to appear, so either process may start first\n";
 }
 
 bool parse_args(int argc, char** argv, Options& options)
@@ -131,6 +160,10 @@ bool parse_args(int argc, char** argv, Options& options)
     {
       options.imu_bus = value;
     }
+    else if (arg == "--baro-bus" && (value = next()))
+    {
+      options.baro_bus = value;
+    }
     else if (arg == "--imu-wait-s" && (value = next()))
     {
       options.imu_wait_s = std::stol(value);
@@ -143,6 +176,10 @@ bool parse_args(int argc, char** argv, Options& options)
     {
       options.imu_csv_path = value;
     }
+    else if (arg == "--baro-csv" && (value = next()))
+    {
+      options.baro_csv_path = value;
+    }
     else if (arg == "--fix-period" && (value = next()))
     {
       options.fix_period_s = std::stod(value);
@@ -154,6 +191,10 @@ bool parse_args(int argc, char** argv, Options& options)
     else if (arg == "--imu-print-every" && (value = next()))
     {
       options.imu_print_every = std::stoi(value);
+    }
+    else if (arg == "--baro-print-every" && (value = next()))
+    {
+      options.baro_print_every = std::stoi(value);
     }
     else if (arg == "--quiet-ms" && (value = next()))
     {
@@ -220,6 +261,67 @@ private:
   std::size_t failed_transfers_ = 0;
 };
 
+/// @brief The board, for the on-target BMP390 driver: whole I2C transactions
+/// over the shared-memory bus, plus the part's INT line.
+///
+/// This class is the whole difference between running the driver here and
+/// running it on the STM32, where the same operations are
+/// HAL_I2C_Mem_Read/Write and a GPIO read
+/// (Hemerion/baro/bmp390/bmp390_hal_i2c_bus.h).
+class ShmI2cBus final : public Bmp390I2cBus
+{
+public:
+  ShmI2cBus(I2cShmController& controller, std::chrono::milliseconds timeout)
+    : controller_(controller), timeout_(timeout)
+  {
+  }
+
+  bool write_register(std::uint8_t reg, std::uint8_t value) override
+  {
+    const std::uint8_t frame[2] = { reg, value };
+    return complete(controller_.transaction(kBmp390I2cAddressPrimary, frame, 2, nullptr, 0, timeout_));
+  }
+
+  bool read_registers(std::uint8_t reg, std::uint8_t* out, std::size_t count) override
+  {
+    return complete(controller_.transaction(kBmp390I2cAddressPrimary, &reg, 1, out, count, timeout_));
+  }
+
+  void delay_ms(std::uint32_t milliseconds) override
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+  }
+
+  [[nodiscard]] bool interrupt_line() const override { return controller_.interrupt_line(); }
+
+  [[nodiscard]] bool peripheral_present() const { return controller_.peripheral_present(); }
+
+  [[nodiscard]] std::size_t transactions() const { return transactions_; }
+  [[nodiscard]] std::size_t failed_transactions() const { return failed_transactions_; }
+
+private:
+  bool complete(I2cShmController::Result result)
+  {
+    if (result != I2cShmController::Result::kOk)
+    {
+      // Same policy as ShmSpiBus: a transaction that fails because the part
+      // powered down is the co-simulation ending, not a bus fault.
+      if (controller_.peripheral_present())
+      {
+        ++failed_transactions_;
+      }
+      return false;
+    }
+    ++transactions_;
+    return true;
+  }
+
+  I2cShmController& controller_;
+  std::chrono::milliseconds timeout_;
+  std::size_t transactions_ = 0;
+  std::size_t failed_transactions_ = 0;
+};
+
 void print_fix(long index, double sim_time_s, const GpsFix& fix)
 {
   std::printf("[fc] fix %5ld  t=%7.1f s  lat=%11.7f  lon=%12.7f  alt=%9.1f m  vel=%7.1f m/s  crs=%5.1f deg  sats=%u\n",
@@ -276,7 +378,8 @@ int main(int argc, char** argv)
   }
 
   std::cout << "[fc] listening for UBX-NAV-PVT on UDP port " << options.gps_port << " (GpsDriver, protocol=UBX)\n"
-            << "[fc] waiting up to " << options.imu_wait_s << " s for the IMU on SPI bus '" << options.imu_bus << "'\n";
+            << "[fc] waiting up to " << options.imu_wait_s << " s for the IMU on SPI bus '" << options.imu_bus
+            << "' and the BMP390 on I2C bus '" << options.baro_bus << "'\n";
 
   std::optional<SpiShmController> spi =
       SpiShmController::attach_within(options.imu_bus, std::chrono::seconds(options.imu_wait_s));
@@ -284,6 +387,18 @@ int main(int argc, char** argv)
   {
     std::cerr << "error: no IMU answered on SPI bus '" << options.imu_bus
               << "' -- start rocket_gps_cosim (or point --imu-bus / HEMERION_IMU_FMU_SPI_BUS at the right bus)\n";
+    return EXIT_FAILURE;
+  }
+
+  // The IMU wait above absorbs the co-simulation's startup; once one FMU has
+  // its bus up the others are moments behind, so this wait is short only in
+  // the happy path, not in what it tolerates.
+  std::optional<I2cShmController> i2c =
+      I2cShmController::attach_within(options.baro_bus, std::chrono::seconds(options.imu_wait_s));
+  if (!i2c.has_value())
+  {
+    std::cerr << "error: no BMP390 answered on I2C bus '" << options.baro_bus
+              << "' -- start rocket_gps_cosim (or point --baro-bus / HEMERION_BMP390_FMU_I2C_BUS at the right bus)\n";
     return EXIT_FAILURE;
   }
 
@@ -304,6 +419,27 @@ int main(int argc, char** argv)
       return EXIT_FAILURE;
   }
 
+  // The full BMP390 bring-up the STM32 task runs: identity, soft reset,
+  // calibration NVM, OSR/ODR/INT_CTRL, normal mode. The default Bmp390Config
+  // ODR (50 Hz) is what the simulated part will convert at from here on --
+  // the FMU has no rate parameter to agree with.
+  const Bmp390Config baro_config;
+  ShmI2cBus baro_bus(*i2c, std::chrono::milliseconds(1000));
+  Bmp390Driver baro_driver(baro_bus);
+  switch (baro_driver.probe(baro_config))
+  {
+    case Bmp390Error::kNone:
+      std::cout << "[fc] BMP390 identified on I2C (CHIP_ID matched), calibrated, converting at "
+                << 1e6 / static_cast<double>(bmp390_odr_period_us(baro_config.odr_sel)) << " Hz\n";
+      break;
+    case Bmp390Error::kIdentityMismatch:
+      std::cerr << "error: the part on I2C bus '" << options.baro_bus << "' is not a BMP390\n";
+      return EXIT_FAILURE;
+    case Bmp390Error::kTransferFailed:
+      std::cerr << "error: I2C transaction to the BMP390 failed during probe\n";
+      return EXIT_FAILURE;
+  }
+
   std::ofstream gps_csv = open_csv(options.gps_csv_path);
   if (!gps_csv)
   {
@@ -321,6 +457,14 @@ int main(int argc, char** argv)
   }
   imu_csv << "sample_index,sim_time_s,accel_x_mps2,accel_y_mps2,accel_z_mps2,gyro_x_rad_s,gyro_y_rad_s,gyro_z_rad_s\n";
 
+  std::ofstream baro_csv = open_csv(options.baro_csv_path);
+  if (!baro_csv)
+  {
+    std::cerr << "error: cannot open " << options.baro_csv_path.string() << " for writing\n";
+    return EXIT_FAILURE;
+  }
+  baro_csv << "sample_index,sim_time_s,pressure_pa,temperature_c\n";
+
   GpsDriver gps_driver(GpsProtocol::kUbx);
   // On real hardware the IMU driver knows the full-scale ranges because it
   // configured the part's registers itself; here the "configuration" is the
@@ -331,9 +475,10 @@ int main(int argc, char** argv)
   std::array<std::uint8_t, 2048> datagram{};
   std::array<ImuRawSample, 64> imu_batch{};
   GpsFix fix;
-  long fix_count = 0;         // NAV-PVT epochs decoded, valid or not
-  long valid_fix_count = 0;   // epochs that actually carried a solution
+  long fix_count = 0;        // NAV-PVT epochs decoded, valid or not
+  long valid_fix_count = 0;  // epochs that actually carried a solution
   long imu_sample_count = 0;
+  long baro_sample_count = 0;
   long checksum_errors = 0;
   long imu_checksum_errors = 0;
   long imu_fifo_overflows = 0;
@@ -343,7 +488,10 @@ int main(int argc, char** argv)
   float max_speed_mps = 0.0F;
   double max_specific_force_mps2 = 0.0;
   double max_body_rate_rad_s = 0.0;
+  double min_pressure_pa = std::numeric_limits<double>::infinity();
+  double min_temperature_c = std::numeric_limits<double>::infinity();
   bool imu_bus_failed = false;
+  bool baro_gone = false;
 
   const auto wall_start = std::chrono::steady_clock::now();
   auto last_sensor_data = wall_start;
@@ -379,9 +527,8 @@ int main(int argc, char** argv)
           if (first_outage_s < 0.0)
           {
             first_outage_s = sim_time_s;
-            std::printf("[fc] fix %5ld  t=%7.1f s  no fix -- receiver outside its dynamics envelope\n",
-                        fix_count,
-                        sim_time_s);
+            std::printf(
+                "[fc] fix %5ld  t=%7.1f s  no fix -- receiver outside its dynamics envelope\n", fix_count, sim_time_s);
           }
           last_outage_s = sim_time_s;
           gps_csv << fix_count << ',' << sim_time_s << ",,,,,,,," << static_cast<unsigned>(fix.num_satellites) << ','
@@ -463,10 +610,9 @@ int main(int argc, char** argv)
         const double specific_force_mps2 = std::sqrt(static_cast<double>(sample.accel_x) * sample.accel_x +
                                                      static_cast<double>(sample.accel_y) * sample.accel_y +
                                                      static_cast<double>(sample.accel_z) * sample.accel_z);
-        const double body_rate_rad_s =
-            std::sqrt(static_cast<double>(sample.gyro_x) * sample.gyro_x +
-                      static_cast<double>(sample.gyro_y) * sample.gyro_y +
-                      static_cast<double>(sample.gyro_z) * sample.gyro_z);
+        const double body_rate_rad_s = std::sqrt(static_cast<double>(sample.gyro_x) * sample.gyro_x +
+                                                 static_cast<double>(sample.gyro_y) * sample.gyro_y +
+                                                 static_cast<double>(sample.gyro_z) * sample.gyro_z);
         max_specific_force_mps2 = std::max(max_specific_force_mps2, specific_force_mps2);
         max_body_rate_rad_s = std::max(max_body_rate_rad_s, body_rate_rad_s);
         imu_csv << imu_sample_count << ',' << sim_time_s << ',' << sample.accel_x << ',' << sample.accel_y << ','
@@ -475,6 +621,53 @@ int main(int argc, char** argv)
         {
           print_imu_sample(imu_sample_count, sim_time_s, sample);
         }
+      }
+    }
+  };
+
+  // The same polling sequence the firmware's baro task performs: INT line,
+  // then STATUS + the shadowed data/SENSORTIME burst. The data registers are
+  // not a FIFO, so with the co-simulation exchanging variables every 0.1 s a
+  // 50 Hz part's intermediate conversions are overwritten before any poll
+  // could observe them -- the stream lands at ~one conversion per
+  // communication step, each carrying the part's own SENSORTIME stamp, which
+  // is what makes the log's time base right anyway.
+  auto poll_baro = [&]() {
+    if (baro_gone)
+    {
+      return;
+    }
+    while (baro_driver.data_ready())
+    {
+      BaroSample sample;
+      const Bmp390ReadResult result = baro_driver.read_sample(sample);
+      if (result == Bmp390ReadResult::kTransferFailed)
+      {
+        // Same split as the IMU: against a live part this is a fault; against
+        // a powered-down part it is the co-simulation ending.
+        baro_gone = true;
+        return;
+      }
+      if (result != Bmp390ReadResult::kSample)
+      {
+        return;
+      }
+      last_sensor_data = std::chrono::steady_clock::now();
+      any_data = true;
+      ++baro_sample_count;
+      // SENSORTIME wraps every 512 s; this flight fits inside one wrap.
+      const double sim_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
+      min_pressure_pa = std::min(min_pressure_pa, static_cast<double>(sample.pressure_pa));
+      min_temperature_c = std::min(min_temperature_c, static_cast<double>(sample.temperature_c));
+      baro_csv << baro_sample_count << ',' << sim_time_s << ',' << sample.pressure_pa << ',' << sample.temperature_c
+               << '\n';
+      if (baro_sample_count == 1 || baro_sample_count % options.baro_print_every == 0)
+      {
+        std::printf("[fc] baro %5ld  t=%7.1f s  p=%9.1f Pa  T=%6.2f C\n",
+                    baro_sample_count,
+                    sim_time_s,
+                    static_cast<double>(sample.pressure_pa),
+                    static_cast<double>(sample.temperature_c));
       }
     }
   };
@@ -507,6 +700,7 @@ int main(int argc, char** argv)
 
     drain_gps(std::chrono::milliseconds(5));
     poll_imu();
+    poll_baro();
   }
 
   // The co-simulation stopping does not mean the last datagrams have been
@@ -537,7 +731,14 @@ int main(int argc, char** argv)
   }
   std::cout << "[fc] " << imu_sample_count << " IMU samples decoded over " << imu_bus.transfers() << " SPI transfers ("
             << imu_checksum_errors << " checksum errors, " << imu_fifo_overflows << " FIFO overflows, "
-            << imu_bus.failed_transfers() << " failed transfers)\n";
+            << imu_bus.failed_transfers() << " failed transfers)\n"
+            << "[fc] " << baro_sample_count << " BMP390 conversions read over " << baro_bus.transactions()
+            << " I2C transactions (" << baro_bus.failed_transactions() << " failed)\n";
+  if (baro_sample_count > 0)
+  {
+    std::cout << "[fc] min pressure " << min_pressure_pa << " Pa, min temperature " << min_temperature_c
+              << " C (both at the top of the observed trajectory)\n";
+  }
   // With a launch-vehicle envelope in force the receiver can hold no usable
   // fix at all, and "max altitude 0 m" would read as a measurement rather than
   // as the absence of one.
@@ -553,6 +754,6 @@ int main(int argc, char** argv)
   std::cout << "[fc] max |specific force| " << max_specific_force_mps2 << " m/s2, max |body rate| "
             << max_body_rate_rad_s << " rad/s\n"
             << "[fc] fixes written to " << options.gps_csv_path.string() << ", IMU samples to "
-            << options.imu_csv_path.string() << "\n";
-  return (fix_count > 0 && imu_sample_count > 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            << options.imu_csv_path.string() << ", baro samples to " << options.baro_csv_path.string() << "\n";
+  return (fix_count > 0 && imu_sample_count > 0 && baro_sample_count > 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

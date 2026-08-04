@@ -583,6 +583,32 @@ PNG detached from its caption has no other way to tell you which it is.
    register-level realism the flight software has to live with on the real
    part too.
 
+.. figure:: _static/rocket_gps_ecos/baro_pressure.png
+   :width: 100%
+   :alt: Static pressure vs time, log scale: BMP390 conversions riding the ISA curve down to the part's range floor
+
+   The BMP390 channel: compensated pressure decoded by the on-target
+   ``Bmp390Driver`` over the simulated I2C bus, against the ISA pressure at
+   the true altitude. The samples are produced by *inverting the real Bosch
+   compensation polynomial* in the FMU and recovered by running it forward in
+   the driver, with the calibration coefficients travelling as the 21 NVM
+   bytes a physical part serves — so agreement here is agreement between two
+   executions of the same arithmetic across a register interface, not between
+   a model and its copy. The flatline is the reference part's ADC bottoming
+   out near 105 hPa.
+
+.. figure:: _static/rocket_gps_ecos/baro_altitude.png
+   :width: 100%
+   :alt: Pressure altitude from BMP390 samples against true altitude, flatlining near 16 km as the rocket continues to climb
+
+   The same samples inverted through the ISA, which is what flight software
+   does with a static-pressure measurement. The altimeter is honest to
+   ~16 km and then stops being an altimeter while the vehicle climbs another
+   220 km — the barometric equivalent of the GPS figure's COCOM cut-off, and
+   the reason a launch vehicle carries all three sensors at once. Each sample
+   is timestamped from the part's own ``SENSORTIME`` counter, read in the
+   same shadowed burst as the data registers.
+
 One detail matters when comparing fixes against truth: the Ecos master
 propagates connections *between* steps, so the fix emitted at the end of step
 *k* carries the truth sampled at the end of step *k−1* — one communication

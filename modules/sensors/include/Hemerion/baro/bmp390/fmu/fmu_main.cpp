@@ -137,16 +137,17 @@ protected:
     // One conversion per forced-mode trigger, regardless of the ODR.
     if (slave_.take_forced_conversion())
     {
-      latch_one();
+      latch_one(currentTime());
     }
 
     // Normal mode: the part free-runs at the period its ODR register
     // selects. Whole periods elapsed within this step each latch a fresh
-    // conversion (truth zero-order-held, noise redrawn); the remainder
-    // carries into the next step so a 50 Hz part stepped at 100 Hz really
-    // converts at 50 Hz. The data registers are not a FIFO -- a controller
-    // that polls slower than the ODR reads the newest conversion, exactly
-    // as on the real part.
+    // conversion (truth zero-order-held, noise redrawn) stamped with its own
+    // conversion time, and the remainder carries into the next step so a
+    // 50 Hz part stepped at 10 Hz really converts at 50 Hz. The data
+    // registers are not a FIFO -- a controller that polls slower than the
+    // ODR observes only the newest conversion, and SENSORTIME is how it
+    // still knows when that conversion happened.
     const std::uint64_t period_us = slave_.sampling_period_us();
     if (period_us == 0)
     {
@@ -155,12 +156,14 @@ protected:
     else
     {
       const double period_s = static_cast<double>(period_us) * 1e-6;
-      time_into_period_s_ += dt;
-      while (time_into_period_s_ >= period_s)
+      double remaining_s = dt;
+      while (time_into_period_s_ + remaining_s >= period_s)
       {
-        time_into_period_s_ -= period_s;
-        latch_one();
+        remaining_s -= period_s - time_into_period_s_;
+        time_into_period_s_ = 0.0;
+        latch_one(currentTime() + (dt - remaining_s));
       }
+      time_into_period_s_ += remaining_s;
     }
 
     // The INT line is a level; re-drive it so clear-on-read inside the step
@@ -170,10 +173,11 @@ protected:
   }
 
 private:
-  void latch_one()
+  void latch_one(double sample_time_s)
   {
     const Bmp390MeasurementModel::Conversion conversion = measurement_model_.measure(altitude_m_);
-    slave_.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp);
+    slave_.latch_conversion(
+        conversion.uncomp_press, conversion.uncomp_temp, static_cast<std::uint64_t>(sample_time_s * 1e6));
   }
 
   Bmp390MeasurementModel measurement_model_;

@@ -129,11 +129,13 @@ public:
   [[nodiscard]] bool data_ready() const { return bus_.interrupt_line(); }
 
   /// @brief Reads `STATUS` and, when a fresh conversion is waiting, bursts
-  /// the six shadowed data registers and compensates them.
+  /// the shadowed data + `SENSORTIME` block and compensates it.
   ///
   /// @param out Receives the compensated sample on kSample. `timestamp_us`
-  ///            is left untouched: the part carries no clock, so stamping is
-  ///            the caller's job at whatever timebase the system runs.
+  ///            is the conversion's `SENSORTIME` in microseconds -- the
+  ///            part's own 32768 Hz clock, which wraps every 512 s;
+  ///            disambiguating longer spans against a system timebase is the
+  ///            caller's job.
   /// @return kSample, kNoNewData, or kTransferFailed.
   [[nodiscard]] Bmp390ReadResult read_sample(BaroSample& out);
 

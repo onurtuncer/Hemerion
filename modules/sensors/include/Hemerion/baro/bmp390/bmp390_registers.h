@@ -46,25 +46,28 @@ inline constexpr std::uint8_t kBmp390I2cAddressSecondary = 0x77;
 /// Register addresses of the part (the subset Hemerion drives).
 enum class Bmp390Register : std::uint8_t
 {
-  kChipId = 0x00,     ///< Read-only device identity, always @ref kBmp390ChipId.
-  kRevId = 0x01,      ///< Read-only mask revision.
-  kErrReg = 0x02,     ///< Read-only error flags.
-  kStatus = 0x03,     ///< Read-only status: cmd_rdy / drdy_press / drdy_temp.
-  kData0 = 0x04,      ///< press_xlsb -- start of the 6-byte shadowed data burst.
-  kData1 = 0x05,      ///< press_lsb.
-  kData2 = 0x06,      ///< press_msb.
-  kData3 = 0x07,      ///< temp_xlsb.
-  kData4 = 0x08,      ///< temp_lsb.
-  kData5 = 0x09,      ///< temp_msb.
-  kIntStatus = 0x11,  ///< Read-only interrupt status; clears on read.
-  kIntCtrl = 0x19,    ///< Interrupt pin configuration.
-  kIfConf = 0x1A,     ///< Serial interface configuration.
-  kPwrCtrl = 0x1B,    ///< Measurement enables + power mode.
-  kOsr = 0x1C,        ///< Pressure/temperature oversampling.
-  kOdr = 0x1D,        ///< Output data rate (normal mode subdivision).
-  kConfig = 0x1F,     ///< IIR filter coefficient.
-  kCalibNvm = 0x31,   ///< First byte of the 21-byte calibration NVM block.
-  kCmd = 0x7E,        ///< Command register: soft reset, FIFO flush.
+  kChipId = 0x00,       ///< Read-only device identity, always @ref kBmp390ChipId.
+  kRevId = 0x01,        ///< Read-only mask revision.
+  kErrReg = 0x02,       ///< Read-only error flags.
+  kStatus = 0x03,       ///< Read-only status: cmd_rdy / drdy_press / drdy_temp.
+  kData0 = 0x04,        ///< press_xlsb -- start of the 6-byte shadowed data burst.
+  kData1 = 0x05,        ///< press_lsb.
+  kData2 = 0x06,        ///< press_msb.
+  kData3 = 0x07,        ///< temp_xlsb.
+  kData4 = 0x08,        ///< temp_lsb.
+  kData5 = 0x09,        ///< temp_msb.
+  kSensorTime0 = 0x0C,  ///< Sensor time counter, low byte.
+  kSensorTime1 = 0x0D,  ///< Sensor time counter, middle byte.
+  kSensorTime2 = 0x0E,  ///< Sensor time counter, high byte.
+  kIntStatus = 0x11,    ///< Read-only interrupt status; clears on read.
+  kIntCtrl = 0x19,      ///< Interrupt pin configuration.
+  kIfConf = 0x1A,       ///< Serial interface configuration.
+  kPwrCtrl = 0x1B,      ///< Measurement enables + power mode.
+  kOsr = 0x1C,          ///< Pressure/temperature oversampling.
+  kOdr = 0x1D,          ///< Output data rate (normal mode subdivision).
+  kConfig = 0x1F,       ///< IIR filter coefficient.
+  kCalibNvm = 0x31,     ///< First byte of the 21-byte calibration NVM block.
+  kCmd = 0x7E,          ///< Command register: soft reset, FIFO flush.
 };
 
 /// Value `CHIP_ID` always reads back on a BMP390.
@@ -110,6 +113,18 @@ inline constexpr std::uint32_t kBmp390SoftResetDelayMs = 5;
 
 /// Length of the shadowed pressure+temperature data burst [bytes].
 inline constexpr std::size_t kBmp390DataBurstLength = 6;
+
+/// Rate of the part's free-running `SENSORTIME` counter [Hz]: a 24-bit word
+/// at 32768 ticks/s, wrapping every 512 s. Reading it in the same burst as
+/// the data registers is how a driver timestamps conversions from the part's
+/// own clock instead of guessing from its poll cadence.
+inline constexpr std::uint32_t kBmp390SensorTimeTickHz = 32768;
+
+/// Length of the extended burst from `DATA_0` through `SENSORTIME_2`
+/// [bytes]: the six data bytes, the two reserved addresses 0x0A/0x0B (which
+/// read zero and are clocked past by auto-increment), and the three counter
+/// bytes.
+inline constexpr std::size_t kBmp390DataSensorTimeBurstLength = 11;
 
 /// Length of the calibration NVM block at @ref Bmp390Register::kCalibNvm [bytes].
 inline constexpr std::size_t kBmp390CalibNvmLength = 21;

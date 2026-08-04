@@ -685,11 +685,78 @@ def plot_imu_body_rates(truth, imu, out: Path, caption: str) -> None:
     plt.close(fig)
 
 
+# The ICAO Standard Atmosphere layers of the BMP390 FMU's measurement model
+# (BaroNoiseModel::isa_pressure_pa): 6.5 K/km troposphere to 11 km, then the
+# isothermal stratosphere extended upward. Reimplemented here (rather than
+# imported from anywhere) because a plotting script wants no build products.
+_ISA_P0 = 101325.0
+_ISA_T0 = 288.15
+_ISA_LAPSE = 0.0065
+_ISA_H_TROPO = 11000.0
+_ISA_T_TROPO = 216.65
+_ISA_G = 9.80665
+_ISA_R = 287.05287
+_ISA_P_TROPO = _ISA_P0 * (_ISA_T_TROPO / _ISA_T0) ** (_ISA_G / (_ISA_LAPSE * _ISA_R))
+
+
+def isa_pressure_pa(altitude_m: float) -> float:
+    if altitude_m <= _ISA_H_TROPO:
+        return _ISA_P0 * (1.0 - _ISA_LAPSE * altitude_m / _ISA_T0) ** (_ISA_G / (_ISA_LAPSE * _ISA_R))
+    return _ISA_P_TROPO * math.exp(-_ISA_G * (altitude_m - _ISA_H_TROPO) / (_ISA_R * _ISA_T_TROPO))
+
+
+def isa_altitude_m(pressure_pa: float) -> float:
+    """Inverse of isa_pressure_pa -- the pressure altimeter a flight computer runs."""
+    if pressure_pa >= _ISA_P_TROPO:
+        return (_ISA_T0 / _ISA_LAPSE) * (1.0 - (pressure_pa / _ISA_P0) ** (_ISA_LAPSE * _ISA_R / _ISA_G))
+    return _ISA_H_TROPO - (_ISA_R * _ISA_T_TROPO / _ISA_G) * math.log(pressure_pa / _ISA_P_TROPO)
+
+
+def plot_baro_pressure(truth, baro, out: Path, caption: str) -> None:
+    fig, ax = new_figure()
+    ax.plot(baro["sim_time_s"], baro["pressure_pa"],
+            linestyle="none", marker=".", markersize=3, alpha=0.5, color=GPS,
+            label="BMP390 compensated pressure (decoded over I2C)")
+    ax.plot(truth["time"], [isa_pressure_pa(h) for h in truth["alt_m"]],
+            color=TRUTH, linewidth=1.4, label="ISA pressure at true altitude")
+    ax.set_yscale("log")
+    ax.annotate("range floor: the reference part's ADC\nbottoms out near 105 hPa (~16 km)",
+                xy=(0.98, 0.10), xycoords="axes fraction", ha="right", fontsize=8, color=INK_2)
+    ax.set_xlabel("simulation time [s]")
+    ax.set_ylabel("static pressure [Pa]")
+    ax.set_title("Barometer: BMP390 conversions vs. the atmosphere they sampled")
+    legend(ax)
+    stamp(fig, caption)
+    fig.savefig(out / "baro_pressure.png", facecolor=SURFACE)
+    plt.close(fig)
+
+
+def plot_baro_altitude(truth, baro, out: Path, caption: str) -> None:
+    # What the flight software would do with these samples: invert the ISA.
+    # Above the part's range floor the derived altitude flatlines while the
+    # vehicle keeps climbing -- the honest failure mode of a pressure
+    # altimeter on a rocket, and the reason the radar altimeter and GPS exist.
+    fig, ax = new_figure()
+    ax.plot(baro["sim_time_s"], [isa_altitude_m(p) / 1000.0 for p in baro["pressure_pa"]],
+            linestyle="none", marker=".", markersize=3, alpha=0.5, color=GPS,
+            label="pressure altitude from BMP390 samples")
+    ax.plot(truth["time"], [h / 1000.0 for h in truth["alt_m"]],
+            color=TRUTH, linewidth=1.4, label="true altitude")
+    ax.set_xlabel("simulation time [s]")
+    ax.set_ylabel("altitude [km]")
+    ax.set_title("Pressure altitude: where a barometric altimeter stops being one")
+    legend(ax)
+    stamp(fig, caption)
+    fig.savefig(out / "baro_altitude.png", facecolor=SURFACE)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--truth", type=Path, default=Path("results/rocket_truth.csv"))
     parser.add_argument("--fixes", type=Path, default=Path("results/gps_fixes.csv"))
     parser.add_argument("--imu", type=Path, default=Path("results/imu_samples.csv"))
+    parser.add_argument("--baro", type=Path, default=Path("results/baro_samples.csv"))
     parser.add_argument("--out", type=Path, default=Path("plots"))
     args = parser.parse_args()
 
@@ -733,6 +800,12 @@ def main() -> None:
         imu = read_fixes(args.imu)  # same plain-CSV shape as the fix log
         plot_imu_specific_force(truth, imu, args.out, caption)
         plot_imu_body_rates(truth, imu, args.out, caption)
+        figures += 2
+
+    if args.baro.exists():
+        baro = read_fixes(args.baro)  # same plain-CSV shape again
+        plot_baro_pressure(truth, baro, args.out, caption)
+        plot_baro_altitude(truth, baro, args.out, caption)
         figures += 2
     print(f"wrote {figures} figures to {args.out}/")
 

@@ -110,10 +110,12 @@ Bmp390ReadResult Bmp390Driver::read_sample(BaroSample& out)
     return Bmp390ReadResult::kNoNewData;
   }
 
-  // One burst for all six bytes: the part shadows the whole block on the
-  // first byte's read, so pressure and temperature are from the same
-  // conversion -- reading them register-by-register would not guarantee that.
-  std::array<std::uint8_t, kBmp390DataBurstLength> data{};
+  // One burst from DATA_0 through SENSORTIME_2 (auto-increment clocks past
+  // the two reserved bytes in between): the part shadows the whole block on
+  // the first byte's read, so pressure, temperature and the sensor-time
+  // stamp are from the same conversion -- reading them register-by-register
+  // would not guarantee that.
+  std::array<std::uint8_t, kBmp390DataSensorTimeBurstLength> data{};
   if (!bus_.read_registers(reg_address(Bmp390Register::kData0), data.data(), data.size()))
   {
     return Bmp390ReadResult::kTransferFailed;
@@ -121,12 +123,17 @@ Bmp390ReadResult Bmp390Driver::read_sample(BaroSample& out)
 
   const std::uint32_t uncomp_press = word24(data[0], data[1], data[2]);
   const std::uint32_t uncomp_temp = word24(data[3], data[4], data[5]);
+  const std::uint32_t sensor_time_ticks = word24(data[8], data[9], data[10]);
 
   const double temperature_c = compensator_.compensate_temperature(uncomp_temp);
   const double pressure_pa = compensator_.compensate_pressure(uncomp_press, temperature_c);
 
   out.pressure_pa = static_cast<float>(pressure_pa);
   out.temperature_c = static_cast<float>(temperature_c);
+  // The part's own clock, in the sample type's time unit. 24 bits at
+  // 32768 Hz wrap every 512 s; disambiguating longer spans is the caller's
+  // job, exactly as with the real counter.
+  out.timestamp_us = (static_cast<std::uint64_t>(sensor_time_ticks) * 1000000ULL) / kBmp390SensorTimeTickHz;
   return Bmp390ReadResult::kSample;
 }
 

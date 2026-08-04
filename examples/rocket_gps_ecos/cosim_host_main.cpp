@@ -6,7 +6,7 @@
 
 /// @file cosim_host_main.cpp
 /// @brief Ecos co-simulation host coupling Aetherion's TwoStageRocket.fmu to
-/// Hemerion's GPS and IMU hardware-simulator FMUs.
+/// Hemerion's GPS, IMU and BMP390 hardware-simulator FMUs.
 ///
 /// Topology (see examples/rocket_gps_ecos/README.md):
 ///
@@ -14,14 +14,17 @@
 ///        truth: lat/lon/alt, NED velocity        │              noise + dynamics envelope
 ///               body rates, forces, mass         │              + UBX-NAV-PVT
 ///                                                │                    │ UDP 127.0.0.1:5762
-///                                                │                    v
-///                                                └──────────> hemerion_imu_fmu.fmu
-///                                                               noise + raw-count frames
-///                                                                     │ SPI over shared memory
+///                                                ├──────────> hemerion_imu_fmu.fmu
+///                                                │              noise + raw-count frames
+///                                                │                    │ SPI over shared memory
+///                                                └──────────> hemerion_bmp390_fmu.fmu
+///                                                               ISA + inverse compensation
+///                                                                     │ I2C over shared memory
 ///                                                                     v
 ///                                                          gps_flight_computer
 ///                                                    (GpsDriver/UbxParser + ImuSpiDriver/
-///                                                     ImuPacketParser/convert_raw_to_si,
+///                                                     ImuPacketParser/convert_raw_to_si +
+///                                                     Bmp390Driver/Bmp390Compensator,
 ///                                                     the same stacks that run on the
 ///                                                     STM32H743)
 ///
@@ -34,10 +37,14 @@
 /// writes it to the IMU's inputs through Ecos properties (same one-step
 /// transport delay as an Ecos connection). Body rates p/q/r connect 1:1.
 ///
-/// Neither sensor FMU has FMI outputs -- their effect is the sensor bus each
-/// part really uses: a UDP stand-in for the GPS receiver's UART, and a
-/// shared-memory SPI bus (sim/spi_shm) the IMU answers as a peripheral. Both
-/// are consumed by gps_flight_computer.
+/// None of the sensor FMUs has FMI outputs -- their effect is the sensor bus
+/// each part really uses: a UDP stand-in for the GPS receiver's UART, a
+/// shared-memory SPI bus (sim/spi_shm) the IMU answers as a peripheral, and a
+/// shared-memory I2C bus (sim/i2c_shm) the BMP390 answers as a register-
+/// accurate part. All three are consumed by gps_flight_computer. The BMP390
+/// takes exactly one FMI input -- truth altitude -- and no rate parameter: it
+/// converts at whatever ODR the flight computer programs into its registers,
+/// which is the point of simulating the part instead of the datasheet.
 ///
 /// The GPS FMU's receiver dynamics envelope is configured here rather than
 /// left at its defaults, because it is the single most visible thing about
@@ -94,12 +101,16 @@ namespace
 #ifndef HEMERION_IMU_FMU_PATH
 #define HEMERION_IMU_FMU_PATH ""
 #endif
+#ifndef HEMERION_BMP390_FMU_PATH
+#define HEMERION_BMP390_FMU_PATH ""
+#endif
 
 struct Options
 {
   std::filesystem::path rocket_fmu = HEMERION_ROCKET_FMU_PATH;
   std::filesystem::path gps_fmu = HEMERION_GPS_FMU_PATH;
   std::filesystem::path imu_fmu = HEMERION_IMU_FMU_PATH;
+  std::filesystem::path baro_fmu = HEMERION_BMP390_FMU_PATH;
   std::filesystem::path csv_path = "results/rocket_truth.csv";
   // NASA TM-2015-218675 Scenario 17 runs to 200 s: stage 1 burns out at 37.4 s, the vehicle coasts, stage 2
   // ignites at 131.8 s and burns out at 193 s, and the check-case data ends 7 s later with the vehicle still
@@ -139,14 +150,16 @@ struct Options
 void print_usage()
 {
   std::cout << "usage: rocket_gps_cosim [--rocket <TwoStageRocket.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
-               "                        [--imu <hemerion_imu_fmu.fmu>] [--imu-rate <hz>]\n"
-               "                        [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
+               "                        [--imu <hemerion_imu_fmu.fmu>] [--baro <hemerion_bmp390_fmu.fmu>]\n"
+               "                        [--imu-rate <hz>] [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                        [--stg2-ignition <s>] [--lat0 <deg>] [--lon0 <deg>] [--alt0 <m>]\n"
                "                        [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
                "\n"
                "  --rocket    path to Aetherion's TwoStageRocket.fmu (default: configure-time location)\n"
                "  --gps       path to the packaged hemerion_gps_fmu.fmu (default: build-tree artifact)\n"
                "  --imu       path to the packaged hemerion_imu_fmu.fmu (default: build-tree artifact)\n"
+               "  --baro      path to the packaged hemerion_bmp390_fmu.fmu (default: build-tree artifact;\n"
+               "              no rate option -- the part converts at the ODR the flight computer programs)\n"
                "  --imu-rate  IMU output data rate [Hz] (default 100)\n"
                "  --dyn-model u-blox dynModel code for the receiver's platform model (default -1 = no platform\n"
                "              envelope, leaving COCOM as the only limit; 8 = airborne <4 g, whose acceleration\n"
@@ -187,6 +200,10 @@ bool parse_args(int argc, char** argv, Options& options)
     else if (arg == "--imu" && (value = next()))
     {
       options.imu_fmu = value;
+    }
+    else if (arg == "--baro" && (value = next()))
+    {
+      options.baro_fmu = value;
     }
     else if (arg == "--imu-rate" && (value = next()))
     {
@@ -300,8 +317,7 @@ bool parse_args(int argc, char** argv, Options& options)
   std::error_code ec;
   const std::filesystem::path probe_dir =
       std::filesystem::temp_directory_path(ec) /
-      ("hemerion_unzip_probe_" +
-       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+      ("hemerion_unzip_probe_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   if (ec || !std::filesystem::create_directories(probe_dir, ec) || ec)
   {
     // Not being able to make a temp directory is a different problem, and Ecos
@@ -476,7 +492,8 @@ int main(int argc, char** argv)
 
   for (const auto& [label, path] : { std::pair{ "rocket", options.rocket_fmu },
                                      std::pair{ "gps", options.gps_fmu },
-                                     std::pair{ "imu", options.imu_fmu } })
+                                     std::pair{ "imu", options.imu_fmu },
+                                     std::pair{ "baro", options.baro_fmu } })
   {
     if (path.empty() || !std::filesystem::exists(path))
     {
@@ -503,6 +520,7 @@ int main(int argc, char** argv)
     ss.add_model("rocket", options.rocket_fmu.string());
     ss.add_model("gps", options.gps_fmu.string());
     ss.add_model("imu", options.imu_fmu.string());
+    ss.add_model("baro", options.baro_fmu.string());
 
     // The rocket reports geodetic position in radians; the GPS FMU takes degrees.
     const std::function<double(const double&)> rad2deg = [](const double& rad) {
@@ -522,6 +540,12 @@ int main(int argc, char** argv)
     ss.make_connection<double>("rocket::out.p_rad_s", "imu::p_rad_s");
     ss.make_connection<double>("rocket::out.q_rad_s", "imu::q_rad_s");
     ss.make_connection<double>("rocket::out.r_rad_s", "imu::r_rad_s");
+
+    // The BMP390's whole truth interface is altitude: its measurement model
+    // owns the atmosphere (ISA) and the part's error model, and everything
+    // else about its behaviour -- rate included -- is register state the
+    // flight computer programs over I2C.
+    ss.make_connection<double>("rocket::out.alt_m", "baro::h_m");
 
     // NASA TM-2015-218675 Scenario 17's initial conditions: equatorial pad on
     // the prime meridian, due east, 55.22 deg nose-up. These are the
@@ -613,8 +637,10 @@ int main(int argc, char** argv)
     std::cout << "[cosim] rocket: " << options.rocket_fmu.string() << "\n"
               << "[cosim] gps:    " << options.gps_fmu.string() << "\n"
               << "[cosim] imu:    " << options.imu_fmu.string() << "\n"
+              << "[cosim] baro:   " << options.baro_fmu.string() << "\n"
               << "[cosim] step " << options.step_s << " s (" << 1.0 / options.step_s << " Hz GPS, "
-              << options.imu_rate_hz << " Hz IMU), stop " << options.stop_s << " s\n"
+              << options.imu_rate_hz << " Hz IMU; BMP390 converts at the ODR the flight computer programs), stop "
+              << options.stop_s << " s\n"
               << "[cosim] plant: launch " << options.lat0_deg << " deg N / " << options.lon0_deg << " deg E at "
               << options.alt0_m << " m, stage 2 ignition at t=" << options.stg2_ignition_s << " s\n"
               << "[cosim] receiver: ";
@@ -625,9 +651,8 @@ int main(int argc, char** argv)
     {
       std::cout << "dynModel " << options.dynamic_platform << ", ";
     }
-    std::cout << "COCOM limits "
-              << (options.cocom_limits ? "in force (18000 m AND 515 m/s)" : "disabled") << ", re-acquisition "
-              << options.reacquisition_time_s << " s\n";
+    std::cout << "COCOM limits " << (options.cocom_limits ? "in force (18000 m AND 515 m/s)" : "disabled")
+              << ", re-acquisition " << options.reacquisition_time_s << " s\n";
 
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time

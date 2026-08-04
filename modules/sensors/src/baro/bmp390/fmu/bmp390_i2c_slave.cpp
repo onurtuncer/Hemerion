@@ -80,9 +80,13 @@ void Bmp390I2cSlave::stop()
   }
 }
 
-void Bmp390I2cSlave::latch_conversion(std::uint32_t uncomp_press, std::uint32_t uncomp_temp)
+void Bmp390I2cSlave::latch_conversion(std::uint32_t uncomp_press, std::uint32_t uncomp_temp, std::uint64_t timestamp_us)
 {
   const std::lock_guard<std::mutex> lock(mutex_);
+
+  // 32768 ticks per second, 24-bit wrap -- the microsecond clock in the
+  // part's own time base.
+  sensor_time_ticks_ = static_cast<std::uint32_t>((timestamp_us * kBmp390SensorTimeTickHz) / 1000000ULL) & 0x00FFFFFFU;
 
   data_[0] = static_cast<std::uint8_t>(uncomp_press & 0xFFU);
   data_[1] = static_cast<std::uint8_t>((uncomp_press >> 8) & 0xFFU);
@@ -141,17 +145,24 @@ void Bmp390I2cSlave::reset()
 
 std::uint8_t Bmp390I2cSlave::read_register(std::uint8_t address)
 {
-  // Reading DATA_0 latches the whole conversion into the burst shadow and
-  // clears the data-ready condition -- one conversion, one coherent block.
+  // Reading DATA_0 latches the whole conversion -- data words *and* its
+  // sensor time -- into the burst shadow and clears the data-ready
+  // condition: one conversion, one coherent block.
   if (address == reg_address(Bmp390Register::kData0))
   {
     data_shadow_ = data_;
+    sensor_time_shadow_ticks_ = sensor_time_ticks_;
     status_ &= static_cast<std::uint8_t>(~(kBmp390StatusPressureReady | kBmp390StatusTemperatureReady));
     drdy_interrupt_ = false;
   }
   if (address >= reg_address(Bmp390Register::kData0) && address <= reg_address(Bmp390Register::kData5))
   {
     return data_shadow_[address - reg_address(Bmp390Register::kData0)];
+  }
+  if (address >= reg_address(Bmp390Register::kSensorTime0) && address <= reg_address(Bmp390Register::kSensorTime2))
+  {
+    const unsigned shift = 8U * (address - reg_address(Bmp390Register::kSensorTime0));
+    return static_cast<std::uint8_t>((sensor_time_shadow_ticks_ >> shift) & 0xFFU);
   }
   if (address >= reg_address(Bmp390Register::kCalibNvm) &&
       address < reg_address(Bmp390Register::kCalibNvm) + kBmp390CalibNvmLength)
@@ -237,6 +248,8 @@ void Bmp390I2cSlave::apply_soft_reset()
 {
   data_.fill(0);
   data_shadow_.fill(0);
+  sensor_time_ticks_ = 0;
+  sensor_time_shadow_ticks_ = 0;
   status_ = kBmp390StatusCmdReady;
   drdy_interrupt_ = false;
   forced_pending_ = false;

@@ -110,11 +110,14 @@ void test_probe_and_sample_across_the_bus()
   assert(slave.sampling_period_us() == 20000);  // the driver's 50 Hz ODR arrived through the bus
 
   // A few "communication steps": latch a conversion, let the driver poll it
-  // off the bus, check the compensated values against the ISA truth.
+  // off the bus, check the compensated values against the ISA truth and the
+  // SENSORTIME stamp against the latched clock.
+  std::uint64_t timestamp_us = 0;
   for (const double altitude_m : { 0.0, 3000.0, 9000.0 })
   {
+    timestamp_us += 20000;
     const auto conversion = model.measure(altitude_m);
-    slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp);
+    slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp, timestamp_us);
     endpoint.publish_interrupt(slave.interrupt_asserted());
     assert(driver.data_ready());
 
@@ -122,6 +125,7 @@ void test_probe_and_sample_across_the_bus()
     assert(driver.read_sample(sample) == Bmp390ReadResult::kSample);
     assert(near(sample.pressure_pa, BaroNoiseModel::isa_pressure_pa(altitude_m), 0.5));
     assert(near(sample.temperature_c, BaroNoiseModel::isa_temperature_c(altitude_m), 0.01));
+    assert(sample.timestamp_us <= timestamp_us && timestamp_us - sample.timestamp_us <= 31);
 
     endpoint.publish_interrupt(slave.interrupt_asserted());
     assert(!driver.data_ready());

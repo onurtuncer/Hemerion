@@ -87,11 +87,23 @@ public:
   /// Sets the drdy status bits for whichever of pressure/temperature is
   /// enabled in `PWR_CTRL` and asserts the INT condition if `INT_CTRL` has
   /// data-ready enabled. A conversion latched while a previous one is unread
-  /// simply overwrites it -- the data registers are not a FIFO.
+  /// simply overwrites it -- the data registers are not a FIFO, so a
+  /// controller polling slower than the ODR observes only the newest
+  /// conversion (which is also why `SENSORTIME` matters: it tells the
+  /// controller *when* that conversion happened).
+  ///
+  /// `SENSORTIME` is served as the counter value latched here -- the
+  /// conversion's own timestamp. (Real silicon serves the live counter, a
+  /// few hundred microseconds later by the time a poll reads it; latching at
+  /// the conversion is the same idealization every other Hemerion simulator
+  /// applies to its timestamps.)
   ///
   /// @param uncomp_press Raw 24-bit pressure conversion word.
   /// @param uncomp_temp  Raw 24-bit temperature conversion word.
-  void latch_conversion(std::uint32_t uncomp_press, std::uint32_t uncomp_temp);
+  /// @param timestamp_us Simulation clock at this conversion [microseconds];
+  ///                     stored as `SENSORTIME` ticks (32768 Hz, 24-bit
+  ///                     wrap).
+  void latch_conversion(std::uint32_t uncomp_press, std::uint32_t uncomp_temp, std::uint64_t timestamp_us);
 
   /// @brief Interval between conversions the current configuration produces
   /// [microseconds]; 0 when the part is not free-running (sleep or forced
@@ -126,10 +138,12 @@ private:
   const std::array<std::uint8_t, kBmp390CalibNvmLength> nvm_;
   const std::uint8_t target_address_;
 
-  // Live conversion words (what the measurement engine last produced) and
-  // the shadow served during a data burst.
+  // Live conversion words + sensor time (what the measurement engine last
+  // produced) and the shadow served during a data burst.
   std::array<std::uint8_t, kBmp390DataBurstLength> data_{};
   std::array<std::uint8_t, kBmp390DataBurstLength> data_shadow_{};
+  std::uint32_t sensor_time_ticks_ = 0;
+  std::uint32_t sensor_time_shadow_ticks_ = 0;
 
   std::uint8_t status_ = kBmp390StatusCmdReady;
   bool drdy_interrupt_ = false;

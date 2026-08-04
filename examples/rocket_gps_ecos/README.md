@@ -1,6 +1,6 @@
-# examples/rocket_gps_ecos — two-stage rocket → GPS + IMU FMUs → STM32 flight software, co-simulated with Ecos
+# examples/rocket_gps_ecos — two-stage rocket → GPS + IMU + baro FMUs → STM32 flight software, co-simulated with Ecos
 
-End-to-end sensor-in-the-loop scenario built from four independently developed pieces:
+End-to-end sensor-in-the-loop scenario built from five independently developed pieces:
 
 ```
 ┌──────────────────────┐   FMI 2.0 variables    ┌──────────────────────┐   UBX-NAV-PVT     ┌─────────────────────────┐
@@ -11,16 +11,22 @@ End-to-end sensor-in-the-loop scenario built from four independently developed p
 │                      │                        └──────────────────────┘                   │  ImuPacketParser +      │
 │                      │   p/q/r (connections), ┌──────────────────────┐  SPI transfers    │  convert_raw_to_si      │
 │                      │   specific force       │ hemerion_imu_fmu.fmu │<──────────────────┤                         │
-│                      ├───────────────────────>│ (MEMS IMU sim: noise │   over shared     │  — the same modules/    │
-│                      │   (host-computed)      │  + registers + FIFO) ├─── memory ───────>│  sensors code the STM32 │
-└──────────────────────┘                        └──────────────────────┘  bursts of counts │  H743 firmware runs     │
-        │                                                                                  └─────────────────────────┘
+│                      ├───────────────────────>│ (MEMS IMU sim: noise │   over shared     │  Bmp390Driver +         │
+│                      │   (host-computed)      │  + registers + FIFO) ├─── memory ───────>│  Bmp390Compensator      │
+│                      │                        └──────────────────────┘  bursts of counts │                         │
+│                      │   altitude             ┌──────────────────────┐  I2C transactions │  — the same modules/    │
+│                      ├───────────────────────>│ hemerion_bmp390_fmu  │<──────────────────┤  sensors code the STM32 │
+│                      │                        │ (Bosch BMP390 sim:   │   over shared     │  H743 firmware runs     │
+└──────────────────────┘                        │  ISA + registers +   ├─── memory ───────>│                         │
+        │                                       │  calibration NVM)    │  raw ADC words    └─────────────────────────┘
+        │                                       └──────────────────────┘
         └────────────── rocket_gps_cosim (Ecos master, fixed-step 10 Hz) ──────────┘
 ```
 
-The two arrow directions are the point: **the receiver talks, the IMU is polled.** A GPS module pushes NAV
-solutions down a UART whenever it has them; an inertial part sits there holding samples until a flight
-computer asserts chip select and comes to get them. Modelling both as pushed byte streams would have
+The arrow directions are the point: **the receiver talks, the IMU and the barometer are polled.** A GPS
+module pushes NAV solutions down a UART whenever it has them; an inertial part sits there holding samples
+until a flight computer asserts chip select and comes to get them; a barometer holds one conversion in its
+data registers until firmware reads it over I2C. Modelling all three as pushed byte streams would have
 exercised the packet parsers and nothing else.
 
 * **`TwoStageRocket.fmu`** — Aetherion's two-stage rocket plant (NASA TM-2015-218675 Scenario 17: DAVE-ML
@@ -40,14 +46,26 @@ exercised the packet parsers and nothing else.
   zero-order-held across the step). It then behaves like the chip it models: `WHO_AM_I`, `STATUS`,
   `FIFO_COUNT`, `CONTROL` and a non-incrementing `FIFO_DATA` burst port, answered over a shared-memory SPI bus
   (`sim/spi_shm/`), with a data-ready line for the controller to sample.
+* **`hemerion_bmp390_fmu.fmu`** — this repo's Bosch BMP390 barometer simulator
+  (`modules/sensors/include/Hemerion/baro/bmp390/fmu/`). It takes exactly one truth input — altitude — and
+  maps it through the ICAO Standard Atmosphere and the part's error model, then *numerically inverts the real
+  Bosch compensation polynomial* to the raw 24-bit ADC words a physical part would have converted. It answers
+  a shared-memory I2C bus (`sim/i2c_shm/`) as a register-accurate part: `CHIP_ID`, the 21-byte calibration
+  NVM, `OSR`/`ODR`/`PWR_CTRL`, shadowed data + `SENSORTIME` bursts, an INT line. It has **no rate
+  parameter**: it converts at whatever ODR the flight computer programs into its registers — none while the
+  register still reads sleep, which is exactly the kind of coupling a register-accurate simulator exists to
+  exercise.
 * **`gps_flight_computer`** — host stand-in for the STM32H743 flight computer's sensor ingest paths. GPS bytes
   go through the unmodified `GpsDriver`/`UbxParser`; the IMU is driven by the unmodified **on-target**
   `ImuSpiDriver` — probe, DRDY, `STATUS`+`FIFO_COUNT` in one transfer, burst the FIFO, feed every byte to
-  `ImuPacketParser` + `convert_raw_to_si()`. Only the two transport shims differ from the target: a UDP socket
-  where the receiver's UART would be, and a shared-memory bus where `HAL_SPI_TransmitReceive` plus the
-  CS/DRDY GPIOs would be (or Renode's emulated peripherals fed by the same FMUs, see `tests/swil/`).
+  `ImuPacketParser` + `convert_raw_to_si()`; the barometer by the unmodified on-target `Bmp390Driver` —
+  probe `CHIP_ID`, soft-reset, read the calibration NVM, program `OSR`/`ODR`/`INT_CTRL`/`PWR_CTRL`, poll
+  `STATUS`, burst the shadowed data block and compensate with the part's own coefficients. Only the transport
+  shims differ from the target: a UDP socket where the receiver's UART would be, and shared-memory buses
+  where `HAL_SPI_TransmitReceive`/`HAL_I2C_Mem_Read` plus the GPIOs would be (or Renode's emulated
+  peripherals fed by the same FMUs, see `tests/swil/`).
 * **[Ecos](https://github.com/Ecos-platform/ecos)** — the co-simulation master. `rocket_gps_cosim` uses the
-  Ecos C++ API (`simulation_structure`, `fixed_step_algorithm`, `csv_writer`) to load all three FMUs, wire
+  Ecos C++ API (`simulation_structure`, `fixed_step_algorithm`, `csv_writer`) to load all four FMUs, wire
   truth to the sensor inputs, and log the truth trajectory.
 
 The unit and interface mismatches between the FMUs are handled where they belong, in the orchestration layer:
@@ -148,16 +166,17 @@ This produces, under `build/examples-native/`:
 | `gps_flight_computer` | `examples/rocket_gps_ecos/` |
 | `hemerion_gps_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
 | `hemerion_imu_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
+| `hemerion_bmp390_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
 
 Each sensor FMU is exported for both FMI generations from the same sources. This example uses the **FMI 2.0**
-pair, since Ecos imports through fmi4c; `--gps`/`--imu` can point at any archive you like.
+set, since Ecos imports through fmi4c; `--gps`/`--imu`/`--baro` can point at any archive you like.
 
 ## Running
 
 Two terminals, both in `build/examples-native/examples/rocket_gps_ecos/`. Start the flight computer first: it
-binds the GPS FMU's UDP destination (5762), then waits for the IMU's SPI bus to appear, so either start order
-works — but a controller that probes after the FMU has begun stepping resets the part's FIFO and discards
-whatever was buffered before it took over.
+binds the GPS FMU's UDP destination (5762), then waits for the IMU's SPI bus and the BMP390's I2C bus to
+appear, so either start order works — but a controller that probes after the FMU has begun stepping resets
+the part's FIFO and discards whatever was buffered before it took over.
 
 ```
 # terminal 1 — the "STM32" side
@@ -168,7 +187,8 @@ whatever was buffered before it took over.
 ```
 
 The co-simulation runs Scenario 17's own 200 s window at a 0.1 s communication step (= 10 Hz GPS, a typical
-u-blox navigation rate; the IMU latches at 100 Hz within each step) and needs no interaction. Stage 1 burns
+u-blox navigation rate; the IMU latches at 100 Hz within each step, and the BMP390 at whatever ODR the flight
+computer programmed over I2C — 50 Hz with the driver's defaults) and needs no interaction. Stage 1 burns
 out and separates at t = 37.4 s, the vehicle **coasts for 94 s**, stage 2 ignites at t = 131.8 s and burns out
 at t = 193 s, and the run ends 7 s later at 236 km with the vehicle still climbing — it is a rocket *to
 orbit*, so there is no apogee inside the window. The flight computer exits by itself when the master
@@ -182,13 +202,18 @@ accelerates it can outrun the flight computer's poll loop by more than the loop 
 unpaced run overran the part's 16 KiB FIFO and lost a few hundred of 20010 samples. The sticky overflow bit
 reports it and no frame is ever truncated, which is exactly the behaviour a FIFO plus an overflow flag exists
 to give you; it is also an artifact of the simulation rather than of the system under test, since a real
-plant cannot outrun its consumer. Paced, both reference runs are lossless.
+plant cannot outrun its consumer. Paced, both reference runs are lossless. The BMP390 is affected differently:
+its data registers hold exactly one conversion (no FIFO), so a faster-than-real-time master overwrites
+conversions before a real-time poll loop can observe them — the samples that do come through are correct and
+carry the part's own `SENSORTIME` stamp, there are just fewer of them. Paced, the observed rate is bounded by
+the poll loop, not the transport.
 
 Useful knobs (`--help` lists all):
 
-* `--rocket <path>` / `--gps <path>` / `--imu <path>` — FMU locations, if the configure-time defaults don't
-  apply.
-* `--imu-rate <hz>` — IMU output data rate (default 100; becomes the FMU's `sample_rate_hz` parameter).
+* `--rocket <path>` / `--gps <path>` / `--imu <path>` / `--baro <path>` — FMU locations, if the
+  configure-time defaults don't apply.
+* `--imu-rate <hz>` — IMU output data rate (default 100; becomes the FMU's `sample_rate_hz` parameter). The
+  BMP390 deliberately has no such knob: its rate is the `ODR` register the flight computer writes.
 * `--dyn-model <code>` / `--no-cocom` / `--reacq <s>` — the receiver's dynamics envelope (see above).
 * `--rtf 1` — pace the co-simulation to wall-clock speed (default is as-fast-as-possible, about 1.7× real
   time on a typical desktop), e.g. to watch the fix stream come in live.
@@ -197,6 +222,8 @@ Useful knobs (`--help` lists all):
 * `HEMERION_IMU_FMU_SPI_BUS` (FMU side) and `--imu-bus` (flight-computer side) — the shared-memory SPI bus
   name, default `hemerion_imu_spi`. Set both to run two co-simulations side by side on one machine. A
   shared-memory bus is local by construction; a remote consumer needs Renode's emulated SPI instead.
+* `HEMERION_BMP390_FMU_I2C_BUS` (FMU side) and `--baro-bus` (flight-computer side) — the same convention for
+  the barometer's I2C bus, default `hemerion_bmp390_i2c`.
 
 Ecos does not link a zip library — it spawns `tar`, or `unzip` when `SHELL` names a bash — and reports any
 failure as `Failed to unzip ... to tempdir`, which says nothing about why. Two environmental traps produce
@@ -231,19 +258,25 @@ Outputs land in `results/`:
   the GPS noise model injects and make the decoded-fix error figure a picture of the log's own rounding.
 * `imu_samples.csv` — every IMU sample the flight software decoded, already converted back to SI units by
   `convert_raw_to_si()`: specific force and angular rate per axis, timestamped from the frame payload.
+* `baro_samples.csv` — every BMP390 conversion the flight software read and compensated: pressure [Pa] and
+  temperature [°C], timestamped from the part's own `SENSORTIME` counter read in the same burst as the data
+  registers (32768 Hz, wraps every 512 s — this flight fits inside one wrap).
 
 ## Plots
 
-`plot_results.py` (matplotlib) turns the three CSVs into the figures used by the Sphinx page
+`plot_results.py` (matplotlib) turns the four CSVs into the figures used by the Sphinx page
 (`doc/rocket_gps_ecos_cosim.rst`): the flight in 3-D with the navigated part of it distinguished, GPS
 availability against the receiver's envelope, altitude, speed over ground, the decoded-fix error against
-truth, and the decoded IMU specific force and body rates against truth.
+truth, the decoded IMU specific force and body rates against truth, and the BMP390's compensated pressure
+against the atmosphere it sampled — plus the pressure altitude derived from it, which tracks truth to ~16 km
+and then flatlines at the part's range floor while the rocket keeps climbing: the honest failure mode of a
+barometric altimeter on a launch vehicle, and the reason the GPS and the IMU are on the bus too.
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
 
-All seven come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
+All nine come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
 the rest of the flight as the outage it is; the script skips a fix-dependent figure rather than drawing it
 empty if a configuration leaves fewer than two usable epochs (`--dyn-model 8` leaves one). The 3-D trajectory
 and the availability figure survive that case, since both are drawn from truth with the fixes only overlaid.

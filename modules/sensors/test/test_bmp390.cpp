@@ -144,16 +144,20 @@ void test_noiseless_sample_round_trips()
   Bmp390Driver driver(bus);
   assert(driver.probe() == Bmp390Error::kNone);
 
+  std::uint64_t timestamp_us = 20000;
   for (const double altitude_m : { 0.0, 1500.0, 5000.0, 11000.0, 15000.0 })
   {
     const auto conversion = model.measure(altitude_m);
-    slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp);
+    slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp, timestamp_us);
     assert(driver.data_ready());
 
     BaroSample sample;
     assert(driver.read_sample(sample) == Bmp390ReadResult::kSample);
     assert(near(sample.pressure_pa, BaroNoiseModel::isa_pressure_pa(altitude_m), 0.5));
     assert(near(sample.temperature_c, BaroNoiseModel::isa_temperature_c(altitude_m), 0.01));
+    // SENSORTIME round trip: one 32768 Hz tick is ~30.5 us of quantization.
+    assert(sample.timestamp_us <= timestamp_us && timestamp_us - sample.timestamp_us <= 31);
+    timestamp_us += 20000;  // the 50 Hz ODR the driver programmed
   }
 }
 
@@ -172,7 +176,7 @@ void test_read_consumes_data_ready()
   assert(driver.read_sample(sample) == Bmp390ReadResult::kNoNewData);  // nothing latched yet
 
   const auto conversion = model.measure(250.0);
-  slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp);
+  slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp, 40000);
   assert(driver.read_sample(sample) == Bmp390ReadResult::kSample);
   assert(!driver.data_ready());
   assert(driver.read_sample(sample) == Bmp390ReadResult::kNoNewData);
@@ -192,7 +196,7 @@ void test_noisy_sample_stays_bounded()
 
   const double altitude_m = 1500.0;
   const auto conversion = model.measure(altitude_m);
-  slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp);
+  slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp, 60000);
 
   BaroSample sample;
   assert(driver.read_sample(sample) == Bmp390ReadResult::kSample);
