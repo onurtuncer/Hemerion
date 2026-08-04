@@ -12,7 +12,8 @@ foreach(
   gnc_flight
   can_actuator_link
   datalink
-  led_blink)
+  led_blink
+  baro_logger)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_app}/CMakeLists.txt")
     add_subdirectory(${_hemerion_app})
   endif()
