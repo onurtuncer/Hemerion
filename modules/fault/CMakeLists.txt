@@ -17,6 +17,10 @@ add_library(hemerion_fault STATIC src/fault_registry.cpp src/watchdog.cpp)
 target_include_directories(hemerion_fault PUBLIC include)
 target_compile_features(hemerion_fault PUBLIC cxx_std_23)
 
-if(HEMERION_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
+# NOT CMAKE_CROSSCOMPILING: test/ is native-only -- the test-swil preset turns HEMERION_BUILD_TESTS on under the
+# arm-none-eabi toolchain, where these targets cannot build.
+if(HEMERION_BUILD_TESTS
+   AND NOT CMAKE_CROSSCOMPILING
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
   add_subdirectory(test)
 endif()

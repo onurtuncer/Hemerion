@@ -37,7 +37,11 @@ add_library(
 target_include_directories(hemerion_sensors PUBLIC include)
 target_compile_features(hemerion_sensors PUBLIC cxx_std_23)
 
-if(HEMERION_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
+# NOT CMAKE_CROSSCOMPILING: test/ is native-only (std::mutex, host sockets) -- the test-swil preset turns
+# HEMERION_BUILD_TESTS on under the arm-none-eabi toolchain, where these targets cannot build.
+if(HEMERION_BUILD_TESTS
+   AND NOT CMAKE_CROSSCOMPILING
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
   add_subdirectory(test)
 endif()
 
