@@ -7,10 +7,10 @@
 
 .. _rocket_gps_ecos_cosim:
 
-Rocket → GPS + IMU → Flight Software Co-Simulation (``examples/rocket_gps_ecos``)
-=================================================================================
+Rocket → GPS + IMU + Baro → Flight Software Co-Simulation (``examples/rocket_gps_ecos``)
+========================================================================================
 
-``examples/rocket_gps_ecos`` couples four independently developed pieces into
+``examples/rocket_gps_ecos`` couples five independently developed pieces into
 one sensor-in-the-loop scenario, orchestrated by the
 `Ecos <https://github.com/Ecos-platform/ecos>`_ FMI co-simulation platform:
 
@@ -33,14 +33,25 @@ one sensor-in-the-loop scenario, orchestrated by the
    the part's **sample FIFO** at 100 Hz — ten per co-simulation step. It does
    not send them anywhere: it is an **SPI peripheral**, and answers
    chip-select-framed transfers on a bus carried in shared memory.
-4. **The flight software sensor stacks** (``gps_flight_computer``) drive both
-   buses with the *unmodified* ``GpsDriver``/``UbxParser`` and
-   ``ImuSpiDriver``/``ImuPacketParser``/``convert_raw_to_si()`` from
-   ``modules/sensors`` — the same code the STM32H743 firmware cross-compiles.
-   Only the two transport shims differ from the target: a UDP socket where the
-   receiver's UART would be, and a shared-memory SPI bus where
-   ``HAL_SPI_TransmitReceive`` plus the CS/DRDY GPIOs would be (or Renode's
-   emulated peripherals, see :ref:`swil_windows_setup`).
+4. **Hemerion's BMP390 barometer-simulator FMU** (``hemerion_bmp390_fmu.fmu``,
+   also from ``modules/sensors``) takes exactly one truth input — altitude —
+   maps it through the ICAO Standard Atmosphere and the part's error model,
+   then *numerically inverts the real Bosch compensation polynomial* to the
+   raw 24-bit ADC words a physical part would have converted. It answers a
+   shared-memory **I2C bus** as a register-accurate part: ``CHIP_ID``, the
+   21-byte calibration NVM, ``OSR``/``ODR``/``PWR_CTRL``, shadowed data +
+   ``SENSORTIME`` bursts. It has no rate parameter: it converts at whatever
+   ODR the flight computer programs into its registers — none while
+   ``PWR_CTRL`` still reads sleep.
+5. **The flight software sensor stacks** (``gps_flight_computer``) drive all
+   three buses with the *unmodified* ``GpsDriver``/``UbxParser``,
+   ``ImuSpiDriver``/``ImuPacketParser``/``convert_raw_to_si()`` and
+   ``Bmp390Driver``/``Bmp390Compensator`` from ``modules/sensors`` — the same
+   code the STM32H743 firmware cross-compiles. Only the transport shims differ
+   from the target: a UDP socket where the receiver's UART would be, and
+   shared-memory SPI and I2C buses where ``HAL_SPI_TransmitReceive`` /
+   ``HAL_I2C_Mem_Read`` plus the GPIOs would be (or Renode's emulated
+   peripherals, see :ref:`swil_windows_setup`).
 
 .. code-block:: text
 
@@ -52,17 +63,23 @@ one sensor-in-the-loop scenario, orchestrated by the
    │                      │                       └──────────────────────┘                 │  ImuPacketParser +     │
    │                      │  p/q/r (connections), ┌──────────────────────┐   SPI transfers │  convert_raw_to_si     │
    │                      │  specific force       │ hemerion_imu_fmu.fmu │<────────────────┤                        │
-   │                      ├──────────────────────>│ MEMS IMU simulator:  │  over shared    │  (the code the STM32   │
-   │                      │  (host-computed)      │ bias + noise + regs  │──────  memory ─>│  H743 firmware runs)   │
-   └──────────────────────┘                       │ + 16 KiB sample FIFO │  bursts of      │                        │
-            │                                     └──────────────────────┘  raw counts     └────────────────────────┘
-            └───────────── rocket_gps_cosim: Ecos master, fixed step 0.1 s (10 Hz GPS, 100 Hz IMU) ────────┘
+   │                      ├──────────────────────>│ MEMS IMU simulator:  │  over shared    │  Bmp390Driver +        │
+   │                      │  (host-computed)      │ bias + noise + regs  │──────  memory ─>│  Bmp390Compensator     │
+   │                      │                       │ + 16 KiB sample FIFO │  bursts of      │                        │
+   │                      │  altitude             └──────────────────────┘  raw counts     │  (the code the STM32   │
+   │                      ├──────────────────────>┌──────────────────────┐ I2C transactions│  H743 firmware runs)   │
+   └──────────────────────┘                       │ hemerion_bmp390_fmu  │<────────────────┤                        │
+            │                                     │ register-accurate    │  over shared    │                        │
+            │                                     │ BMP390: ISA + regs   │──────  memory ─>│                        │
+            │                                     │ + calibration NVM    │  raw ADC words  └────────────────────────┘
+            │                                     └──────────────────────┘
+            └── rocket_gps_cosim: Ecos master, fixed step 0.1 s (10 Hz GPS, 100 Hz IMU, baro at programmed ODR) ──┘
 
-The two arrow directions are the point. The receiver *talks*; the IMU is
-*polled*. Modelling both as byte streams pushed at the flight computer would
-have exercised the packet parsers and nothing else — no register map, no
-FIFO, no chip select, none of the sequence firmware actually runs against an
-inertial part.
+The arrow directions are the point. The receiver *talks*; the IMU and the
+barometer are *polled*. Modelling all three as byte streams pushed at the
+flight computer would have exercised the packet parsers and nothing else — no
+register map, no FIFO, no chip select, no ODR register, none of the sequence
+firmware actually runs against an inertial part or a barometer.
 
 .. contents:: On this page
    :local:
@@ -114,6 +131,9 @@ wire 1:1 into the IMU FMU:
    * - ``out.r_rad_s``
      - —
      - ``imu::r_rad_s``
+   * - ``out.alt_m``
+     - —
+     - ``baro::h_m``
 
 In code:
 
@@ -123,6 +143,7 @@ In code:
     ss.add_model("rocket", options.rocket_fmu.string());
     ss.add_model("gps", options.gps_fmu.string());
     ss.add_model("imu", options.imu_fmu.string());
+    ss.add_model("baro", options.baro_fmu.string());
 
     const std::function<double(const double&)> rad2deg = [](const double& rad) {
       return rad * (180.0 / std::numbers::pi);
@@ -136,6 +157,7 @@ In code:
     ss.make_connection<double>("rocket::out.p_rad_s", "imu::p_rad_s");
     ss.make_connection<double>("rocket::out.q_rad_s", "imu::q_rad_s");
     ss.make_connection<double>("rocket::out.r_rad_s", "imu::r_rad_s");
+    ss.make_connection<double>("rocket::out.alt_m", "baro::h_m");
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(0.1));
     sim->init("launchSite");
@@ -157,8 +179,9 @@ one-communication-step transport delay a connection would have:
     imu_fy->set_value(aero_fy->get_value() / m);
     imu_fz->set_value(aero_fz->get_value() / m);
 
-Neither sensor FMU has **FMI output variables**: their outputs are byte
-streams, exactly like a real receiver's UART or a real IMU's data registers.
+None of the sensor FMUs has **FMI output variables**: their outputs are byte
+streams, exactly like a real receiver's UART, a real IMU's data registers or
+a real barometer's shadowed data block.
 That keeps the firmware parsers exercised at the byte level — sync characters,
 little-endian scaled integers, checksums and all — rather than handing the
 flight software convenient floating-point values it would never see on the
@@ -252,8 +275,9 @@ the FMU at runtime):
    $ cmake --build build/examples-native
 
 Besides the two example executables this also produces
-``hemerion_gps_fmu.fmu`` and ``hemerion_imu_fmu.fmu`` under
-``build/examples-native/fmus/``. ``generateFMU()``
+``hemerion_gps_fmu.fmu``, ``hemerion_imu_fmu.fmu`` and
+``hemerion_bmp390_fmu.fmu`` (plus the baro/radalt/mag UDP emitters this
+example does not use) under ``build/examples-native/fmus/``. ``generateFMU()``
 (:file:`cmake/generate_fmu.cmake`) builds each simulator against the vendored
 fmu4cpp export layer, generates its ``modelDescription.xml`` from the
 variables the model registers, and zips the result into a proper archive
@@ -263,24 +287,79 @@ variables the model registers, and zips the result into a proper archive
 Both FMI generations are exported from the same sources: ``fmus/fmi2/``
 (library under ``binaries/win64`` or ``binaries/linux64``) and ``fmus/fmi3/``
 (``binaries/x86_64-windows`` or ``binaries/x86_64-linux``). **This example
-uses the FMI 2.0 pair** — Ecos imports through fmi4c — and the paths compiled
+uses the FMI 2.0 set** — Ecos imports through fmi4c — and the paths compiled
 into ``rocket_gps_cosim`` point there.
+
+.. _rocket_gps_ecos_setup:
+
+Setting up on a bare machine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The reference run on this page was produced on a Windows host inside a **WSL2
+Ubuntu 24.04** distro — the FMUs are platform binaries, so everything on this
+page (the Aetherion plant, the sensor FMUs and both host executables) must be
+built for the *same* platform, and a WSL distro is the cheapest way to get a
+uniform Linux one on a Windows machine. The same commands apply verbatim on a
+native Linux box.
+
+Host prerequisites, all from the distribution's package manager::
+
+   $ apt-get install cmake ninja-build g++ git ca-certificates \
+         libtbb-dev unzip zip curl pkg-config
+
+``TwoStageRocket.fmu`` comes out of an `Aetherion
+<https://github.com/onurtuncer/Aetherion>`_ checkout rather than a binary
+download. Three things about that build are worth knowing before running it:
+
+* Aetherion resolves CppAD through **vcpkg** in manifest mode. The clone
+  pointed to by ``VCPKG_ROOT`` must be a *full* clone — ``vcpkg.json`` pins a
+  ``builtin-baseline`` commit, and a ``--depth 1`` clone that does not contain
+  it fails at configure time with ``failed to `git show`
+  versions/baseline.json``.
+* the ``vendor/ecos`` **submodule must be initialized**
+  (``git submodule update --init --recursive``); without it configure stops at
+  ``vendor/ecos does not contain a CMakeLists.txt``.
+* the FMU targets are gated behind ``AETHERION_BUILD_FMUS=ON``; building only
+  the ``TwoStageRocket_fmi2`` target skips the library's test suite.
+
+.. code-block:: console
+
+   $ git clone https://github.com/microsoft/vcpkg.git ~/vcpkg     # full clone, not --depth 1
+   $ ~/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+   $ export VCPKG_ROOT=~/vcpkg
+
+   $ cd <aetherion-checkout>
+   $ git submodule update --init --recursive
+   $ cmake --preset=gcc-release -DAETHERION_BUILD_FMUS=ON -DAETHERION_BUILD_TESTS=OFF
+   $ cmake --build build/gcc-release --target TwoStageRocket_fmi2
+
+The packaged archive lands at
+``build/gcc-release/models/fmi2/TwoStageRocket/TwoStageRocket.fmu``; either
+install Aetherion so the configure-time ``find_file()`` bakes the path in, or
+pass it at runtime with ``--rocket`` as the reference run below does. The
+Hemerion side is then the two commands at the top of this section — the
+``examples-native`` preset fetches Ecos and fmi4c from source at configure
+time, so it needs network access once.
 
 Running
 -------
 
 Two terminals, both in ``build/examples-native/examples/rocket_gps_ecos/``.
 Start the flight computer first: it binds the GPS FMU's UDP destination
-(5762), then waits (``--imu-wait-s``, default 120 s) for the IMU's SPI bus to
-appear, so the two processes may be started in either order. Starting it first
-is still preferable — a controller that probes after the FMU has begun
-stepping resets the part's FIFO and discards whatever was buffered before it
-took over.
+(5762), then waits (``--imu-wait-s``, default 120 s) for the IMU's SPI bus and
+the BMP390's I2C bus to appear, so the two processes may be started in either
+order. Starting it first is still preferable — a controller that probes after
+the FMU has begun stepping resets the part's FIFO and discards whatever was
+buffered before it took over.
 
 .. code-block:: console
 
-   $ ./gps_flight_computer          # terminal 1 — the "STM32" side
-   $ ./rocket_gps_cosim             # terminal 2 — the Ecos master
+   $ ./gps_flight_computer                                 # terminal 1 — the "STM32" side
+   $ ./rocket_gps_cosim --rtf 1 \                          # terminal 2 — the Ecos master
+         --rocket <aetherion>/build/gcc-release/models/fmi2/TwoStageRocket/TwoStageRocket.fmu
+
+(``--rocket`` is only needed when Aetherion was not installed at configure
+time; see :ref:`rocket_gps_ecos_setup`.)
 
 The default flight is Scenario 17's own 200 s window at a 0.1 s communication
 step — a 10 Hz GPS navigation rate. Stage 1 burns out and separates at
@@ -332,14 +411,15 @@ Ecos master console
 
 .. code-block:: text
 
-   [cosim] rocket: C:\dev\Aetherion\out\build\windows-release\models\fmi2\TwoStageRocket\TwoStageRocket.fmu
-   [cosim] gps:    C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gps_fmu.fmu
-   [cosim] imu:    C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
-   [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU), stop 200 s
+   [cosim] rocket: /mnt/d/dev/Aetherion/build/gcc-release/models/fmi2/TwoStageRocket/TwoStageRocket.fmu
+   [cosim] gps:    /mnt/d/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gps_fmu.fmu
+   [cosim] imu:    /mnt/d/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_imu_fmu.fmu
+   [cosim] baro:   /mnt/d/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_bmp390_fmu.fmu
+   [cosim] step 0.1 s (10 Hz GPS, 100 Hz IMU; BMP390 converts at the ODR the flight computer programs), stop 200 s
    [cosim] plant: launch 0 deg N / 0 deg E at 0 m, stage 2 ignition at t=131.8 s
    [cosim] receiver: COCOM limits in force (18000 m AND 515 m/s), re-acquisition 2 s
-   [cosim] t=10 s  alt=1826.71 m  mach=1.52891  mass=265846 kg
-   [cosim] t=20 s  alt=7249.12 m  mach=3.63603  mass=217693 kg
+   [cosim] t=10 s  alt=1826.73 m  mach=1.52891  mass=265846 kg
+   [cosim] t=20 s  alt=7249.05 m  mach=3.63602  mass=217693 kg
    [cosim] t=30 s  alt=16639.8 m  mach=6.52317  mass=169539 kg
    [cosim] t=37.4 s  stage 1 separated
    [cosim] t=40 s  alt=30874.2 m  mach=8.87282  mass=98905.9 kg
@@ -348,10 +428,10 @@ Ecos master console
    [cosim] t=130 s  alt=137088 m  mach=8.23193  mass=98905.9 kg
    [cosim] t=140 s  alt=145338 m  mach=9.68307  mass=88316.5 kg
    ...
-   [cosim] t=190 s  alt=213472 m  mach=27.7983  mass=22949.7 kg
-   [cosim] t=200 s  alt=236494 m  mach=30.3804  mass=18897 kg
+   [cosim] t=190 s  alt=213471 m  mach=27.7983  mass=22949.7 kg
+   [cosim] t=200 s  alt=236492 m  mach=30.3804  mass=18897 kg
    [cosim] done: 2001 steps, 2001 UBX-NAV-PVT frames emitted and 20010 IMU samples buffered for the SPI controller
-   [cosim] max altitude 236729 m at t=200.1 s, staging at t=37.4 s
+   [cosim] max altitude 236726 m at t=200.1 s, staging at t=37.4 s
    [cosim] rocket truth written to results/rocket_truth.csv
 
 Constant mass from t = 37.4 s to t = 140 s is the coast; Mach *falling* through
@@ -360,33 +440,39 @@ it while altitude climbs is the vehicle decelerating in thinning air.
 Flight computer console
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Every 50th decoded fix and every 1000th decoded IMU sample is printed; the
-data is what the *sensors* report — truth plus the injected noise — decoded
-from raw bytes:
+Every 50th decoded fix, every 1000th decoded IMU sample and every 500th baro
+conversion is printed; the data is what the *sensors* report — truth plus the
+injected noise — decoded from raw bytes:
 
 .. code-block:: text
 
    [fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
-   [fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi'
+   [fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi' and the BMP390 on I2C bus 'hemerion_bmp390_i2c'
    [fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
-   [fc] fix     1  t=    0.1 s  lat=  0.0000065  lon=  -0.0000007  alt=     -3.9 m  vel=    0.0 m/s  crs=147.8 deg  sats=11
-   [fc] imu      1  t=    0.1 s  f=[   54.27    0.01   -0.05] m/s2  w=[ -0.0021  0.0000 -0.0021] rad/s
-   [fc] fix    50  t=    5.0 s  lat=  0.0000069  lon=   0.0034391  alt=    432.2 m  vel=  156.7 m/s  crs= 89.2 deg  sats=11
-   [fc] fix   100  t=   10.0 s  lat= -0.0000131  lon=   0.0145416  alt=   1791.7 m  vel=  351.4 m/s  crs= 88.1 deg  sats=11
-   [fc] fix   300  t=   30.0 s  lat=  0.0000148  lon=   0.1733980  alt=  16525.6 m  vel= 1522.4 m/s  crs= 88.2 deg  sats=11
+   [fc] BMP390 identified on I2C (CHIP_ID matched), calibrated, converting at 50 Hz
+   [fc] fix     1  t=    0.1 s  lat=  0.0000028  lon=   0.0000160  alt=      4.2 m  vel=    0.0 m/s  crs= 58.4 deg  sats=11
+   [fc] imu      1  t=    0.1 s  f=[   54.18    0.07   -0.01] m/s2  w=[ -0.0021  0.0000  0.0011] rad/s
+   [fc] baro     1  t=    0.2 s  p= 101321.2 Pa  T= 15.00 C
+   [fc] fix    50  t=    5.0 s  lat=  0.0000333  lon=   0.0034251  alt=    431.5 m  vel=  156.8 m/s  crs= 88.7 deg  sats=11
+   [fc] fix   100  t=   10.0 s  lat=  0.0000003  lon=   0.0145563  alt=   1785.7 m  vel=  351.2 m/s  crs= 92.2 deg  sats=11
+   [fc] fix   300  t=   30.0 s  lat= -0.0000171  lon=   0.1734049  alt=  16526.1 m  vel= 1522.5 m/s  crs= 91.5 deg  sats=11
    [fc] fix   313  t=   31.3 s  no fix -- receiver outside its dynamics envelope
-   [fc] imu   4000  t=   40.1 s  f=[   -0.92   -0.04   -0.18] m/s2  w=[  0.0000  0.0000 -0.0032] rad/s
-   [fc] imu  10000  t=  100.1 s  f=[    0.01    0.01    0.10] m/s2  w=[  0.0000 -0.0043  0.0011] rad/s
-   [fc] imu  14000  t=  140.1 s  f=[   56.55   -0.10    0.07] m/s2  w=[  0.0032 -0.0021 -0.0021] rad/s
-   [fc] imu  19000  t=  190.1 s  f=[  217.88    0.02    0.04] m/s2  w=[  0.0000 -0.0032  0.0032] rad/s
-   [fc] imu  20000  t=  200.1 s  f=[    0.02    0.04   -0.04] m/s2  w=[  0.0021 -0.0032 -0.0043] rad/s
+   [fc] imu   4000  t=   40.1 s  f=[   -0.87    0.01   -0.10] m/s2  w=[  0.0021 -0.0011  0.0021] rad/s
+   [fc] baro   500  t=   50.1 s  p=  10446.7 Pa  T=-56.50 C
+   [fc] imu  10000  t=  100.1 s  f=[   -0.04   -0.06   -0.01] m/s2  w=[  0.0021  0.0011  0.0000] rad/s
+   [fc] imu  14000  t=  140.1 s  f=[   56.60    0.01    0.00] m/s2  w=[  0.0032 -0.0074 -0.0021] rad/s
+   [fc] imu  19000  t=  190.1 s  f=[  217.94    0.02   -0.06] m/s2  w=[ -0.0011 -0.0053 -0.0011] rad/s
+   [fc] imu  20000  t=  200.1 s  f=[    0.01   -0.02    0.05] m/s2  w=[  0.0011 -0.0043  0.0000] rad/s
+   [fc] baro  2000  t=  200.1 s  p=  10446.6 Pa  T=-56.50 C
    [fc] IMU powered down (FMU terminated) -- co-simulation finished
    [fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 312 carried a fix, 1689 did not
    [fc] no-fix window: t=31.3 s to t=200.1 s (receiver outside its dynamics envelope)
-   [fc] 20000 IMU samples decoded over 14173 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
-   [fc] max altitude 17955.1 m, max ground speed 1617.16 m/s (over 312 fixes carrying a solution)
-   [fc] max |specific force| 264.657 m/s2, max |body rate| 0.0574879 rad/s
-   [fc] fixes written to results/gps_fixes.csv, IMU samples to results/imu_samples.csv
+   [fc] 20000 IMU samples decoded over 48021 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+   [fc] 2000 BMP390 conversions read over 42009 I2C transactions (0 failed)
+   [fc] min pressure 10446.1 Pa, min temperature -56.5169 C (both at the top of the observed trajectory)
+   [fc] max altitude 17955.5 m, max ground speed 1617.02 m/s (over 312 fixes carrying a solution)
+   [fc] max |specific force| 264.62 m/s2, max |body rate| 0.0555134 rad/s
+   [fc] fixes written to results/gps_fixes.csv, IMU samples to results/imu_samples.csv, baro samples to results/baro_samples.csv
 
 Read the GPS lines again: **312 fixes out of 2001 navigation epochs, and the
 last one at 31.2 s.** The receiver works normally through the first 31 seconds
@@ -404,13 +490,20 @@ of good data it does get, which is what an initialisation or a launch-detect
 routine has to work with.
 
 The IMU line is the other half: **20000 of 20010 samples decoded, zero
-checksum errors, zero FIFO overflows, zero failed transfers**, across 14173
+checksum errors, zero FIFO overflows, zero failed transfers**, across 48021
 chip-select-framed SPI transfers. The ten missing samples are the ones the FMU
 buffered before the flight computer probed — ``probe()`` writes ``FIFO_RESET``,
 exactly as a driver clearing whatever accumulated before it took over. Every
 NAV-PVT frame the receiver emitted was decoded too (2001 of 2001), fix or no
-fix. The whole chain from 6-DoF truth through both noise models, both encoders,
-both transports and the on-target drivers is lossless and wire-correct.
+fix, and every BMP390 conversion the programmed 50 Hz ODR produced was read
+and compensated (2000 over 42009 I2C transactions, none failed). The whole
+chain from 6-DoF truth through the noise models, encoders, three transports
+and the on-target drivers is lossless and wire-correct.
+
+The baro lines tell their story compactly: 101 321 Pa on the pad — the ISA
+sea-level value through the part's own compensation arithmetic — and the range
+floor from t = 50 s on, since the vehicle exits the part's ~16 km measurement
+range during stage-1 flight and never comes back down inside the window.
 
 The mission profile reads straight off the decoded IMU stream, which is the
 cheapest sanity check there is on the plant: 54 m/s² at lift-off climbing to
@@ -472,8 +565,9 @@ peripheral powering down under a controller mid-transfer.
 Results
 -------
 
-``plot_results.py`` (matplotlib) renders the three CSVs — Ecos' truth log and
-the flight computer's fix and IMU-sample logs — into the figures below:
+``plot_results.py`` (matplotlib) renders the four CSVs — the truth log and
+the flight computer's fix, IMU-sample and baro-sample logs — into the figures
+below:
 
 .. code-block:: console
 
@@ -626,7 +720,7 @@ Implementation notes
 Where the FMI plumbing lives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Neither sensor FMU implements the FMI interface itself. Each ``fmu_main.cpp``
+None of the sensor FMUs implements the FMI interface itself. Each ``fmu_main.cpp``
 derives one class from ``fmu4cpp::fmu_base``, registers its variables by name
 and implements ``do_step()``; the vendored fmu4cpp export layer
 (:file:`vendor/fmu4cpp/`) supplies the entry points, and ``generateFMU()``
@@ -759,11 +853,12 @@ The IMU on the same truth bus
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The IMU FMU follows the pattern the GPS FMU established — truth in over FMI,
-sensor-realistic bytes out the side channel — and the same pattern extends to
-any further sensor (barometer, magnetometer, radar altimeter): a noise model
-and an emitter under ``modules/sensors/include/Hemerion/<sensor>/fmu/``, an
-on-target parser next to the driver code, and a round-trip unit test proving
-the two stay byte-compatible. The wire format is deliberately *not* UBX: the
+sensor-realistic bytes out the side channel — the BMP390 FMU carries it onto
+a register-accurate I2C part, and the same pattern extends to any further
+sensor (magnetometer, radar altimeter): a noise model and an emitter under
+``modules/sensors/include/Hemerion/<sensor>/fmu/``, an on-target parser next
+to the driver code, and a round-trip unit test proving the two stay
+byte-compatible. The wire format is deliberately *not* UBX: the
 Hemerion IMU frame has its own sync bytes (``0xA5 0x5A``), so an interleaved
 GPS/IMU byte stream can never desync one parser into the other's frames, and
 the payload is raw register counts — scale (±40 g, ±2000 °/s) is
