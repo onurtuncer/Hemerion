@@ -96,7 +96,7 @@ std::optional<UdpReceiver> UdpReceiver::create(std::uint16_t local_port)
   {
     return std::nullopt;
   }
-  if (bind(native, reinterpret_cast<sockaddr*>(&local_addr), sizeof(local_addr)) != 0)
+  if (bind(native, reinterpret_cast<sockaddr*>(&local_addr), sizeof(local_addr)) != 0)  // NOLINT(*-reinterpret-cast)
   {
     close(native);
     return std::nullopt;

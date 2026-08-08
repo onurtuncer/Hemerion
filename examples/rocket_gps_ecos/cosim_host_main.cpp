@@ -69,6 +69,7 @@
 #include "util/unzipper.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -83,6 +84,7 @@
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -177,88 +179,61 @@ void print_usage()
                "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
 }
 
+// The options that take a value, paired with what to do with it. A table rather than a chain
+// of `arg == "--x" && (value = next())`: an assignment inside a condition reads as a
+// comparison, and repeating the form once per option made adding one a copy-paste exercise.
+// Captureless lambdas convert to the plain function pointer, so the table is constexpr.
+struct ValueOption
+{
+  std::string_view name;
+  void (*apply)(Options&, const char*);
+};
+
+constexpr std::array<ValueOption, 15> kValueOptions = { {
+    { "--rocket", [](Options& o, const char* v) { o.rocket_fmu = v; } },
+    { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
+    { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
+    { "--baro", [](Options& o, const char* v) { o.baro_fmu = v; } },
+    { "--imu-rate", [](Options& o, const char* v) { o.imu_rate_hz = std::stod(v); } },
+    { "--dyn-model", [](Options& o, const char* v) { o.dynamic_platform = std::stoi(v); } },
+    { "--reacq", [](Options& o, const char* v) { o.reacquisition_time_s = std::stod(v); } },
+    { "--stg2-ignition", [](Options& o, const char* v) { o.stg2_ignition_s = std::stod(v); } },
+    { "--lat0", [](Options& o, const char* v) { o.lat0_deg = std::stod(v); } },
+    { "--lon0", [](Options& o, const char* v) { o.lon0_deg = std::stod(v); } },
+    { "--alt0", [](Options& o, const char* v) { o.alt0_m = std::stod(v); } },
+    { "--stop", [](Options& o, const char* v) { o.stop_s = std::stod(v); } },
+    { "--step", [](Options& o, const char* v) { o.step_s = std::stod(v); } },
+    { "--csv", [](Options& o, const char* v) { o.csv_path = v; } },
+    { "--rtf", [](Options& o, const char* v) { o.realtime_factor = std::stod(v); } },
+} };
+
 bool parse_args(int argc, char** argv, Options& options)
 {
   for (int i = 1; i < argc; ++i)
   {
     const std::string arg = argv[i];
-    auto next = [&]() -> const char* { return (i + 1 < argc) ? argv[++i] : nullptr; };
     if (arg == "--help" || arg == "-h")
     {
       print_usage();
       return false;
     }
-    const char* value = nullptr;
-    if (arg == "--rocket" && (value = next()))
-    {
-      options.rocket_fmu = value;
-    }
-    else if (arg == "--gps" && (value = next()))
-    {
-      options.gps_fmu = value;
-    }
-    else if (arg == "--imu" && (value = next()))
-    {
-      options.imu_fmu = value;
-    }
-    else if (arg == "--baro" && (value = next()))
-    {
-      options.baro_fmu = value;
-    }
-    else if (arg == "--imu-rate" && (value = next()))
-    {
-      options.imu_rate_hz = std::stod(value);
-    }
-    else if (arg == "--dyn-model" && (value = next()))
-    {
-      options.dynamic_platform = std::stoi(value);
-    }
-    else if (arg == "--no-cocom")
+    // The one option that takes no value, so it cannot live in the table above.
+    if (arg == "--no-cocom")
     {
       options.cocom_limits = false;
+      continue;
     }
-    else if (arg == "--reacq" && (value = next()))
-    {
-      options.reacquisition_time_s = std::stod(value);
-    }
-    else if (arg == "--stg2-ignition" && (value = next()))
-    {
-      options.stg2_ignition_s = std::stod(value);
-    }
-    else if (arg == "--lat0" && (value = next()))
-    {
-      options.lat0_deg = std::stod(value);
-    }
-    else if (arg == "--lon0" && (value = next()))
-    {
-      options.lon0_deg = std::stod(value);
-    }
-    else if (arg == "--alt0" && (value = next()))
-    {
-      options.alt0_m = std::stod(value);
-    }
-    else if (arg == "--stop" && (value = next()))
-    {
-      options.stop_s = std::stod(value);
-    }
-    else if (arg == "--step" && (value = next()))
-    {
-      options.step_s = std::stod(value);
-    }
-    else if (arg == "--csv" && (value = next()))
-    {
-      options.csv_path = value;
-    }
-    else if (arg == "--rtf" && (value = next()))
-    {
-      options.realtime_factor = std::stod(value);
-    }
-    else
+
+    const auto option = std::ranges::find(kValueOptions, arg, &ValueOption::name);
+    // Same two rejections the else-if chain made, and the same message: an option nobody
+    // knows, or a known one standing at the end of argv with no value behind it.
+    if (option == kValueOptions.end() || i + 1 >= argc)
     {
       std::cerr << "unknown or incomplete argument: " << arg << "\n";
       print_usage();
       return false;
     }
+    option->apply(options, argv[++i]);
   }
   return true;
 }

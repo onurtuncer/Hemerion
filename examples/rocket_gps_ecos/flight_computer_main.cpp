@@ -78,6 +78,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace
@@ -140,76 +141,53 @@ void print_usage()
                "  --imu-wait-s how long to wait for those buses to appear, so either process may start first\n";
 }
 
+// The options that take a value, paired with what to do with it. A table rather than a chain
+// of `arg == "--x" && (value = next())`: an assignment inside a condition reads as a
+// comparison, and repeating the form once per option made adding one a copy-paste exercise.
+// Captureless lambdas convert to the plain function pointer, so the table is constexpr.
+struct ValueOption
+{
+  std::string_view name;
+  void (*apply)(Options&, const char*);
+};
+
+constexpr std::array<ValueOption, 13> kValueOptions = { {
+    { "--port", [](Options& o, const char* v) { o.gps_port = static_cast<std::uint16_t>(std::stoi(v)); } },
+    { "--imu-bus", [](Options& o, const char* v) { o.imu_bus = v; } },
+    { "--baro-bus", [](Options& o, const char* v) { o.baro_bus = v; } },
+    { "--imu-wait-s", [](Options& o, const char* v) { o.imu_wait_s = std::stol(v); } },
+    { "--csv", [](Options& o, const char* v) { o.gps_csv_path = v; } },
+    { "--imu-csv", [](Options& o, const char* v) { o.imu_csv_path = v; } },
+    { "--baro-csv", [](Options& o, const char* v) { o.baro_csv_path = v; } },
+    { "--fix-period", [](Options& o, const char* v) { o.fix_period_s = std::stod(v); } },
+    { "--print-every", [](Options& o, const char* v) { o.print_every = std::stoi(v); } },
+    { "--imu-print-every", [](Options& o, const char* v) { o.imu_print_every = std::stoi(v); } },
+    { "--baro-print-every", [](Options& o, const char* v) { o.baro_print_every = std::stoi(v); } },
+    { "--quiet-ms", [](Options& o, const char* v) { o.quiet_ms = std::stol(v); } },
+    { "--max-wall-s", [](Options& o, const char* v) { o.max_wall_s = std::stol(v); } },
+} };
+
 bool parse_args(int argc, char** argv, Options& options)
 {
   for (int i = 1; i < argc; ++i)
   {
     const std::string arg = argv[i];
-    auto next = [&]() -> const char* { return (i + 1 < argc) ? argv[++i] : nullptr; };
     if (arg == "--help" || arg == "-h")
     {
       print_usage();
       return false;
     }
-    const char* value = nullptr;
-    if (arg == "--port" && (value = next()))
-    {
-      options.gps_port = static_cast<std::uint16_t>(std::stoi(value));
-    }
-    else if (arg == "--imu-bus" && (value = next()))
-    {
-      options.imu_bus = value;
-    }
-    else if (arg == "--baro-bus" && (value = next()))
-    {
-      options.baro_bus = value;
-    }
-    else if (arg == "--imu-wait-s" && (value = next()))
-    {
-      options.imu_wait_s = std::stol(value);
-    }
-    else if (arg == "--csv" && (value = next()))
-    {
-      options.gps_csv_path = value;
-    }
-    else if (arg == "--imu-csv" && (value = next()))
-    {
-      options.imu_csv_path = value;
-    }
-    else if (arg == "--baro-csv" && (value = next()))
-    {
-      options.baro_csv_path = value;
-    }
-    else if (arg == "--fix-period" && (value = next()))
-    {
-      options.fix_period_s = std::stod(value);
-    }
-    else if (arg == "--print-every" && (value = next()))
-    {
-      options.print_every = std::stoi(value);
-    }
-    else if (arg == "--imu-print-every" && (value = next()))
-    {
-      options.imu_print_every = std::stoi(value);
-    }
-    else if (arg == "--baro-print-every" && (value = next()))
-    {
-      options.baro_print_every = std::stoi(value);
-    }
-    else if (arg == "--quiet-ms" && (value = next()))
-    {
-      options.quiet_ms = std::stol(value);
-    }
-    else if (arg == "--max-wall-s" && (value = next()))
-    {
-      options.max_wall_s = std::stol(value);
-    }
-    else
+
+    const auto option = std::ranges::find(kValueOptions, arg, &ValueOption::name);
+    // Same two rejections the else-if chain made, and the same message: an option nobody
+    // knows, or a known one standing at the end of argv with no value behind it.
+    if (option == kValueOptions.end() || i + 1 >= argc)
     {
       std::cerr << "unknown or incomplete argument: " << arg << "\n";
       print_usage();
       return false;
     }
+    option->apply(options, argv[++i]);
   }
   return true;
 }
@@ -278,8 +256,9 @@ public:
 
   bool write_register(std::uint8_t reg, std::uint8_t value) override
   {
-    const std::uint8_t frame[2] = { reg, value };
-    return complete(controller_.transaction(kBmp390I2cAddressPrimary, frame, 2, nullptr, 0, timeout_));
+    const std::array<std::uint8_t, 2> frame = { reg, value };
+    return complete(
+        controller_.transaction(kBmp390I2cAddressPrimary, frame.data(), frame.size(), nullptr, 0, timeout_));
   }
 
   bool read_registers(std::uint8_t reg, std::uint8_t* out, std::size_t count) override
