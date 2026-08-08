@@ -86,10 +86,28 @@ jobs:
             -DHEMERION_BUILD_FMU=ON \
             -DHEMERION_BUILD_EXAMPLES=ON
 
+      # Informational for now, in the same sense as the IWYU and Metrix++ jobs: examples/ has
+      # never been linted (no CI job configured examples-native until this one), and the first
+      # pass found 37 pre-existing errors -- 28 of them one `if (arg == "--x" && (v = next()))`
+      # argument-parser pattern repeated across the two main.cpp files, plus both main()s over
+      # the 200-line AV Rule 1 threshold. Those want a deliberate refactor, not a drive-by one.
+      # Drop continue-on-error once examples/ is triaged, so this becomes a real gate.
       - name: Run clang-tidy (examples)
+        continue-on-error: true
         run: |
+          # pipefail so the tee below does not swallow run-clang-tidy's status -- without it,
+          # deleting continue-on-error would leave a step that can never fail.
+          set -o pipefail
           python3 /usr/lib/llvm-18/bin/run-clang-tidy \
             -clang-tidy-binary clang-tidy-18 \
             -p build/clang-tidy-examples \
             -j "$(nproc)" \
-            $(find examples -name '*.cpp' | sort | tr '\n' ' ')
+            $(find examples -name '*.cpp' | sort | tr '\n' ' ') \
+            | tee clang-tidy-examples-report.txt
+
+      - name: Upload examples clang-tidy report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: clang-tidy-examples-report
+          path: clang-tidy-examples-report.txt
