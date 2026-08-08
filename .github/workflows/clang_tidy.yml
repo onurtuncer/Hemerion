@@ -5,12 +5,20 @@ on:
     branches:
       - main
   pull_request:
+    # The trees run-clang-tidy is pointed at, plus everything that decides what ends up in
+    # compile_commands.json -- a CMake or submodule change alone can change which sources
+    # get linted, or how, and must be able to trigger this job.
     paths:
       - 'modules/**'
       - 'apps/**'
       - 'bsp/**'
       - 'sim/**'
       - 'tests/**'
+      - 'examples/**'
+      - '**/CMakeLists.txt'
+      - '**.cmake'
+      - 'CMakePresets.json'
+      - '.gitmodules'
       - '.clang-tidy'
       - '.github/workflows/clang_tidy.yml'
 
@@ -56,3 +64,32 @@ jobs:
             -p build/clang-tidy \
             -j "$(nproc)" \
             $(find modules apps bsp sim tests -name '*.cpp' | sort | tr '\n' ' ')
+
+      # examples/ needs a second configure rather than a wider first one: it requires
+      # HEMERION_BUILD_EXAMPLES, which requires HEMERION_BUILD_FMU, and the root
+      # CMakeLists.txt skips apps/ whenever HEMERION_BUILD_FMU is ON ("FMU shared libraries
+      # are the link target in that mode"). One configure therefore cannot hold both apps/
+      # and examples/, so each gets its own compilation database.
+      #
+      # HEMERION_BSP mirrors the fmu-native preset. Configure only, no build: a compilation
+      # database is all clang-tidy needs, and configuring is what fetches Ecos and fmi4c.
+      - name: Configure (examples)
+        run: |
+          cmake -B build/clang-tidy-examples -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_CXX_STANDARD=23 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_CXX_EXTENSIONS=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DHEMERION_BSP=native_linux \
+            -DHEMERION_BUILD_FMU=ON \
+            -DHEMERION_BUILD_EXAMPLES=ON
+
+      - name: Run clang-tidy (examples)
+        run: |
+          python3 /usr/lib/llvm-18/bin/run-clang-tidy \
+            -clang-tidy-binary clang-tidy-18 \
+            -p build/clang-tidy-examples \
+            -j "$(nproc)" \
+            $(find examples -name '*.cpp' | sort | tr '\n' ' ')

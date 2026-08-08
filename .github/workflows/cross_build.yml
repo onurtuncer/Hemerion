@@ -1,6 +1,10 @@
 name: Cross Build (ARM)
 
 on:
+  # pull_request is unfiltered, so PRs always cross-build. This push filter is what guards
+  # commits that land on a branch directly, and it has to name everything the cross build
+  # consumes -- the root CMakeLists.txt and the vendored FreeRTOS submodule were both
+  # missing, so a direct push touching only those skipped the ARM build entirely.
   push:
     paths:
       - 'modules/**'
@@ -8,7 +12,11 @@ on:
       - 'bsp/**'
       - 'toolchains/**'
       - 'cmake/**'
+      - 'vendor/**'
+      - '**/CMakeLists.txt'
+      - '**.cmake'
       - 'CMakePresets.json'
+      - '.gitmodules'
       - '.github/workflows/cross_build.yml'
   pull_request:
 

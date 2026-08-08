@@ -5,12 +5,15 @@ on:
     branches:
       - main
   pull_request:
+    # Exactly the trees metrix++ collect is pointed at below. No CMake involved -- this job
+    # parses sources directly and never configures a build, so build inputs are not listed.
     paths:
       - 'modules/**'
       - 'apps/**'
       - 'bsp/**'
       - 'sim/**'
       - 'tests/**'
+      - 'examples/**'
       - '.github/workflows/metrixpp.yml'
 
 concurrency:
@@ -33,7 +36,7 @@ jobs:
       - name: Collect cyclomatic complexity metrics
         run: |
           metrix++ collect --std.code.complexity.cyclomatic --std.code.lines.code \
-            -- modules apps bsp sim tests
+            -- modules apps bsp sim tests examples
 
       - name: View report (functions sorted by complexity)
         run: |

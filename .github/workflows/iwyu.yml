@@ -5,12 +5,19 @@ on:
     branches:
       - main
   pull_request:
+    # The trees iwyu_tool is pointed at, plus everything that decides what ends up in
+    # compile_commands.json -- the Build step is not continue-on-error, so a CMake or
+    # submodule change alone can fail this job and must be able to trigger it.
     paths:
       - 'modules/**'
       - 'apps/**'
       - 'bsp/**'
       - 'sim/**'
       - 'tests/**'
+      - '**/CMakeLists.txt'
+      - '**.cmake'
+      - 'CMakePresets.json'
+      - '.gitmodules'
       - '.github/workflows/iwyu.yml'
 
 concurrency:
