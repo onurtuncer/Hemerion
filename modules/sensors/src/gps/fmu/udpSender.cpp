@@ -121,9 +121,9 @@ std::optional<UdpSender> UdpSender::create(const std::string& peer_address, std:
 }
 
 std::optional<UdpSender> UdpSender::create_from_env(const char* host_variable,
-                                                   const char* port_variable,
-                                                   const std::string& default_host,
-                                                   std::uint16_t default_port)
+                                                    const char* port_variable,
+                                                    const std::string& default_host,
+                                                    std::uint16_t default_port)
 {
   // std::getenv is flagged deprecated by the Windows SDK headers (in favour of _dupenv_s) purely as an MSVC CRT
   // "insecure function" nag, not a real portability issue -- std::getenv is the standard, portable way to do this.

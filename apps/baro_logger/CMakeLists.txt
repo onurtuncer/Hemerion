@@ -4,8 +4,8 @@
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # apps/baro_logger -- BMP390 barometer logger for bsp/stm32h743_nucleo: the first firmware consumer of the on-target
-# Bmp390Driver (modules/sensors/baro/bmp390/), over the BSP's I2C1 HAL and the header-only Bmp390HalI2cBus adapter.
-# One FreeRTOS task probes, configures and polls the part, printing compensated samples over the ST-LINK VCP.
+# Bmp390Driver (modules/sensors/baro/bmp390/), over the BSP's I2C1 HAL and the header-only Bmp390HalI2cBus adapter. One
+# FreeRTOS task probes, configures and polls the part, printing compensated samples over the ST-LINK VCP.
 #
 # Only buildable when that BSP is active, same as apps/led_blink (whose CMakeLists.txt documents the guard).
 # ------------------------------------------------------------------------------

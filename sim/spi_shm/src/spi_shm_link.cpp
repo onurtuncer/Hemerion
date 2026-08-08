@@ -253,10 +253,7 @@ bool SpiShmController::transfer(const std::uint8_t* tx,
   return true;
 }
 
-bool SpiShmController::data_ready() const
-{
-  return region().interrupt_line.load(std::memory_order_acquire) != 0U;
-}
+bool SpiShmController::data_ready() const { return region().interrupt_line.load(std::memory_order_acquire) != 0U; }
 
 bool SpiShmController::peripheral_present() const
 {

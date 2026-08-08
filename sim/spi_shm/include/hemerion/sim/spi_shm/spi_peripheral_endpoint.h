@@ -54,8 +54,8 @@ concept SpiShiftable = requires(Device& device, std::uint8_t byte) {
 // of these FMUs needs an FMI String-typed variable.
 struct SpiPeripheralConfig
 {
-  std::string default_bus_name;      // Bus to create when nothing overrides it.
-  std::string bus_name_env_variable; // Environment variable that may override it; empty disables the override.
+  std::string default_bus_name;       // Bus to create when nothing overrides it.
+  std::string bus_name_env_variable;  // Environment variable that may override it; empty disables the override.
 };
 
 // Resolves a bus name: the environment variable if it is set and non-empty,
@@ -76,8 +76,9 @@ public:
   // instantiated at build time purely so the modelDescription.xml generator
   // can enumerate its variables, and that must not touch the OS.
   SpiPeripheralEndpoint(Device& device, SpiPeripheralConfig config)
-    : adapter_(device), config_(std::move(config)),
-      bus_name_(resolve_bus_name(config_.bus_name_env_variable, config_.default_bus_name))
+    : adapter_(device)
+    , config_(std::move(config))
+    , bus_name_(resolve_bus_name(config_.bus_name_env_variable, config_.default_bus_name))
   {
   }
 
@@ -130,10 +131,7 @@ public:
   [[nodiscard]] const std::string& bus_name() const { return bus_name_; }
 
   // Transfers answered so far this run; zero while detached.
-  [[nodiscard]] std::uint64_t transfers_serviced() const
-  {
-    return (bus_ != nullptr) ? bus_->transfers_serviced() : 0;
-  }
+  [[nodiscard]] std::uint64_t transfers_serviced() const { return (bus_ != nullptr) ? bus_->transfers_serviced() : 0; }
 
 private:
   // The one place the duck-typed device model meets the transport's interface.

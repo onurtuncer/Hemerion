@@ -54,9 +54,9 @@ public:
   /// @return The connected sender, or std::nullopt on the same failures as
   ///         create().
   [[nodiscard]] static std::optional<UdpSender> create_from_env(const char* host_variable,
-                                                               const char* port_variable,
-                                                               const std::string& default_host,
-                                                               std::uint16_t default_port);
+                                                                const char* port_variable,
+                                                                const std::string& default_host,
+                                                                std::uint16_t default_port);
 
   UdpSender(const UdpSender&) = delete;
   UdpSender& operator=(const UdpSender&) = delete;

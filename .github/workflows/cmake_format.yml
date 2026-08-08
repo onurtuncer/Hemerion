@@ -5,14 +5,12 @@ on:
     branches:
       - main
   pull_request:
+    # Match on the filenames .run-cmake-format actually formats rather than a list of
+    # top-level directories -- a directory list silently stops covering new trees (that is
+    # how doc/, examples/ and tests/ drifted out of format), and the script scans the whole repo.
     paths:
-      - 'modules/**'
-      - 'apps/**'
-      - 'bsp/**'
-      - 'sim/**'
-      - 'cmake/**'
-      - 'toolchains/**'
-      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - '**.cmake'
       - '.github/workflows/cmake_format.yml'
       - '**/.cmake-format'
       - '.run-cmake-format'
@@ -27,11 +25,15 @@ jobs:
 
       - name: Run CMake Lang Format Check
         run: |
-          sudo pip3 install --break-system-packages cmakelang
-          RED='\033[0;31m'
-          NC='\033[0m' # No Color
+          set -euo pipefail
+          # Pinned: cmakelang's layout decisions change between releases, so an unpinned
+          # install turns any upstream release into a red main branch on files nobody touched.
+          sudo pip3 install --break-system-packages 'cmakelang==0.6.13'
           bash .run-cmake-format
           output=$(git diff)
-          if [ -n "$output" ]; then printf "${RED}CMake format error: run script './.run-cmake-format'${NC}\n"; fi
-          if [ -n "$output" ]; then printf "${RED}${output}${NC}\n"; fi
-          if [ -n "$output" ]; then exit 1; else exit 0; fi
+          if [ -n "$output" ]; then
+            printf '\033[0;31mCMake format error: run the script "./.run-cmake-format" and commit the result\033[0m\n'
+            # %s, not the diff as a format string -- a diff containing % would be mangled.
+            printf '%s\n' "$output"
+            exit 1
+          fi

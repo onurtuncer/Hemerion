@@ -56,12 +56,12 @@ inline constexpr std::uint8_t kImuSpiDummyByte = 0x00;
 /// Register addresses of the simulated part.
 enum class ImuSpiRegister : std::uint8_t
 {
-  kWhoAmI = 0x00,       ///< Read-only device identity, always @ref kImuSpiWhoAmI.
-  kStatus = 0x01,       ///< Read-only status bits; the overflow flag clears on read.
-  kFifoCountLow = 0x02,  ///< Read-only FIFO fill level [bytes], low byte.
-  kFifoCountHigh = 0x03, ///< Read-only FIFO fill level [bytes], high byte.
-  kControl = 0x04,      ///< Read/write control bits.
-  kFifoData = 0x7F,     ///< Read-only FIFO port; does not auto-increment.
+  kWhoAmI = 0x00,         ///< Read-only device identity, always @ref kImuSpiWhoAmI.
+  kStatus = 0x01,         ///< Read-only status bits; the overflow flag clears on read.
+  kFifoCountLow = 0x02,   ///< Read-only FIFO fill level [bytes], low byte.
+  kFifoCountHigh = 0x03,  ///< Read-only FIFO fill level [bytes], high byte.
+  kControl = 0x04,        ///< Read/write control bits.
+  kFifoData = 0x7F,       ///< Read-only FIFO port; does not auto-increment.
 };
 
 /// Value the `WHO_AM_I` register always reads back, so a driver can prove it

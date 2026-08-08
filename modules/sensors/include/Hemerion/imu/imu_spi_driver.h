@@ -78,9 +78,9 @@ public:
 /// Result of ImuSpiDriver::probe() and the fatal cases of poll().
 enum class ImuSpiError : std::uint8_t
 {
-  kNone,               ///< The exchange completed.
-  kTransferFailed,     ///< The bus could not complete a transfer.
-  kIdentityMismatch,   ///< `WHO_AM_I` did not read back @ref kImuSpiWhoAmI.
+  kNone,              ///< The exchange completed.
+  kTransferFailed,    ///< The bus could not complete a transfer.
+  kIdentityMismatch,  ///< `WHO_AM_I` did not read back @ref kImuSpiWhoAmI.
 };
 
 /// @brief Register-level IMU driver: drains the part's sample FIFO into
@@ -99,11 +99,11 @@ public:
   /// What one poll() moved off the part.
   struct PollResult
   {
-    std::size_t samples = 0;           ///< Raw samples decoded into the caller's array.
-    std::size_t bytes_read = 0;        ///< FIFO bytes clocked out of the part.
-    std::size_t checksum_errors = 0;   ///< Frames the parser rejected.
-    std::size_t dropped_samples = 0;   ///< Samples decoded past the caller's capacity (see poll()).
-    bool fifo_overflow = false;        ///< The part reported dropping samples since the last poll.
+    std::size_t samples = 0;                 ///< Raw samples decoded into the caller's array.
+    std::size_t bytes_read = 0;              ///< FIFO bytes clocked out of the part.
+    std::size_t checksum_errors = 0;         ///< Frames the parser rejected.
+    std::size_t dropped_samples = 0;         ///< Samples decoded past the caller's capacity (see poll()).
+    bool fifo_overflow = false;              ///< The part reported dropping samples since the last poll.
     ImuSpiError error = ImuSpiError::kNone;  ///< kTransferFailed if the bus gave up mid-poll.
   };
 

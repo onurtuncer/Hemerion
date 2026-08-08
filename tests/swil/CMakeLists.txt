@@ -17,10 +17,10 @@ if(NOT Renode_FOUND OR NOT Pyrenode3_FOUND)
   return()
 endif()
 
-# pyrenode3 cannot introspect the /usr/bin/renode shell launcher the Renode .deb installs (see tests/README.md's
-# "Setup: Renode + pyrenode3" section) -- when the deb's /opt/renode CoreCLR layout is present, point pyrenode3 at the
-# build output directory instead. PYRENODE_BIN stays as the fallback for installs where Renode_EXECUTABLE is a real
-# binary pyrenode3 can load. RENODE_ROOT takes precedence so a non-default install location keeps working.
+# pyrenode3 cannot introspect the /usr/bin/renode shell launcher the Renode .deb installs (see tests/README.md's "Setup:
+# Renode + pyrenode3" section) -- when the deb's /opt/renode CoreCLR layout is present, point pyrenode3 at the build
+# output directory instead. PYRENODE_BIN stays as the fallback for installs where Renode_EXECUTABLE is a real binary
+# pyrenode3 can load. RENODE_ROOT takes precedence so a non-default install location keeps working.
 if(DEFINED ENV{RENODE_ROOT} AND EXISTS "$ENV{RENODE_ROOT}/bin/Renode.dll")
   set(_swil_pyrenode_env "PYRENODE_BUILD_DIR=$ENV{RENODE_ROOT};PYRENODE_BUILD_OUTPUT=bin")
 elseif(EXISTS "/opt/renode/bin/Renode.dll")

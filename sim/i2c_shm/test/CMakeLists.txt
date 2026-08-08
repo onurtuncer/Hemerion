@@ -20,7 +20,8 @@ set_tests_properties(i2c_shm.link PROPERTIES LABELS "unit")
 set(_hemerion_sensors_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/sensors")
 add_executable(
   test_hemerion_i2c_shm_bmp390
-  test_i2c_shm_bmp390.cpp "${_hemerion_sensors_dir}/src/baro/bmp390/bmp390_driver.cpp"
+  test_i2c_shm_bmp390.cpp
+  "${_hemerion_sensors_dir}/src/baro/bmp390/bmp390_driver.cpp"
   "${_hemerion_sensors_dir}/src/baro/bmp390/bmp390_compensation.cpp"
   "${_hemerion_sensors_dir}/src/baro/bmp390/fmu/bmp390_i2c_slave.cpp")
 target_include_directories(test_hemerion_i2c_shm_bmp390 PRIVATE "${_hemerion_sensors_dir}/include")

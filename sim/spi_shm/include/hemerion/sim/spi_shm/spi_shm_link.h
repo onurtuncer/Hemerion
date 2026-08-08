@@ -140,10 +140,8 @@ public:
   // `tx` and the peripheral's answer into `rx` (either may be null for a
   // half-duplex leg). Returns false if `length` exceeds kMaxTransferBytes, the
   // peripheral shut the bus down, or it did not answer within `timeout`.
-  [[nodiscard]] bool transfer(const std::uint8_t* tx,
-                              std::uint8_t* rx,
-                              std::size_t length,
-                              std::chrono::milliseconds timeout);
+  [[nodiscard]] bool
+  transfer(const std::uint8_t* tx, std::uint8_t* rx, std::size_t length, std::chrono::milliseconds timeout);
 
   // Samples the peripheral's data-ready line.
   [[nodiscard]] bool data_ready() const;

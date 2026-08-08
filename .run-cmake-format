@@ -1,3 +1,9 @@
 #!/bin/bash
-find . \( -path ./out -o -path ./vendor -o -path ./.venv \) -prune \
-  -o -type f \( -name CMakeLists.txt -o -name "*.cmake" \) -exec cmake-format -i {} \;
+set -euo pipefail
+# Prune the same generated/third-party trees as .run-clang-format: a configured build/
+# directory is full of CMake files CMake itself wrote, and reformatting those produces a
+# dirty tree locally that CI (which runs on a fresh checkout) never sees.
+# -exec ... + (instead of \;) makes find exit non-zero when cmake-format fails, so a
+# broken .cmake-format fails the CI job instead of silently formatting nothing.
+find . -type d \( -name out -o -name vendor -o -name .venv -o -name _deps -o -name build -o -name .git \) -prune \
+  -o -type f \( -name CMakeLists.txt -o -name "*.cmake" \) -exec cmake-format -i {} +

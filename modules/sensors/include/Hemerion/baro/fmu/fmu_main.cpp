@@ -147,8 +147,8 @@ fmu4cpp::model_info fmu4cpp::get_model_info()
   model_info info;
   info.modelName = "HemerionBaroSimulator";
   info.author = "Onur Tuncer, Istanbul Technical University";
-  info.description =
-      "Truth-altitude-to-compensated-pressure-counts barometer hardware simulator for SWIL/HIL co-simulation";
+  info.description = "Truth-altitude-to-compensated-pressure-counts barometer hardware simulator for SWIL/HIL "
+                     "co-simulation";
   // Names such as h_m carry no FMI structured-naming hierarchy.
   info.variableNamingConvention = "flat";
   return info;

@@ -155,8 +155,8 @@ fmu4cpp::model_info fmu4cpp::get_model_info()
   model_info info;
   info.modelName = "HemerionMagSimulator";
   info.author = "Onur Tuncer, Istanbul Technical University";
-  info.description =
-      "Body-frame truth-field-to-raw-register-counts magnetometer hardware simulator for SWIL/HIL co-simulation";
+  info.description = "Body-frame truth-field-to-raw-register-counts magnetometer hardware simulator for SWIL/HIL "
+                     "co-simulation";
   // Names such as b_x_ut carry no FMI structured-naming hierarchy.
   info.variableNamingConvention = "flat";
   return info;

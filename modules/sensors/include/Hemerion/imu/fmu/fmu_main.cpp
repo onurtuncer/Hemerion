@@ -149,8 +149,7 @@ public:
   void terminate() override
   {
     const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
-    while (slave_.fifo_used() > 0 && endpoint_.controller_attached() &&
-           std::chrono::steady_clock::now() < deadline)
+    while (slave_.fifo_used() > 0 && endpoint_.controller_attached() && std::chrono::steady_clock::now() < deadline)
     {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
