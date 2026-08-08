@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <vector>
 
 #include "Hemerion/imu/fmu/imu_noise_model.h"
@@ -326,7 +327,7 @@ void test_truth_to_si_across_the_bus()
   assert(convert_raw_to_si(decoded, model.scale(), si) == ImuConversionError::kNone);
 
   const double accel_lsb = 9.80665 / static_cast<double>(model.scale().accel_lsb_per_g);
-  const double gyro_lsb = (3.14159265358979323846 / 180.0) / static_cast<double>(model.scale().gyro_lsb_per_dps);
+  const double gyro_lsb = (std::numbers::pi / 180.0) / static_cast<double>(model.scale().gyro_lsb_per_dps);
   assert(std::fabs(si.accel_x - truth.specific_force_x_mps2) <= accel_lsb);
   assert(std::fabs(si.accel_z - truth.specific_force_z_mps2) <= accel_lsb);
   assert(std::fabs(si.gyro_y - truth.angular_rate_y_rad_s) <= gyro_lsb);

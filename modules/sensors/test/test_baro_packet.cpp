@@ -17,6 +17,7 @@
 // Plain asserts + exit code, matching test_imu_packet.cpp -- Unity is not
 // yet vendored (see test_ubx_parser.cpp's header comment).
 // ------------------------------------------------------------------------------
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -87,8 +88,11 @@ void test_isa_anchor_points()
   // altitude.
   assert(near(BaroNoiseModel::isa_pressure_pa(10999.9), BaroNoiseModel::isa_pressure_pa(11000.1), 2.0));
   double previous = BaroNoiseModel::isa_pressure_pa(0.0);
-  for (double h = 1000.0; h <= 30000.0; h += 1000.0)
+  // Step the altitude with an integer counter rather than accumulating a double, so the
+  // sample points stay exactly 1000 m apart at 1000..30000 m.
+  for (int step = 1; step <= 30; ++step)
   {
+    const double h = 1000.0 * static_cast<double>(step);
     const double p = BaroNoiseModel::isa_pressure_pa(h);
     assert(p < previous);
     assert(p > 0.0);
@@ -200,7 +204,7 @@ void test_unknown_message_is_skipped()
   // Hand-built frame: id 0x7E, 3-byte payload, valid Fletcher checksum.
   std::uint8_t ck_a = 0;
   std::uint8_t ck_b = 0;
-  std::uint8_t body[] = { 0x7E, 0x03, 0x00, 0xAA, 0xBB, 0xCC };
+  const std::array<std::uint8_t, 6> body = { 0x7E, 0x03, 0x00, 0xAA, 0xBB, 0xCC };
   for (const std::uint8_t byte : body)
   {
     ck_a = static_cast<std::uint8_t>(ck_a + byte);
@@ -209,15 +213,15 @@ void test_unknown_message_is_skipped()
 
   BaroPacketParser parser;
   BaroRawSample decoded;
-  BaroPacketError last_error = BaroPacketError::kIncomplete;
   (void)parser.parse_byte(0xB7, decoded);
   (void)parser.parse_byte(0x7B, decoded);
   for (const std::uint8_t byte : body)
   {
-    last_error = parser.parse_byte(byte, decoded);
+    (void)parser.parse_byte(byte, decoded);
   }
   (void)parser.parse_byte(ck_a, decoded);
-  last_error = parser.parse_byte(ck_b, decoded);
+  // Only the checksum-completing byte's verdict matters; the frame is not decodable until then.
+  const BaroPacketError last_error = parser.parse_byte(ck_b, decoded);
   assert(last_error == BaroPacketError::kUnsupportedMessage);
 
   // The parser must be back in sync for the next real frame.

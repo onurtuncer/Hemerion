@@ -61,7 +61,7 @@ double Bmp390Compensator::compensate_temperature(std::uint32_t uncomp_temp) cons
 double Bmp390Compensator::compensate_pressure(std::uint32_t uncomp_press, double temperature_c) const
 {
   const double t_lin = temperature_c;
-  const double uncomp = static_cast<double>(uncomp_press);
+  const auto uncomp = static_cast<double>(uncomp_press);
 
   double partial_data1 = par_p6_ * t_lin;
   double partial_data2 = par_p7_ * t_lin * t_lin;

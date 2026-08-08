@@ -17,6 +17,7 @@
 // Plain asserts + exit code, matching test_imu_packet.cpp -- Unity is not
 // yet vendored (see test_ubx_parser.cpp's header comment).
 // ------------------------------------------------------------------------------
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -200,7 +201,7 @@ void test_unknown_message_is_skipped()
   // Hand-built frame: id 0x7E, 3-byte payload, valid Fletcher checksum.
   std::uint8_t ck_a = 0;
   std::uint8_t ck_b = 0;
-  std::uint8_t body[] = { 0x7E, 0x03, 0x00, 0xAA, 0xBB, 0xCC };
+  const std::array<std::uint8_t, 6> body = { 0x7E, 0x03, 0x00, 0xAA, 0xBB, 0xCC };
   for (const std::uint8_t byte : body)
   {
     ck_a = static_cast<std::uint8_t>(ck_a + byte);
@@ -209,15 +210,15 @@ void test_unknown_message_is_skipped()
 
   RadAltPacketParser parser;
   RadAltRawSample decoded;
-  RadAltPacketError last_error = RadAltPacketError::kIncomplete;
   (void)parser.parse_byte(0xC9, decoded);
   (void)parser.parse_byte(0x9C, decoded);
   for (const std::uint8_t byte : body)
   {
-    last_error = parser.parse_byte(byte, decoded);
+    (void)parser.parse_byte(byte, decoded);
   }
   (void)parser.parse_byte(ck_a, decoded);
-  last_error = parser.parse_byte(ck_b, decoded);
+  // Only the checksum-completing byte's verdict matters; the frame is not decodable until then.
+  const RadAltPacketError last_error = parser.parse_byte(ck_b, decoded);
   assert(last_error == RadAltPacketError::kUnsupportedMessage);
 
   // The parser must be back in sync for the next real frame.
