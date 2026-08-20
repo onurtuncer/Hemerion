@@ -223,7 +223,12 @@ Verify that each module FMU:
 | `test-native` | Ubuntu 24.04 | Every push |
 | `fmu-native` | Ubuntu 24.04 | Every push |
 | `renode-h743` (build only) | Ubuntu 24.04 | Every push |
-| `test-swil` | Ubuntu 24.04 + Renode container | PR merge to `main` |
+| `test-swil` | Ubuntu 24.04 + Renode container | Every PR, and pushes to `main` |
 | `cross-stm32f446` (build only) | Ubuntu 24.04 | Every push |
 
-SWIL tests are gated to PR merge because Renode startup adds ~30 s per test suite.
+SWIL used to run only *after* a PR merged, so a broken loop was discovered on
+`main` rather than on the PR that broke it — four consecutive runs failed at
+`actions/checkout` without anyone noticing. It now runs on every PR like the
+other build jobs; Renode startup adds ~30 s, which is cheap against that
+blind spot. The job is `concurrency`-grouped, so a new push to a PR cancels
+the superseded run.

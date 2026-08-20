@@ -1,14 +1,25 @@
 name: SWIL Tests
 
 on:
-  pull_request:
+  # Matches the convention the other build jobs settled on (see cross_build.yml): pull_request
+  # unfiltered so every PR runs this, and a push filter guarding commits that land on main
+  # directly. It used to be `pull_request: types: [closed]` + `if: merged == true`, which meant
+  # the job ran only *after* a merge -- so a broken SWIL loop was discovered on main, never on
+  # the PR that broke it. That is how four consecutive runs failed at `actions/checkout` without
+  # anyone noticing. Renode startup costs ~30 s, which is not worth that blind spot.
+  push:
     branches: [ main ]
-    types: [ closed ]
+  pull_request:
+
+# The most expensive job here (two builds plus an emulator); superseded runs on the same PR
+# are not worth a runner.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-swil:
     name: test-swil (Renode)
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
     # --user root because the image runs as a non-root user whose UID does not own the runner's bind-mounted
     # /__w/_temp: every run so far died inside actions/checkout with "EACCES: permission denied, open
