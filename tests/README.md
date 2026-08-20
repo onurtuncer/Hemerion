@@ -26,7 +26,14 @@ ctest --preset test-native --output-on-failure
 # SWIL tests (requires Renode on PATH)
 cmake --preset test-swil
 cmake --build --preset test-swil
-ctest --preset test-swil -L swil --output-on-failure
+
+# The BMP390 SWIL loop also needs two *native* host tools. test-swil is a cross
+# build and sim/ is host-only, so it cannot produce them; build them separately:
+cmake --preset test-native
+cmake --build --preset test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+
+# HEMERION_SWIL_STRICT makes a missing artefact fail instead of skip -- see below
+HEMERION_SWIL_STRICT=1 ctest --preset test-swil -L swil --output-on-failure
 
 # FMU tests
 cmake --preset fmu-native
@@ -48,8 +55,9 @@ pytest via the `add_test(... COMMAND pytest ...)` entry in
 tests/swil/
 ├── CMakeLists.txt     # find_package(Renode)/find_package(Pyrenode3) gate + add_test
 ├── requirements.txt    # pytest + pyrenode3 (pinned commit), for the venv described below
-├── conftest.py          # renode_machine fixture: loads the platform, yields the Machine
-└── test_led_blink.py   # apps/led_blink smoke test: watches usart3 for "LED ON"/"LED OFF"
+├── conftest.py          # renode_machine fixture, firmware_elf(), missing()
+├── test_led_blink.py   # apps/led_blink smoke test: watches usart3 for "LED ON"/"LED OFF"
+└── test_baro_logger.py # apps/baro_logger across the full I2C chain (see below)
 ```
 
 The `renode_machine` fixture in `conftest.py`:
@@ -74,9 +82,23 @@ def test_led_blinks(renode_machine):
     assert tester.WaitFor("LED ON", None, False, False, False, False) is not None
 ```
 
-`firmware_elf()` skips (rather than fails) when the target app hasn't been
-built under `build/renode-h743/` yet — `tests/swil` runs against whatever
-that preset most recently produced; it doesn't drive the cross-build itself.
+`firmware_elf()` locates the ELF in the build tree that registered the test:
+`tests/swil/CMakeLists.txt` passes `HEMERION_SWIL_FIRMWARE_DIR` pointing at
+that build's `apps/`, and failing that any `build/*/apps/<app>/<app>` is
+searched. Candidates are checked for an `EM_ARM` ELF header, so a
+`native_linux` build of the same app name is never handed to Renode.
+
+When nothing is found it **skips** rather than fails — `tests/swil` runs
+against whatever was last built and does not drive builds itself. Set
+`HEMERION_SWIL_STRICT=1` to invert that:
+
+> A skipped pytest is a **passed** ctest. Both SWIL tests once skipped
+> silently in CI — `firmware_elf()` looked under `build/renode-h743/` while
+> the job builds the `test-swil` preset into `build/test-swil/` — so the
+> whole suite reported success having run nothing. CI now sets
+> `HEMERION_SWIL_STRICT=1`, which turns every "not built" skip into a
+> failure naming the build step that is missing. Route any new
+> skip-on-missing path through `conftest.missing()` so it is covered too.
 
 ### Setup: Renode + pyrenode3
 
@@ -125,6 +147,19 @@ cd /mnt/d/Dev/Hemerion/tests/swil
 ~/swilvenv/bin/python3 -m pytest test_led_blink.py -v
 ```
 
+`test_baro_logger.py` additionally needs the two `sim/i2c_shm/tools` binaries
+built **for the OS pytest runs under** — Linux ones, in this split, not the
+Windows build. Build them once inside WSL:
+
+```bash
+cd /mnt/d/Dev/Hemerion
+cmake --preset test-native
+cmake --build --preset test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+```
+
+They are then found by the `build/*/sim/i2c_shm/tools/` glob, or point
+`HEMERION_SWIL_TOOLS_DIR` at them explicitly.
+
 `tests/swil/CMakeLists.txt`'s `find_package(Renode)` / `find_package(Pyrenode3)`
 gate means a `cmake --preset test-swil` configure on Windows (where Renode
 is the incompatible .NET-Framework build) silently skips `tests/swil`
@@ -132,6 +167,42 @@ rather than failing — the `ctest --preset test-swil` path is meant for a
 single Linux environment (CI's Ubuntu + Renode container) that has both the
 ARM toolchain and a CoreCLR Renode build; it isn't wired to span the
 Windows-build / WSL-test split above.
+
+### The BMP390 loop (`test_baro_logger.py`)
+
+`test_led_blink.py` needs nothing but the firmware. `test_baro_logger.py`
+drives every layer between the emulated I2C controller and a
+register-accurate device model:
+
+```
+baro_logger (emulated) -> Renode STM32F7_I2C -> HemerionI2cShmBridge (C#)
+    -> TCP -> i2c_shm_tcp_bridge -> sim/i2c_shm -> bmp390_shm_peripheral
+```
+
+so the test also supervises two host processes. Points worth knowing:
+
+* **The two host tools are native binaries.** `sim/` is host-only and
+  `HEMERION_BUILD_SIM` hard-errors under a cross toolchain, so the
+  `test-swil` build that registers this test can never produce them. They
+  come from `test-native`; `HEMERION_SWIL_TOOLS_DIR` overrides the search.
+* **No fixed TCP port.** The bridge is launched with `--port 0` and reports
+  the port it actually bound on stdout; the test reads it back and writes a
+  small platform overlay naming it. That is why there is no `bmp390` node in
+  `sim/renode/boards/nucleo_h743zi2.repl` — see
+  `sim/renode/i2c_bridge/DESIGN.md`.
+* **`targetAddress` is stated twice in that overlay, on purpose.** Renode
+  matches the transfer on the registration address but the C# class puts
+  `targetAddress` on the shm bus, and it has no default — so a missing one
+  is a load-time error rather than a silent mismatch.
+* **Stop the peripheral politely.** `bmp390_shm_peripheral` unlinks its
+  shared-memory segment only on a normal return from `main()`, and handles
+  SIGINT/SIGTERM so that path is reachable. A SIGKILL strands
+  `/dev/shm/<bus>` until the machine reboots.
+* **Helper failures are reported as themselves.** The test waits for the
+  bridge to accept a connection before starting the emulation and checks
+  both helpers' liveness as it goes, quoting their captured output — a stale
+  segment or a taken port surfaces as that, not as firmware which failed to
+  print its banner.
 
 ---
 
@@ -152,7 +223,12 @@ Verify that each module FMU:
 | `test-native` | Ubuntu 24.04 | Every push |
 | `fmu-native` | Ubuntu 24.04 | Every push |
 | `renode-h743` (build only) | Ubuntu 24.04 | Every push |
-| `test-swil` | Ubuntu 24.04 + Renode container | PR merge to `main` |
+| `test-swil` | Ubuntu 24.04 + Renode container | Every PR, and pushes to `main` |
 | `cross-stm32f446` (build only) | Ubuntu 24.04 | Every push |
 
-SWIL tests are gated to PR merge because Renode startup adds ~30 s per test suite.
+SWIL used to run only *after* a PR merged, so a broken loop was discovered on
+`main` rather than on the PR that broke it — four consecutive runs failed at
+`actions/checkout` without anyone noticing. It now runs on every PR like the
+other build jobs; Renode startup adds ~30 s, which is cheap against that
+blind spot. The job is `concurrency`-grouped, so a new push to a PR cancels
+the superseded run.

@@ -1,26 +1,63 @@
 name: SWIL Tests
 
 on:
-  pull_request:
+  # Matches the convention the other build jobs settled on (see cross_build.yml): pull_request
+  # unfiltered so every PR runs this, and a push filter guarding commits that land on main
+  # directly. It used to be `pull_request: types: [closed]` + `if: merged == true`, which meant
+  # the job ran only *after* a merge -- so a broken SWIL loop was discovered on main, never on
+  # the PR that broke it. That is how four consecutive runs failed at `actions/checkout` without
+  # anyone noticing. Renode startup costs ~30 s, which is not worth that blind spot.
+  push:
     branches: [ main ]
-    types: [ closed ]
+  pull_request:
+
+# The most expensive job here (two builds plus an emulator); superseded runs on the same PR
+# are not worth a runner.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-swil:
     name: test-swil (Renode)
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
-    container: antmicro/renode:latest
+    # --user root because the image runs as a non-root user whose UID does not own the runner's bind-mounted
+    # /__w/_temp: every run so far died inside actions/checkout with "EACCES: permission denied, open
+    # /__w/_temp/_runner_file_commands/save_state_...", i.e. before a single line of this repo was checked out.
+    container:
+      image: antmicro/renode:latest
+      options: --user root
     steps:
+      # Must precede the checkout: actions/checkout needs git >= 2.18 *inside the container*,
+      # and antmicro/renode ships without it. Without git the action quietly falls back to a
+      # GitHub REST API tarball, which cannot fetch submodules -- it fails with "Input
+      # 'submodules' not supported when falling back to download using the GitHub REST API"
+      # rather than anything naming the real cause.
+      - name: Install git for actions/checkout
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends git ca-certificates
+
       - uses: actions/checkout@v7
         with:
           submodules: recursive
 
+      # The cross toolchain builds the firmware; a native one builds the two host tools the BMP390 loop needs. Neither
+      # is installed unconditionally: the Renode image may already ship a cross toolchain from a tarball rather than
+      # a package, and its default g++ is fine here — nothing in the tools' translation units needs <print>, so the
+      # g++-14 the native workflows pin (see README.md) is not required.
       - name: Install build dependencies
         run: |
-          apt-get update -q
           apt-get install -y --no-install-recommends cmake ninja-build python3-pip
-          pip3 install pyrenode3
+          command -v arm-none-eabi-g++ >/dev/null || apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
+          command -v g++ >/dev/null || apt-get install -y --no-install-recommends g++
+          # Install from the requirements file, not `pip3 install pyrenode3`, which was wrong three ways:
+          # pyrenode3 is not on PyPI at all (antmicro ship it only from git, hence the commit pin in that
+          # file), pytest was never installed even though ctest invokes `python3 -m pytest`, and PEP 668
+          # makes a system-wide install an error on this image without --break-system-packages. The pin is
+          # also what tests/README.md tells developers to install, so CI and a dev venv now agree.
+          pip3 install --break-system-packages -r tests/swil/requirements.txt
 
       - name: Configure
         run: cmake --preset=test-swil
@@ -28,5 +65,24 @@ jobs:
       - name: Build
         run: cmake --build --preset=test-swil
 
+      # These cannot come from the build above: sim/ is host-only and the root CMakeLists hard-errors on
+      # HEMERION_BUILD_SIM under a cross toolchain, so test-swil never even adds sim/. Without this step
+      # test_baro_logger.py finds no tools, pytest.skip()s, and ctest scores the skip as a pass — which is how this job
+      # came to be green while running none of the SWIL loop.
+      - name: Build the host-side bridge tools (native)
+        run: |
+          cmake --preset=test-native
+          cmake --build --preset=test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+
+      # HEMERION_SWIL_STRICT turns "artefact not built" from a skip into a failure, so a future gap in the steps above
+      # cannot quietly reproduce that vacuous pass.
       - name: Run SWIL tests
-        run: ctest --preset=test-swil -L swil --output-on-failure
+        env:
+          HEMERION_SWIL_STRICT: '1'
+        run: |
+          # $(pwd), not ${{ github.workspace }}: in a container job that expression expands to the *host*
+          # path (/home/runner/work/...), while the step runs against the bind mount at /__w/... . The
+          # variable therefore pointed at nothing, and only host_tool()'s build/* glob fallback saved the
+          # run. Resolving it in the shell keeps the override honest.
+          export HEMERION_SWIL_TOOLS_DIR="$(pwd)/build/test-native/sim/i2c_shm/tools"
+          ctest --preset=test-swil -L swil --output-on-failure

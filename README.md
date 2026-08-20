@@ -282,11 +282,28 @@ See `CMakePresets.json` for the full list of presets and their toolchain/BSP bin
 
 ## Running SWIL Simulation
 
-With Renode installed:
+Interactively, with Renode installed (the script brings up the bare
+Nucleo-H743 platform; load your own ELF from the monitor):
 
 ```bash
-renode scripts/stm32h7_hemerion.resc
+renode sim/renode/scripts/swil_lockstep.resc
 ```
+
+The automated harness under `tests/swil/` drives the same platform from
+pytest via pyrenode3. It needs **two** builds — the cross build for the
+firmware, and a native one for the host-side bridge tools that
+`test_baro_logger.py` uses, which a cross toolchain cannot produce:
+
+```bash
+cmake --build --preset test-swil
+cmake --build --preset test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+HEMERION_SWIL_STRICT=1 ctest --preset test-swil -L swil --output-on-failure
+```
+
+`HEMERION_SWIL_STRICT=1` makes a missing artefact fail rather than skip —
+without it, ctest scores a skipped pytest as a pass. See `tests/README.md`
+for the full harness, and `doc/swil_windows_setup.rst` for the WSL2 setup
+Windows machines need.
 
 ---
 

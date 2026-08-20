@@ -21,6 +21,22 @@ target_link_libraries(hemerion_i2c_shm PUBLIC hemerion_shm_bridge)
 target_link_libraries(hemerion_i2c_shm PRIVATE Threads::Threads)
 set_target_properties(hemerion_i2c_shm PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# The BMP390 device model, named once for both subdirectories below. Both compile these sources in directly rather than
+# linking hemerion_sensors, so that sim/ never has to be ordered against modules/ -- but they had each spelled out the
+# same three-level reach-in and the same file list, so splitting a translation unit (or moving either directory) meant
+# editing two files and link-erroring in whichever was forgotten.
+set(HEMERION_I2C_SHM_SENSORS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../modules/sensors")
+set(HEMERION_I2C_SHM_BMP390_SOURCES "${HEMERION_I2C_SHM_SENSORS_DIR}/src/baro/bmp390/bmp390_compensation.cpp"
+                                    "${HEMERION_I2C_SHM_SENSORS_DIR}/src/baro/bmp390/fmu/bmp390_i2c_slave.cpp")
+
 if(HEMERION_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
   add_subdirectory(test)
+endif()
+
+# Gated like test/ above, and for the same reason: these are host *tools*, not part of the bus library. Leaving them
+# unconditional built them (and recompiled the BMP390 device-model sources a second time) in every fmu-native and
+# examples-native configure, where nothing consumes them. HEMERION_BUILD_SIM is the axis that actually asks for sim/'s
+# own deliverables -- fmu-native and examples-native only reach sim/ because FMUs need the transports underneath them.
+if((HEMERION_BUILD_SIM OR HEMERION_BUILD_TESTS) AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
+  add_subdirectory(tools)
 endif()

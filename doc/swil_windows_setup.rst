@@ -178,6 +178,26 @@ To run all SWIL tests:
 
     ~/swilvenv/bin/python3 -m pytest tests/swil/ -v
 
+``test_baro_logger.py`` needs two more pieces
+---------------------------------------------
+
+``test_led_blink.py`` needs nothing but the firmware. ``test_baro_logger.py``
+drives the BMP390 across Renode's emulated I2C, a C# bridge peripheral, a TCP
+hop, and the shared-memory bus, so it also launches two **native** host tools.
+Those cannot come from the cross build: ``sim/`` is host-only and
+``HEMERION_BUILD_SIM`` hard-errors under a cross toolchain. Build them once
+inside WSL2, where pytest runs:
+
+.. code-block:: bash
+
+    cd /mnt/d/Dev/Hemerion
+    cmake --preset test-native
+    cmake --build --preset test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+
+The harness finds them by globbing ``build/*/sim/i2c_shm/tools/``, or you can
+point ``HEMERION_SWIL_TOOLS_DIR`` at them. See ``tests/README.md`` for the rest
+of the chain and ``sim/renode/i2c_bridge/DESIGN.md`` for the wire protocol.
+
 ---
 
 Why not ``ctest --preset test-swil``?
@@ -195,13 +215,27 @@ cross-compiles, and runs tests in one step:
     cmake --build --preset test-swil
     ctest --preset test-swil -L swil
 
-On a Windows dev machine this pipeline is intentionally split:
+Note that even on Linux this is now two builds, not one: the cross ``test-swil``
+build for the firmware, plus a native ``test-native`` build for
+``test_baro_logger.py``'s host tools. The CI job runs both.
+
+On a Windows dev machine the pipeline is intentionally split:
 ``cmake --preset renode-h743`` on Windows for the cross-compile (ARM toolchain
 there), pytest on WSL for the Renode test harness (CoreCLR Renode there). The
 ``find_package(Renode)`` / ``find_package(Pyrenode3)`` gate in
 ``tests/swil/CMakeLists.txt`` detects this automatically — when configured on
-Windows it silently skips the ``swil.led_blink`` CTest entry rather than
-failing, since Windows Renode can't serve pyrenode3.
+Windows it silently skips the ``swil.led_blink`` and ``swil.baro_logger`` CTest
+entries rather than failing, since Windows Renode can't serve pyrenode3.
+
+.. warning::
+
+   A skipped pytest is a **passed** ctest. Both SWIL tests once skipped
+   silently in CI — ``conftest.firmware_elf()`` looked under
+   ``build/renode-h743/`` while the job builds ``test-swil`` into
+   ``build/test-swil/`` — so the suite reported success having run nothing.
+   CI now sets ``HEMERION_SWIL_STRICT=1``, which turns every "not built" skip
+   into a failure naming the missing build step. Set it locally too whenever
+   you mean "these tests must actually run".
 
 ---
 
