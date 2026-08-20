@@ -33,7 +33,7 @@ import time
 
 from pyrenode3.wrappers import Emulation, Monitor, TerminalTester
 
-from conftest import REPO_ROOT, firmware_elf, missing, peripheral
+from conftest import REPO_ROOT, firmware_elf, function_at, missing, peripheral
 
 CS_PATH = REPO_ROOT / "sim" / "renode" / "i2c_bridge" / "HemerionI2cBridge.cs"
 
@@ -100,6 +100,37 @@ def tail(log_path: pathlib.Path, limit: int = 4000) -> str:
     except OSError as error:
         return f"(could not read {log_path}: {error})"
     return text[-limit:] if text else "(no output)"
+
+
+def renode_tail(log_path: pathlib.Path, limit: int = 3000) -> str:
+    """The Renode log with the RCC chatter dropped.
+
+    stm32h743.repl models the clock tree as an unimplemented region, so boot
+    alone emits hundreds of "rcc: Unhandled read/write" warnings -- enough to
+    fill any tail budget and hide the lines that actually matter: the C#
+    bridge's own logging, and any unhandled access to the I2C region.
+    """
+    kept = [line for line in tail(log_path, limit=400_000).split("\n") if "rcc:" not in line]
+    text = "\n".join(kept).strip()
+    return text[-limit:] if text else "(nothing but rcc chatter)"
+
+
+def cpu_state(machine, elf: pathlib.Path) -> str:
+    """Best-effort program counter, resolved to a function name, plus the
+    instruction count.
+
+    Distinguishes a CPU spinning in a fault handler from one still making
+    progress, and names where it is spinning -- resolved against the ELF this
+    test actually loaded, so a stale local build of the same app cannot
+    mislabel it. Renode's API surface varies by version, so this must never be
+    the reason a test errors.
+    """
+    try:
+        cpu = peripheral(machine, "sysbus.cpu").internal
+        program_counter = int(cpu.PC)
+        return f"PC={program_counter:#x} ({function_at(elf, program_counter)}) executed={cpu.ExecutedInstructions}"
+    except Exception as error:  # noqa: BLE001 -- diagnostics only
+        return f"(unavailable: {error})"
 
 
 def check_alive(helper) -> None:
@@ -268,7 +299,8 @@ def test_baro_logger_reads_the_simulated_part(renode_machine):
                             f"firmware never printed {pattern!r}, and both helpers were still running --",
                             "so this is the emulated side of the chain, not the harness.",
                             f"--- usart3 ---\n{tail(uart_log)}",
-                            f"--- renode ---\n{tail(renode_log)}",
+                            f"--- cpu ---\n{cpu_state(renode_machine, elf)}",
+                            f"--- renode (rcc chatter dropped) ---\n{renode_tail(renode_log)}",
                             f"--- {part[1]} ---\n{tail(part[2])}",
                             f"--- {bridge[1]} ---\n{tail(bridge[2])}",
                         ]

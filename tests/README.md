@@ -223,7 +223,7 @@ Verify that each module FMU:
 | `test-native` | Ubuntu 24.04 | Every push |
 | `fmu-native` | Ubuntu 24.04 | Every push |
 | `renode-h743` (build only) | Ubuntu 24.04 | Every push |
-| `test-swil` | Ubuntu 24.04 + Renode container | Every PR, and pushes to `main` |
+| `test-swil` | Ubuntu 24.04 + Renode container | Every PR, and pushes to `main` (`swil.baro_logger` informational — see below) |
 | `cross-stm32f446` (build only) | Ubuntu 24.04 | Every push |
 
 SWIL used to run only *after* a PR merged, so a broken loop was discovered on
@@ -232,3 +232,14 @@ SWIL used to run only *after* a PR merged, so a broken loop was discovered on
 other build jobs; Renode startup adds ~30 s, which is cheap against that
 blind spot. The job is `concurrency`-grouped, so a new push to a PR cancels
 the superseded run.
+
+`swil.led_blink` gates; `swil.baro_logger` runs in a `continue-on-error` step
+for now, the way IWYU, Metrix++ and the examples clang-tidy pass do. It fails
+for a reason that predates the harness: `baro_logger` hangs before its first
+print and emits *no* usart3 output at all, while `led_blink` prints happily on
+the same platform — so the emulated I2C path is what needs fixing, not the
+test. Note this is a `continue-on-error` step and **not** a skip: a skipped
+pytest is a passed ctest, which is how this suite spent months green while
+testing nothing. The test still runs, still reports, and still captures the
+Renode log and both helper logs on failure. Drop `continue-on-error` from
+`swil.yml` once the emulated I2C path works.
