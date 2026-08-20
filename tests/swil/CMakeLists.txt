@@ -29,6 +29,13 @@ else()
   set(_swil_pyrenode_env "PYRENODE_BIN=${Renode_EXECUTABLE}")
 endif()
 
+# conftest.firmware_elf() used to hardcode build/renode-h743, which the test-swil preset CI builds (binaryDir
+# build/test-swil) never populates -- every SWIL test skipped there, and ctest scores a pytest skip as a pass, so the
+# job was green having run nothing. Handing the harness this build's own apps/ directory ties the tests to whichever
+# cross preset registered them. HEMERION_SWIL_TOOLS_DIR and HEMERION_SWIL_STRICT are deliberately not set here: they are
+# the caller's, and ENVIRONMENT adds to the inherited environment rather than replacing it.
+set(_swil_env "${_swil_pyrenode_env};HEMERION_SWIL_FIRMWARE_DIR=${CMAKE_BINARY_DIR}/apps")
+
 add_test(NAME swil.led_blink COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/test_led_blink.py"
                                      -v)
 set_tests_properties(
@@ -38,5 +45,29 @@ set_tests_properties(
              WORKING_DIRECTORY
              "${CMAKE_CURRENT_SOURCE_DIR}"
              ENVIRONMENT
-             "${_swil_pyrenode_env}")
+             "${_swil_env}"
+             TIMEOUT
+             300)
+
+# The whole BMP390 SWIL loop: emulated firmware -> Renode STM32F7_I2C -> runtime-loaded C# bridge -> TCP ->
+# i2c_shm_tcp_bridge -> shared-memory bus -> the register-accurate part model. Skips inside pytest when the firmware or
+# the host tools are missing -- the latter come from a *native* build (sim/ is host-only, so this cross build cannot
+# produce them), pointed at by HEMERION_SWIL_TOOLS_DIR; set HEMERION_SWIL_STRICT to turn those skips into failures.
+#
+# The TIMEOUT is explicit because this test drives four processes across a TCP hop: if the bridge or the part wedges,
+# the emulated CPU thread blocks with Renode's virtual clock stopped, so the pytest-side 30 s TerminalTester budget --
+# counted in *virtual* seconds -- never elapses. Without this, ctest's 1500 s default is what ends the job.
+add_test(NAME swil.baro_logger COMMAND "${Python3_EXECUTABLE}" -m pytest
+                                       "${CMAKE_CURRENT_SOURCE_DIR}/test_baro_logger.py" -v)
+set_tests_properties(
+  swil.baro_logger
+  PROPERTIES LABELS
+             "swil"
+             WORKING_DIRECTORY
+             "${CMAKE_CURRENT_SOURCE_DIR}"
+             ENVIRONMENT
+             "${_swil_env}"
+             TIMEOUT
+             300)
+unset(_swil_env)
 unset(_swil_pyrenode_env)

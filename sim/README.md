@@ -14,6 +14,7 @@ FMUs and the Aetherion plant FMU.
 |---|---|
 | `renode/` | Renode board definitions (`.repl`) and emulation scripts (`.resc`) for STM32H7/STM32F4 SWIL targets |
 | `fmi/` | FMI 2.0 co-simulation master: steps module FMUs and the Aetherion plant FMU in lockstep |
+| `i2c_shm/` | Simulated I2C bus in shared memory, plus the host tools that bridge it to an emulated controller (see `renode/i2c_bridge/DESIGN.md`) |
 | `shm_bridge/` | Shared-memory transport between the FMI master and a locally running Aetherion process |
 | `spi_shm/` | Simulated SPI bus in shared memory: sensor FMUs answer chip-select-framed transfers from host or emulated firmware |
 | `udp_bridge/` | UDP transport for the FMI master when Aetherion runs out-of-process or on a different host |
@@ -213,6 +214,6 @@ shared region.
 
 | Preset | What runs |
 |---|---|
-| `fmu-native` | Builds module FMUs + `fmi/` master + `fmi/plant/` importer |
-| `test-native` | Runs `tests/fmu/` and `tests/integration/` against the master, with the plant FMU in the loop |
-| `test-swil` | Uses `renode/` only; `fmi/` is not involved |
+| `fmu-native` | Builds module FMUs + `fmi/` master + `fmi/plant/` importer. Does **not** build `i2c_shm/tools/` — nothing in an FMU build consumes those host binaries |
+| `test-native` | Runs `tests/fmu/` and `tests/integration/` against the master, with the plant FMU in the loop. Also the preset that builds `i2c_shm/tools/`, since it sets `HEMERION_BUILD_SIM` |
+| `test-swil` | Uses `renode/` only; `fmi/` is not involved. Being a cross build it cannot add `sim/` at all, so the SWIL BMP390 test needs a companion `test-native` build for its host tools |

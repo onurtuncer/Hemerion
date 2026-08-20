@@ -46,7 +46,29 @@ cmake --preset renode-h743
 cmake --build build/renode-h743 --target baro_logger
 ```
 
-`baro_logger.hex` / `.bin` land next to the ELF. No Renode platform runs
-this app yet: Renode's emulated I2C has no bridge to the shared-memory bus
-the BMP390 FMU answers on (the same gap the IMU's SPI path has), so SWIL for
-this app currently means the host co-simulation in `examples/rocket_gps_ecos`.
+`baro_logger.hex` / `.bin` land next to the ELF.
+
+## Running it under Renode
+
+This app *does* run in emulation: `sim/renode/i2c_bridge` closes the gap
+between Renode's emulated I2C and the shared-memory bus the BMP390 device
+model answers on (the IMU's SPI path still has it). The chain is
+
+```
+baro_logger (emulated) -> Renode STM32F7_I2C -> HemerionI2cShmBridge (C#)
+    -> TCP -> i2c_shm_tcp_bridge -> sim/i2c_shm -> bmp390_shm_peripheral
+```
+
+`tests/swil/test_baro_logger.py` drives exactly that and asserts the
+`BARO up:` banner plus two compensated pressure readings against the ISA at
+the peripheral's truth altitude. The two host tools it needs are native
+binaries a cross build cannot produce, so they come from a native preset:
+
+```
+cmake --build --preset test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+```
+
+See `sim/renode/i2c_bridge/DESIGN.md` for the wire protocol and the
+platform-overlay details, and `tests/README.md` for running the harness.
+The host co-simulation in `examples/rocket_gps_ecos` remains the other way
+to exercise the same driver.

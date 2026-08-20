@@ -16,17 +16,13 @@ set_tests_properties(i2c_shm.link PROPERTIES LABELS "unit")
 
 # The full BMP390 SWIL chain minus only the FMI wrapper: the real on-target driver polling the simulated part across
 # this bus. The BMP390 sources are compiled in directly rather than linked from hemerion_sensors, so this test does not
-# order sim/ against modules/ -- it depends only on this directory's target and the sensors *sources*.
-set(_hemerion_sensors_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../modules/sensors")
-add_executable(
-  test_hemerion_i2c_shm_bmp390
-  test_i2c_shm_bmp390.cpp
-  "${_hemerion_sensors_dir}/src/baro/bmp390/bmp390_driver.cpp"
-  "${_hemerion_sensors_dir}/src/baro/bmp390/bmp390_compensation.cpp"
-  "${_hemerion_sensors_dir}/src/baro/bmp390/fmu/bmp390_i2c_slave.cpp")
-target_include_directories(test_hemerion_i2c_shm_bmp390 PRIVATE "${_hemerion_sensors_dir}/include")
+# order sim/ against modules/ -- it depends only on this directory's target and the sensors *sources*, shared with
+# tools/ as HEMERION_I2C_SHM_BMP390_SOURCES. The on-target driver is named here rather than there because this is the
+# only target that needs it.
+add_executable(test_hemerion_i2c_shm_bmp390 test_i2c_shm_bmp390.cpp ${HEMERION_I2C_SHM_BMP390_SOURCES}
+                                            "${HEMERION_I2C_SHM_SENSORS_DIR}/src/baro/bmp390/bmp390_driver.cpp")
+target_include_directories(test_hemerion_i2c_shm_bmp390 PRIVATE "${HEMERION_I2C_SHM_SENSORS_DIR}/include")
 target_link_libraries(test_hemerion_i2c_shm_bmp390 PRIVATE hemerion_i2c_shm)
-unset(_hemerion_sensors_dir)
 
 add_test(NAME i2c_shm.bmp390 COMMAND test_hemerion_i2c_shm_bmp390)
 set_tests_properties(i2c_shm.bmp390 PROPERTIES LABELS "unit")
