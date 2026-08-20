@@ -56,7 +56,12 @@ option(HEMERION_BUILD_DOCS "Build Doxygen/Sphinx documentation" OFF)
 # -- enable_testing() only takes effect in directories processed after it runs, so calling it down in the "cross-cutting
 # integration / SWIL tests" block (after modules/apps/sim are already added) left ctest unable to see any module-level
 # test.
-if(HEMERION_BUILD_TESTS)
+#
+# HEMERION_BUILD_FMU counts too, even though it turns HEMERION_BUILD_TESTS off: generateFMU() registers one
+# "fmu"-labelled archive-layout test per packaged FMU (cmake/fmu_archive_test.cmake), and without enable_testing() here
+# those would be recorded and never written out -- leaving the fmu-native test preset filtering on a label no test in
+# the tree carried, which is exactly the vacuous pass it used to be.
+if(HEMERION_BUILD_TESTS OR HEMERION_BUILD_FMU)
   enable_testing()
 endif()
 

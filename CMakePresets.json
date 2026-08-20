@@ -117,9 +117,10 @@
     {
       "name": "fmu-native",
       "configurePreset": "fmu-native",
+      "description": "Verifies every packaged .fmu archive's layout. The label is carried by the tests generateFMU() registers per archive, so 'no tests matched' means the FMU build stopped producing them -- hence noTestsAction error, not ignore: with ignore this preset passed while running nothing at all.",
       "filter": { "include": { "label": "fmu" } },
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "ignore", "stopOnFailure": false }
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
     },
     {
       "name": "test-swil",

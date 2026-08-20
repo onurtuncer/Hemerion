@@ -17,7 +17,9 @@
 # * VERSION_DEFS is cleared per FMI version -- upstream clears a misspelled VERSIONS_DEFS, so a model built for both
 #   fmi2 and fmi3 compiled the second one with both macros defined;
 # * static libraries are not "bundled" next to the model binary -- a static library is linked into that binary and has
-#   no runtime artifact, so copying it only buried a .a/.lib inside the packaged archive.
+#   no runtime artifact, so copying it only buried a .a/.lib inside the packaged archive;
+# * every packaged archive gets a ctest verifying its layout -- hemerion_add_fmu_archive_test(), one call below, with
+#   the check itself in cmake/fmu_archive_test.cmake so this file's delta from upstream stays a single line.
 #
 # Usage:
 #
@@ -40,6 +42,8 @@
 # staged layout under ${CMAKE_BINARY_DIR}/models/<fmiVersion>/<modelIdentifier>/ into <modelIdentifier>.fmu. All of it
 # runs as POST_BUILD steps, so a plain `cmake --build` leaves loadable archives behind.
 # ------------------------------------------------------------------------------
+
+include("${CMAKE_CURRENT_LIST_DIR}/fmu_archive_test.cmake")
 
 get_filename_component(_fmu4cpp_root "${CMAKE_CURRENT_LIST_DIR}/../vendor/fmu4cpp" ABSOLUTE)
 
@@ -147,6 +151,7 @@ function(generateFMU modelIdentifier)
       COMMAND descriptionGenerator "$<TARGET_FILE_NAME:${versionTarget}>")
 
     _package_fmu()
+    hemerion_add_fmu_archive_test(${versionTarget} ${fmiVersion} "${FMU_ARCHIVE}")
 
   endforeach()
 
