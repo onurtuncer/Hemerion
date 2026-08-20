@@ -115,20 +115,43 @@ def renode_tail(log_path: pathlib.Path, limit: int = 3000) -> str:
     return text[-limit:] if text else "(nothing but rcc chatter)"
 
 
-def cpu_state(machine, elf: pathlib.Path) -> str:
-    """Best-effort program counter, resolved to a function name, plus the
-    instruction count.
+def cpu_state(machine, elf: pathlib.Path, samples: int = 3, gap_s: float = 0.5) -> str:
+    """Where the CPU is, sampled more than once.
 
-    Distinguishes a CPU spinning in a fault handler from one still making
-    progress, and names where it is spinning -- resolved against the ELF this
-    test actually loaded, so a stale local build of the same app cannot
-    mislabel it. Renode's API surface varies by version, so this must never be
-    the reason a test errors.
+    A single program counter says nothing about whether the core is wedged or
+    merely busy. Three samples separated in time do: the same address every
+    time is a tight spin, different addresses inside one function is a loop
+    that is not escaping, and different functions means the CPU is still
+    getting work done and the fault is elsewhere. Each is resolved against the
+    ELF this test loaded, so a stale local build cannot mislabel it.
+
+    Renode's API surface varies by version -- PC comes back as a RegisterValue
+    rather than an int, for one -- so the whole thing is best-effort and must
+    never be the reason a test errors.
     """
     try:
         cpu = peripheral(machine, "sysbus.cpu").internal
-        program_counter = int(cpu.PC)
-        return f"PC={program_counter:#x} ({function_at(elf, program_counter)}) executed={cpu.ExecutedInstructions}"
+        seen = []
+        for index in range(samples):
+            if index:
+                time.sleep(gap_s)
+            raw = cpu.PC
+            seen.append(int(getattr(raw, "RawValue", raw)))
+
+        described = [function_at(elf, pc) for pc in seen]
+        # function_at() renders as "name +offset of size"; group on the name
+        # alone, or three offsets within one function read as three functions.
+        names = {text.split(" +")[0] for text in described}
+
+        lines = [f"executed={cpu.ExecutedInstructions}"]
+        lines += [f"  PC={pc:#x}  {text}" for pc, text in zip(seen, described)]
+        if len(set(seen)) == 1:
+            lines.append("  -> identical every sample: wedged at one instruction, not looping")
+        elif len(names) == 1:
+            lines.append("  -> moving inside one function: a loop it is not escaping")
+        else:
+            lines.append("  -> spread across functions: the CPU is still doing work")
+        return "\n".join(lines)
     except Exception as error:  # noqa: BLE001 -- diagnostics only
         return f"(unavailable: {error})"
 
