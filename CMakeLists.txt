@@ -33,6 +33,54 @@ project(
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ------------------------------------------------------------------------------
+# Stale-cache guard: a toolchain file that is named but never ran.
+#
+# CMAKE_TOOLCHAIN_FILE is honoured only on a build tree's *first* configure. Point a preset at a toolchain file it did
+# not previously name, re-run `cmake --preset` against a directory configured before that change, and CMake adopts none
+# of it -- while still writing CMAKE_TOOLCHAIN_FILE into the cache. The build tree then reads as correctly configured by
+# every obvious check (the cache names the right file) while compiling with none of that file's flags or definitions.
+# The only surface warning is one "Manually-specified variables were not used by the project" line in a wall of
+# configure output, and it is not an error.
+#
+# The discriminator is the file having actually run: every toolchain file under toolchains/ sets
+# HEMERION_TOOLCHAIN_APPLIED as a normal variable, which is present on a healthy configure *and on every reconfigure of
+# a healthy tree* (CMake re-reads an adopted toolchain file each time), and absent exactly when the cache was built
+# without it.
+#
+# Scoped to our own files: a foreign toolchain (vcpkg, a distribution's cross file, a user's own) will not set the
+# sentinel and must not be failed over it.
+# ------------------------------------------------------------------------------
+if(CMAKE_TOOLCHAIN_FILE AND NOT HEMERION_TOOLCHAIN_APPLIED)
+  file(REAL_PATH "${CMAKE_TOOLCHAIN_FILE}" _hemerion_named_toolchain)
+  file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/toolchains" _hemerion_toolchain_dir)
+  # Compared case-insensitively: on Windows the same path reaches us spelled both "D:/dev/..." and "D:/Dev/...".
+  string(TOLOWER "${_hemerion_named_toolchain}" _hemerion_named_toolchain)
+  string(TOLOWER "${_hemerion_toolchain_dir}/" _hemerion_toolchain_dir)
+  string(FIND "${_hemerion_named_toolchain}" "${_hemerion_toolchain_dir}" _hemerion_toolchain_is_ours)
+
+  if(_hemerion_toolchain_is_ours EQUAL 0)
+    get_filename_component(_hemerion_build_dir_name "${CMAKE_BINARY_DIR}" NAME)
+    message(
+      FATAL_ERROR
+        "${CMAKE_TOOLCHAIN_FILE} is named by this configure but was never applied: "
+        "${CMAKE_BINARY_DIR} was configured before that toolchain file was in play, and CMake honours "
+        "CMAKE_TOOLCHAIN_FILE only on a build tree's first configure. Everything it sets -- compiler, flags, "
+        "definitions -- is silently missing from this build tree.
+"
+        "Reconfigure from scratch:
+"
+        "    cmake --preset ${_hemerion_build_dir_name} --fresh
+"
+        "(or delete ${CMAKE_BINARY_DIR} and configure again). Preset names match their build directory name; if this "
+        "tree was not made by a preset, delete it and configure again however you did the first time.")
+  endif()
+
+  unset(_hemerion_named_toolchain)
+  unset(_hemerion_toolchain_dir)
+  unset(_hemerion_toolchain_is_ours)
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

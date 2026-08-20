@@ -27,7 +27,8 @@
       "name": "native-base",
       "hidden": true,
       "inherits": "base",
-      "description": "Native host build (Linux GCC/Clang or Windows MSVC). No toolchain file is forced here so the same preset name works on every CI runner — toolchains/x86_64-linux.cmake and toolchains/x86_64-windows-msvc.cmake remain available for callers who want their stricter flags applied explicitly.",
+      "toolchainFile": "${sourceDir}/toolchains/x86_64-native.cmake",
+      "description": "Native host build (Linux GCC/Clang or Windows MSVC). x86_64-native.cmake dispatches on the host to x86_64-linux.cmake or x86_64-windows-msvc.cmake, so one preset name still works on every CI runner — and, unlike before, those files actually apply: naming no toolchain file at all kept the presets portable by making both host files dead weight. Neither may set CMAKE_SYSTEM_NAME, which would flip CMAKE_CROSSCOMPILING even on a matching host and trip the root CMakeLists guards on FMU/SIM/EXAMPLES builds.",
       "cacheVariables": {
         "CMAKE_CXX_STANDARD": "23",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
