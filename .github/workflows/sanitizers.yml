@@ -23,13 +23,21 @@ jobs:
     - name: Install dependencies
       run: sudo apt update && sudo apt install -y g++-14
 
-    # cmake/sanitizers.cmake enables ASan + UBSan for the test-native preset
-    # on supported compilers — see cmake/README.md.
+    # -D, not just the preset: sanitizers are opt-in so that the plain build-and-test jobs stay fast and the
+    # coverage job does not measure an instrumented binary. Without this flag cmake/sanitizers.cmake returns
+    # immediately — which is the state this job shipped in for months, exporting ASAN_OPTIONS/UBSAN_OPTIONS that
+    # nothing read and reporting success with no sanitizer ever linked in.
     - name: Configure
-      run: cmake --preset=test-native
+      run: cmake --preset=test-native -DHEMERION_ENABLE_SANITIZERS=ON
       env:
         CC: gcc-14
         CXX: g++-14
+
+    # Proof the instrumentation is present, before spending a build on it. If the flag ever stops reaching the
+    # compiler, this fails here rather than the suite passing clean without a sanitizer.
+    - name: Verify the sanitizer flags reached the compiler
+      run: |
+        grep -q -- '-fsanitize=address,undefined' build/test-native/compile_commands.json           || { echo "::error::HEMERION_ENABLE_SANITIZERS=ON but no -fsanitize in compile_commands.json"; exit 1; }
 
     - name: Build
       run: cmake --build --preset=test-native

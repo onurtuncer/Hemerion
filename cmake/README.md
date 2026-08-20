@@ -20,7 +20,8 @@ Rows marked **planned** describe intended design that is **not in the tree**. No
 | `FindArmNoneEabiGcc.cmake` | present | Find-module — verifies `arm-none-eabi-gcc` and its version, ahead of `toolchains/arm-none-eabi.cmake` |
 | `Safety/FlightSafe.hpp` | present | `FLIGHT_SAFE` pragma-region markers referenced by the coding standard |
 | `hemerion_module.cmake` | **planned** | `hemerion_add_module()` helper — static lib + FMU + test targets from one call. Modules use plain CMake until it lands; `modules/sensors/CMakeLists.txt` carries the migration note |
-| `sanitizers.cmake` | **planned** | Would enable ASan/UBSan for `test-native`. **Not written** — so `.github/workflows/sanitizers.yml` currently runs `test-native` with no sanitizers at all, and the `test-native` preset description overstates what it does |
+| `sanitizers.cmake` | present | ASan + UBSan for native builds, opt-in via `-DHEMERION_ENABLE_SANITIZERS=ON`. GCC/Clang only; warns loudly rather than skipping quietly on a compiler it cannot instrument |
+| `coverage.cmake` | present | gcov instrumentation for native builds, opt-in via `-DHEMERION_ENABLE_COVERAGE=ON`. Refuses MSVC outright rather than producing an empty report |
 | `hemerion_hal/` | **planned** | HAL abstraction headers modules would include. No such directory exists; `bsp/README.md`'s HAL contract is design intent |
 | `version.cmake` | **planned** | Would inject `HEMERION_VERSION_*`. The root `CMakeLists.txt` reads the version straight out of `package.xml` instead, and there is no `VERSION` file |
 | `FreeRTOS.cmake`, `ETL.cmake`, `STM32CubeH7.cmake`, `STM32CubeF4.cmake`, `fmi4c.cmake`, `fmu4cpp.cmake`, `open_ecat.cmake` | **planned** | Per-dependency target wrappers. None exist: `vendor/CMakeLists.txt` defines every vendored target in one place, `fmi4c` arrives transitively through Ecos in `examples/`, and there is no `vendor/open_ecat` |

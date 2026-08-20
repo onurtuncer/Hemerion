@@ -100,6 +100,19 @@ option(HEMERION_BUILD_SIM "Build host-side simulation targets (sim/) -- never cr
 option(HEMERION_BUILD_EXAMPLES "Build host-side co-simulation examples (examples/) -- requires HEMERION_BUILD_FMU" OFF)
 option(HEMERION_BUILD_DOCS "Build Doxygen/Sphinx documentation" OFF)
 
+# ------------------------------------------------------------------------------
+# Native-build instrumentation. Both default OFF and are turned on by the workflow that wants them
+# (.github/workflows/sanitizers.yml, coverage.yml) rather than baked into test-native, so the ordinary build-and-test
+# jobs stay fast and the coverage run does not measure a sanitizer-instrumented binary.
+#
+# Included here, before any add_subdirectory(), because both work by add_compile_options()/add_link_options() at
+# directory scope -- which only reach directories processed after the call.
+# ------------------------------------------------------------------------------
+option(HEMERION_ENABLE_SANITIZERS "Build native targets with ASan + UBSan (GCC/Clang only)" OFF)
+option(HEMERION_ENABLE_COVERAGE "Build native targets with gcov coverage instrumentation (GCC/Clang only)" OFF)
+include(sanitizers)
+include(coverage)
+
 # Must run before any add_subdirectory() that calls add_test() (every module's test/CMakeLists.txt, plus tests/ below)
 # -- enable_testing() only takes effect in directories processed after it runs, so calling it down in the "cross-cutting
 # integration / SWIL tests" block (after modules/apps/sim are already added) left ctest unable to see any module-level

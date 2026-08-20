@@ -79,7 +79,7 @@
       "name": "test-native",
       "inherits": "native-base",
       "displayName": "Unit + integration tests (native)",
-      "description": "Native host build with module test binaries; cmake/sanitizers.cmake enables ASan/UBSan here on supported compilers",
+      "description": "Native host build with module test binaries. Sanitizers and coverage are opt-in, not automatic: pass -DHEMERION_ENABLE_SANITIZERS=ON (cmake/sanitizers.cmake) or -DHEMERION_ENABLE_COVERAGE=ON (cmake/coverage.cmake), which is what the sanitizers and coverage workflows do.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "HEMERION_BSP": "native_linux",

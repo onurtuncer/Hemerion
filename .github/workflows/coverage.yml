@@ -19,11 +19,21 @@ jobs:
     - name: Install dependencies
       run: sudo apt update && sudo apt install -y lcov gcovr g++-14
 
+    # The -D *is* the coverage flags. This step carried this title while passing none of them: nothing in the tree
+    # set --coverage, so gcovr below ran over a build tree with no .gcno or .gcda and produced an empty report that
+    # uploaded successfully. The codecov badge measured nothing.
     - name: Configure (native host + coverage flags)
-      run: cmake --preset=test-native
+      run: cmake --preset=test-native -DHEMERION_ENABLE_COVERAGE=ON
       env:
         CC: gcc-14
         CXX: g++-14
+
+    # Proof the instrumentation is present, before spending a build on it. If the flag ever stops reaching the
+    # compiler, this fails here rather than an empty report uploading clean.
+    - name: Verify the coverage flags reached the compiler
+      run: |
+        grep -q -- '--coverage' build/test-native/compile_commands.json \
+          || { echo "::error::HEMERION_ENABLE_COVERAGE=ON but no --coverage in compile_commands.json"; exit 1; }
 
     - name: Build
       run: cmake --build --preset=test-native
@@ -32,6 +42,9 @@ jobs:
       run: ctest --preset=test-native
       continue-on-error: true
 
+    # --fail-under-line 1 is an anti-vacuous guard, not a quality bar: an uninstrumented tree reports 0 %, so a
+    # future regression that stops coverage being collected fails this step instead of quietly uploading an empty
+    # report behind fail_ci_if_error: false.
     - name: Generate coverage report (Cobertura XML)
       run: |
         gcovr \
@@ -43,6 +56,7 @@ jobs:
           --exclude '.*CMakeFiles.*' \
           --gcov-executable gcov-14 \
           --gcov-ignore-errors=no_working_dir_found \
+          --fail-under-line 1 \
           --xml build/test-native/coverage.xml \
           --xml-pretty \
           build/test-native
