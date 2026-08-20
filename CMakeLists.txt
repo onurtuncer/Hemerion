@@ -168,10 +168,20 @@ endif()
 # ------------------------------------------------------------------------------
 # Host-side simulation targets -- Renode glue, FMI master, shm/UDP/SPI bridges.
 #
-# Added before modules/ because the IMU hardware-simulator FMU answers a shared-memory SPI bus (sim/spi_shm) instead of
-# emitting UDP like the other four sensor FMUs, so that target has to exist by the time modules/sensors is processed.
-# Nothing under sim/ depends on modules/, so the order is free. Building FMUs or examples implies the transports they
-# sit on, hence the widened condition.
+# Nothing under sim/ depends on modules/, so this can go first, and it does. The dependency runs the other way exactly
+# once: the IMU hardware-simulator FMU answers a shared-memory SPI bus (sim/spi_shm) instead of emitting UDP like the
+# other four sensor FMUs, which makes it the one module target that links a sim/ library.
+#
+# That ordering is a guard, not a requirement -- an earlier version of this comment claimed the target "has to exist by
+# the time modules/sensors is processed", which is not true of either CMake or this tree. target_link_libraries()
+# accepts a name that is not a target yet and resolves it at generate time, so the link itself is indifferent to the
+# order. What does read LINK_TARGETS at configure time is generateFMU()'s _bundle_link_libraries(), through if(TARGET)
+# and get_target_property(): a name it has not seen yet is silently skipped, not diagnosed. hemerion_spi_shm is STATIC
+# and that macro skips STATIC libraries regardless, so today the order changes nothing observable at all. It starts to
+# matter the day an FMU's sim/ dependency is SHARED -- bundled, its runtime lands next to the model binary in the
+# archive; skipped, the FMU packages cleanly and fails to load only once unzipped on a machine without that library.
+#
+# Building FMUs or examples implies the transports they sit on, hence the widened condition.
 # ------------------------------------------------------------------------------
 if((HEMERION_BUILD_SIM OR HEMERION_BUILD_FMU OR HEMERION_BUILD_EXAMPLES)
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sim/CMakeLists.txt")
