@@ -78,6 +78,11 @@ jobs:
       # cannot quietly reproduce that vacuous pass.
       - name: Run SWIL tests
         env:
-          HEMERION_SWIL_TOOLS_DIR: ${{ github.workspace }}/build/test-native/sim/i2c_shm/tools
           HEMERION_SWIL_STRICT: '1'
-        run: ctest --preset=test-swil -L swil --output-on-failure
+        run: |
+          # $(pwd), not ${{ github.workspace }}: in a container job that expression expands to the *host*
+          # path (/home/runner/work/...), while the step runs against the bind mount at /__w/... . The
+          # variable therefore pointed at nothing, and only host_tool()'s build/* glob fallback saved the
+          # run. Resolving it in the shell keeps the override honest.
+          export HEMERION_SWIL_TOOLS_DIR="$(pwd)/build/test-native/sim/i2c_shm/tools"
+          ctest --preset=test-swil -L swil --output-on-failure

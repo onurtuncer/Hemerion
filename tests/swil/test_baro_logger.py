@@ -164,6 +164,18 @@ def wait_until_serving(port: int, helpers, timeout_s: float = 40.0) -> None:
     raise AssertionError(f"i2c_shm_tcp_bridge never listened on 127.0.0.1:{port} within {timeout_s:.0f} s")
 
 
+def try_monitor(monitor, command: str) -> None:
+    """Run a monitor command for diagnostics only, swallowing failures.
+
+    A Renode build that spells one of these differently must not turn a
+    diagnosable test failure into an unrelated harness error.
+    """
+    try:
+        monitor.execute(command)
+    except Exception:  # noqa: BLE001 -- diagnostics must never be the cause of a failure
+        pass
+
+
 def wait_for(tester, pattern: str, treat_as_regex: bool = False):
     """Pin the str overload of TerminalTester.WaitFor -- see test_led_blink.py."""
     return tester.WaitFor(pattern, None, treat_as_regex, False, False, False)
@@ -228,6 +240,16 @@ def test_baro_logger_reads_the_simulated_part(renode_machine):
         monitor.execute(f"include @{CS_PATH.as_posix()}")
         monitor.execute(f"machine LoadPlatformDescription @{repl_overlay.as_posix()}")
 
+        # Capture both sides of the emulation before it starts. Without these a
+        # failure downstream of the harness -- which is where the interesting
+        # ones live, since the C# bridge logs its connect and NACK warnings to
+        # the Renode log and the firmware narrates itself over usart3 -- reports
+        # only that a pattern never appeared, with nothing to say why.
+        renode_log = work_dir / "renode.log"
+        uart_log = work_dir / "usart3.log"
+        try_monitor(monitor, f"logFile @{renode_log.as_posix()}")
+        try_monitor(monitor, f"sysbus.usart3 CreateFileBackend @{uart_log.as_posix()}")
+
         renode_machine.load_elf(str(elf))
         tester = TerminalTester(peripheral(renode_machine, "sysbus.usart3"), timeout=30.0)
         Emulation().StartAll()
@@ -240,7 +262,18 @@ def test_baro_logger_reads_the_simulated_part(renode_machine):
                 # firmware itself genuinely the thing that failed.
                 for helper in helpers:
                     check_alive(helper)
-                raise AssertionError(f"firmware never printed {pattern!r} (both helpers still running)")
+                raise AssertionError(
+                    "\n".join(
+                        [
+                            f"firmware never printed {pattern!r}, and both helpers were still running --",
+                            "so this is the emulated side of the chain, not the harness.",
+                            f"--- usart3 ---\n{tail(uart_log)}",
+                            f"--- renode ---\n{tail(renode_log)}",
+                            f"--- {part[1]} ---\n{tail(part[2])}",
+                            f"--- {bridge[1]} ---\n{tail(bridge[2])}",
+                        ]
+                    )
+                )
             return match
 
         expect("BARO up: BMP390 identified")
