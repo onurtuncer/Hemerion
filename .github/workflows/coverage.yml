@@ -64,6 +64,24 @@ jobs:
           --xml-pretty \
           build/test-native
 
+    # The upload needs a token and has never had one: no CODECOV_TOKEN secret is configured, so the
+    # expression below expands to an empty string and Codecov answers "Token required because branch
+    # is protected". Behind the old fail_ci_if_error: false that was invisible -- the badge has never
+    # been fed, on top of the report having been empty. Checked here so the cause is named in one line
+    # rather than found in the upload CLI's debug output.
+    #
+    # Deliberately after the gcovr step, so the coverage summary is printed either way.
+    - name: Check the Codecov token is configured
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      run: |
+        if [ -z "$CODECOV_TOKEN" ]; then
+          echo "::error::CODECOV_TOKEN is not set in this repository's secrets, so the upload below will be"
+          echo "::error::rejected and the README's codecov badge will stay stale. Add it from codecov.io"
+          echo "::error::(Settings -> Secrets and variables -> Actions), or drop the upload step and the badge."
+          exit 1
+        fi
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v7
       with:
