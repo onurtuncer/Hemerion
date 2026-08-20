@@ -46,22 +46,12 @@
       }
     },
     {
-      "name": "cross-stm32f446",
-      "inherits": "cross-base",
-      "displayName": "Cross — STM32F446 custom (ECS gateway)",
-      "description": "Firmware cross-compiled for the custom STM32F446 ECS gateway BSP. Build only — see tests/README.md CI matrix.",
-      "cacheVariables": {
-        "HEMERION_BSP": "stm32f446_custom"
-      }
-    },
-    {
       "name": "fmu-native",
       "inherits": "native-base",
       "displayName": "FMU (native)",
       "description": "Builds every module as an x86 FMI 2.0 and FMI 3.0 co-simulation FMU for Aetherion co-simulation",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "HEMERION_BSP": "native_linux",
         "HEMERION_BUILD_FMU": "ON",
         "HEMERION_BUILD_TESTS": "OFF"
       }
@@ -82,7 +72,6 @@
       "description": "Native host build with module test binaries. Sanitizers and coverage are opt-in, not automatic: pass -DHEMERION_ENABLE_SANITIZERS=ON (cmake/sanitizers.cmake) or -DHEMERION_ENABLE_COVERAGE=ON (cmake/coverage.cmake), which is what the sanitizers and coverage workflows do.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "HEMERION_BSP": "native_linux",
         "HEMERION_BUILD_FMU": "OFF",
         "HEMERION_BUILD_TESTS": "ON",
         "HEMERION_BUILD_SIM": "ON"
@@ -101,7 +90,6 @@
 
   "buildPresets": [
     { "name": "renode-h743", "configurePreset": "renode-h743" },
-    { "name": "cross-stm32f446", "configurePreset": "cross-stm32f446" },
     { "name": "fmu-native", "configurePreset": "fmu-native" },
     { "name": "examples-native", "configurePreset": "examples-native" },
     { "name": "test-native", "configurePreset": "test-native" },

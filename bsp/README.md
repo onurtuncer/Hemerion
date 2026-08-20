@@ -2,7 +2,7 @@
 
 Board support packages. One subdirectory per physical or virtual target. A BSP owns everything that is target-specific: linker script, startup code, clock configuration, pin mapping, and `FreeRTOSConfig.h`.
 
-> **Status: one BSP exists — `stm32h743_nucleo/`.** Every other row below is planned. This matters beyond documentation: the root `CMakeLists.txt` *silently skips* a `HEMERION_BSP` naming a directory that is not there, so `cross-stm32f446` and the three native presets configure and build green against a BSP that does not exist. `cross-stm32f446` produces module static libraries and **zero executables**.
+> **Status: one BSP exists — `stm32h743_nucleo/`.** Every other row below is planned. The root `CMakeLists.txt` now hard-errors when `HEMERION_BSP` names a directory that is not there, listing what is available — it used to skip it silently, which is how the `cross-stm32f446` preset came to build green for a board with no `bsp/` directory, producing module static libraries and zero executables. That preset and its CI job have since been retired; they return when the BSP is written.
 
 The intended contract is that module source never reaches into a BSP subdirectory — it includes only the HAL abstraction headers in `cmake/hemerion_hal/`, which is itself planned (see `cmake/README.md`).
 
@@ -13,8 +13,8 @@ The intended contract is that module source never reaches into a BSP subdirector
 | BSP | Status | Target | Notes |
 |---|---|---|---|
 | `stm32h743_nucleo/` | **present** | STM32H743ZI Nucleo-144 | Primary HWIL and Renode SWIL target; the only BSP in the tree |
-| `stm32f446_custom/` | **planned** | Custom ECS gateway board | Named by the `cross-stm32f446` preset and built in CI, but the directory does not exist — that job compiles modules only |
-| `native_linux/` | **planned** | x86_64 Linux (PREEMPT_RT) | Named by `test-native`/`fmu-native`/`examples-native`; the directory does not exist. Those presets work because nothing native needs a BSP yet |
+| `stm32f446_custom/` | **planned** | Custom ECS gateway board | Nothing references it: the `cross-stm32f446` preset and CI job were retired rather than left building a board that does not exist. Re-add both alongside the directory |
+| `native_linux/` | **planned** | x86_64 Linux (PREEMPT_RT) | The native presets no longer claim it — they leave `HEMERION_BSP` empty, which is valid and means "no board". Nothing host-side needs a BSP yet |
 | `zynq_core0/` | **planned** | Zynq-7020 PS Core 0 | Linux (PetaLinux), OpenAMP `remoteproc` master, ETH bridge to Aetherion. See [AMP targets](#amp-targets-planned) below. |
 | `zynq_core1/` | **planned** | Zynq-7020 PS Core 1 | FreeRTOS, bare-metal — runs the same Hemerion tasks as `stm32h743_nucleo` over RPMsg. |
 | `template/` | **planned** | Scaffold for new boards | Does not exist; copy `stm32h743_nucleo/` instead |

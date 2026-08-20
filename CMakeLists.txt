@@ -128,6 +128,38 @@ endif()
 
 set(HEMERION_BSP "" CACHE STRING "Active board support package directory under bsp/ (empty = none selected)")
 
+# ------------------------------------------------------------------------------
+# A named BSP must exist. Every use of HEMERION_BSP below is guarded with EXISTS, which means a preset naming a board
+# that is not in the tree configured and built perfectly happily -- the BSP was skipped, no target was defined, and
+# every app, each of which guards on its BSP target, skipped itself in turn. cross-stm32f446 has been doing exactly that
+# in CI: green, and producing five module static libraries and zero executables for a board with no bsp/ directory. A
+# typo in the value did the same thing, silently.
+#
+# An empty HEMERION_BSP is still fine and means "no board" -- that is what the native presets use.
+# ------------------------------------------------------------------------------
+if(HEMERION_BSP AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/CMakeLists.txt")
+  file(GLOB _hemerion_bsp_candidates RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/bsp" "${CMAKE_CURRENT_SOURCE_DIR}/bsp/*")
+  set(_hemerion_bsp_available "")
+  foreach(_hemerion_bsp_candidate IN LISTS _hemerion_bsp_candidates)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${_hemerion_bsp_candidate}/CMakeLists.txt")
+      list(APPEND _hemerion_bsp_available "${_hemerion_bsp_candidate}")
+    endif()
+  endforeach()
+  message(
+    FATAL_ERROR
+      "HEMERION_BSP is set to '${HEMERION_BSP}', but bsp/${HEMERION_BSP}/CMakeLists.txt does not exist. "
+      "Nothing board-specific would be built and every app would silently skip itself.
+"
+      "Available: ${_hemerion_bsp_available}
+"
+      "Leave HEMERION_BSP empty for a host build that needs no board. If you did not ask for this value, it is "
+      "cached from an earlier configure of ${CMAKE_BINARY_DIR} -- reconfigure with --fresh, or pass "
+      "-DHEMERION_BSP= to clear it.")
+endif()
+unset(_hemerion_bsp_candidates)
+unset(_hemerion_bsp_candidate)
+unset(_hemerion_bsp_available)
+
 if(HEMERION_BUILD_FMU AND CMAKE_CROSSCOMPILING)
   message(FATAL_ERROR "HEMERION_BUILD_FMU requires a native toolchain, not a cross-compiling one")
 endif()

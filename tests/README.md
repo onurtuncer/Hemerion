@@ -236,7 +236,6 @@ BMP390 FMUs under Ecos.
 | `fmu-native` | Ubuntu 24.04 | Every push |
 | `renode-h743` (build only) | Ubuntu 24.04 | Every push |
 | `test-swil` | Ubuntu 24.04 + Renode container | Every PR, and pushes to `main` (`swil.baro_logger` informational — see below) |
-| `cross-stm32f446` (build only) | Ubuntu 24.04 | Every push — but `bsp/stm32f446_custom` does not exist, so this job builds module static libraries and **no firmware**. See `bsp/README.md` |
 
 SWIL used to run only *after* a PR merged, so a broken loop was discovered on
 `main` rather than on the PR that broke it — four consecutive runs failed at
