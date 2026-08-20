@@ -49,13 +49,16 @@ jobs:
       run: |
         gcovr \
           --root . \
-          --exclude 'tests/.*' \
-          --exclude 'vendor/.*' \
-          --exclude 'cmake/.*' \
+          --exclude '.*/tests/.*' \
+          --exclude '.*/test/.*' \
+          --exclude '.*/examples/.*' \
+          --exclude '.*/vendor/.*' \
+          --exclude '.*/cmake/.*' \
           --exclude '.*/_deps/.*' \
           --exclude '.*CMakeFiles.*' \
           --gcov-executable gcov-14 \
           --gcov-ignore-errors=no_working_dir_found \
+          --print-summary \
           --fail-under-line 1 \
           --xml build/test-native/coverage.xml \
           --xml-pretty \
@@ -67,5 +70,7 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: onurtuncer/Hemerion
         files: build/test-native/coverage.xml
-        fail_ci_if_error: false
+        # true, not false: a failed upload leaves the README badge showing a stale number while the job
+        # reports success -- the same quiet-failure shape this file already had once.
+        fail_ci_if_error: true
         verbose: true
