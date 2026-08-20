@@ -6,12 +6,15 @@ Cross-cutting integration and SWIL tests. Unit tests that test a single module i
 
 ## Test categories
 
-| Directory | What it tests | Requires |
-|---|---|---|
-| `unit/` | Individual module interfaces, no RTOS | Native host only |
-| `integration/` | Multi-module message flows, queue wiring | Native host only |
-| `swil/` | Full firmware running in Renode, observable via pyrenode3 | Renode + pyrenode3 |
-| `fmu/` | FMU packaging, FMI variable naming, step correctness | `fmu-native` build |
+`tests/CMakeLists.txt` adds each of these only `if(EXISTS ...)`, so a category that was never written is skipped in
+silence. Only `swil/` is written:
+
+| Directory | Status | What it tests | Requires |
+|---|---|---|---|
+| `swil/` | **present** | Full firmware running in Renode, observable via pyrenode3 | Renode + pyrenode3 |
+| `unit/` | **planned** | Cross-module interfaces with no RTOS. Per-module unit tests live in each module's own `test/` and do exist | Native host only |
+| `integration/` | **planned** | Multi-module message flows, queue wiring | Native host only |
+| `fmu/` | **planned** | FMI variable naming and step correctness. Packaging *is* covered — `generateFMU()` registers an `fmu`-labelled archive-layout test per FMU, which is what `ctest --preset fmu-native` runs | `fmu-native` build |
 
 ---
 
@@ -206,13 +209,22 @@ so the test also supervises two host processes. Points worth knowing:
 
 ---
 
-## FMU tests (`fmu/`)
+## FMU tests
 
-Verify that each module FMU:
+**What runs today** is packaging verification, registered automatically by `generateFMU()` — one `fmu`-labelled ctest
+per model per FMI version (`cmake/fmu_archive_test.cmake`, `cmake/verify_fmu_archive.cmake`). Each unzips the archive
+and checks `modelDescription.xml` is at its root, `binaries/` beside it holds the library, and the `modelIdentifier`
+inside the description matches. `ctest --preset fmu-native` runs exactly these, with `noTestsAction` set to `error` so
+the preset cannot pass by matching nothing — which is what it did before those tests existed.
+
+**Planned, in a `tests/fmu/` that does not exist yet** — everything requiring an FMI *importer*:
 - Loads without error via fmi4c
-- Exposes the expected variable names and causalities from `model_description.xml`
+- Exposes the expected variable names and causalities
 - Produces numerically correct output for a known input sequence
-- Handles `fmi2Reset` and re-instantiation without memory leaks (checked with ASan on Linux)
+- Handles `fmi2Reset` and re-instantiation without memory leaks
+
+Numerical behaviour is meanwhile exercised end-to-end by `examples/rocket_gps_ecos`, which flies the GPS, IMU and
+BMP390 FMUs under Ecos.
 
 ---
 
@@ -224,7 +236,7 @@ Verify that each module FMU:
 | `fmu-native` | Ubuntu 24.04 | Every push |
 | `renode-h743` (build only) | Ubuntu 24.04 | Every push |
 | `test-swil` | Ubuntu 24.04 + Renode container | Every PR, and pushes to `main` (`swil.baro_logger` informational — see below) |
-| `cross-stm32f446` (build only) | Ubuntu 24.04 | Every push |
+| `cross-stm32f446` (build only) | Ubuntu 24.04 | Every push — but `bsp/stm32f446_custom` does not exist, so this job builds module static libraries and **no firmware**. See `bsp/README.md` |
 
 SWIL used to run only *after* a PR merged, so a broken loop was discovered on
 `main` rather than on the PR that broke it — four consecutive runs failed at

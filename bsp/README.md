@@ -1,23 +1,30 @@
 # bsp/
 
-Board support packages. One subdirectory per physical or virtual target. A BSP owns everything that is target-specific: linker script, startup code, clock configuration, pin mapping, and `FreeRTOSConfig.h`. Module source never reaches into a BSP subdirectory — it includes only the HAL abstraction headers in `cmake/hemerion_hal/`.
+Board support packages. One subdirectory per physical or virtual target. A BSP owns everything that is target-specific: linker script, startup code, clock configuration, pin mapping, and `FreeRTOSConfig.h`.
+
+> **Status: one BSP exists — `stm32h743_nucleo/`.** Every other row below is planned. This matters beyond documentation: the root `CMakeLists.txt` *silently skips* a `HEMERION_BSP` naming a directory that is not there, so `cross-stm32f446` and the three native presets configure and build green against a BSP that does not exist. `cross-stm32f446` produces module static libraries and **zero executables**.
+
+The intended contract is that module source never reaches into a BSP subdirectory — it includes only the HAL abstraction headers in `cmake/hemerion_hal/`, which is itself planned (see `cmake/README.md`).
 
 ---
 
 ## Available BSPs
 
-| BSP | Target | Notes |
-|---|---|---|
-| `stm32h743_nucleo/` | STM32H743ZI Nucleo-144 | Primary HWIL and Renode SWIL target |
-| `stm32f446_custom/` | Custom ECS gateway board | CAN + EtherCAT slave, TwinCAT 3 interface |
-| `native_linux/` | x86_64 Linux (PREEMPT_RT) | POSIX shims over FreeRTOS API for desktop testing |
-| `zynq_core0/` *(planned)* | Zynq-7020 PS Core 0 | Linux (PetaLinux), OpenAMP `remoteproc` master, ETH bridge to Aetherion. See [AMP targets](#amp-targets-planned) below. |
-| `zynq_core1/` *(planned)* | Zynq-7020 PS Core 1 | FreeRTOS, bare-metal — runs the same Hemerion tasks as `stm32h743_nucleo` over RPMsg. |
-| `template/` | Scaffold for new boards | Copy this to add a new target |
+| BSP | Status | Target | Notes |
+|---|---|---|---|
+| `stm32h743_nucleo/` | **present** | STM32H743ZI Nucleo-144 | Primary HWIL and Renode SWIL target; the only BSP in the tree |
+| `stm32f446_custom/` | **planned** | Custom ECS gateway board | Named by the `cross-stm32f446` preset and built in CI, but the directory does not exist — that job compiles modules only |
+| `native_linux/` | **planned** | x86_64 Linux (PREEMPT_RT) | Named by `test-native`/`fmu-native`/`examples-native`; the directory does not exist. Those presets work because nothing native needs a BSP yet |
+| `zynq_core0/` | **planned** | Zynq-7020 PS Core 0 | Linux (PetaLinux), OpenAMP `remoteproc` master, ETH bridge to Aetherion. See [AMP targets](#amp-targets-planned) below. |
+| `zynq_core1/` | **planned** | Zynq-7020 PS Core 1 | FreeRTOS, bare-metal — runs the same Hemerion tasks as `stm32h743_nucleo` over RPMsg. |
+| `template/` | **planned** | Scaffold for new boards | Does not exist; copy `stm32h743_nucleo/` instead |
 
 ---
 
 ## BSP internal layout
+
+The convention `stm32h743_nucleo/` follows and new BSPs should follow. The `include/hemerion/hal/` tier is the planned
+HAL contract, not what the one existing BSP exposes today.
 
 ```
 bsp/<name>/
@@ -39,9 +46,13 @@ The BSP CMake target is an `INTERFACE` library. It contributes include paths, co
 
 ---
 
-## HAL abstraction contract
+## HAL abstraction contract — planned
 
-Every BSP must implement the headers declared in `cmake/hemerion_hal/`. These are thin, `extern "C"` interfaces:
+> **`cmake/hemerion_hal/` does not exist.** No BSP implements this contract yet, and no module includes it. This is
+> the interface the drivers are meant to converge on; today `modules/sensors`' BMP390 driver takes a bus type from
+> `bsp/stm32h743_nucleo/` directly.
+
+Every BSP is intended to implement the headers declared in `cmake/hemerion_hal/`. These are thin, `extern "C"` interfaces:
 
 ```c
 // hemerion/hal/gpio.h
@@ -56,7 +67,7 @@ If a peripheral is not available on a given target (e.g. `native_linux/` has no 
 
 ## Adding a new board
 
-1. Copy `bsp/template/` to `bsp/<your_board>/`.
+1. Copy `bsp/stm32h743_nucleo/` to `bsp/<your_board>/` (`bsp/template/` is planned and not in the tree).
 2. Fill in the linker script, startup file, and clock configuration.
 3. Implement every header in `include/hemerion/hal/`.
 4. Add a new preset in `CMakePresets.json`:

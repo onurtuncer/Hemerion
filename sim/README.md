@@ -13,7 +13,7 @@ FMUs and the Aetherion plant FMU.
 | Directory | Responsibility |
 |---|---|
 | `renode/` | Renode board definitions (`.repl`) and emulation scripts (`.resc`) for STM32H7/STM32F4 SWIL targets |
-| `fmi/` | FMI 2.0 co-simulation master: steps module FMUs and the Aetherion plant FMU in lockstep |
+| `fmi/` | **planned.** FMI 2.0 co-simulation master. The directory holds a `package.xml` and nothing else — no `master.cpp`, no `plant/`, no `CMakeLists.txt`. The working end-to-end co-simulation today is `examples/rocket_gps_ecos`, which uses Ecos as the master instead |
 | `i2c_shm/` | Simulated I2C bus in shared memory, plus the host tools that bridge it to an emulated controller (see `renode/i2c_bridge/DESIGN.md`) |
 | `shm_bridge/` | Shared-memory transport between the FMI master and a locally running Aetherion process |
 | `spi_shm/` | Simulated SPI bus in shared memory: sensor FMUs answer chip-select-framed transfers from host or emulated firmware |
@@ -21,9 +21,14 @@ FMUs and the Aetherion plant FMU.
 
 ---
 
-## `fmi/` — co-simulation master
+## `fmi/` — co-simulation master (planned, not implemented)
 
-`fmi/` orchestrates every FMU in a simulation run: the module FMUs built by
+> **Nothing in this section exists.** `sim/fmi/` contains a single `package.xml`. There is no master executable, no
+> `PlantModel`, and no `fmu_topology.yaml` reader; `sim/CMakeLists.txt` adds the directory only if it ever grows a
+> `CMakeLists.txt`. For a co-simulation that actually runs today, see `examples/rocket_gps_ecos`, which drives the
+> GPS, IMU and BMP390 FMUs from Ecos. The design below is retained as the intent for a Hemerion-owned master.
+
+`fmi/` is intended to orchestrate every FMU in a simulation run: the module FMUs built by
 `fmu-native` (`sensors.fmu`, `gnc.fmu`, `actuators.fmu`, ...) and the
 **plant FMU**, which is Aetherion's compiled flight-dynamics model rather
 than anything Hemerion builds itself.
@@ -39,7 +44,7 @@ sim/fmi/
     └── src/PlantModel.cpp  # Imports Aetherion's .fmu via fmu4cpp, exposes step()/outputs()
 ```
 
-### `fmi/plant/` — Aetherion plant FMU consumer
+### `fmi/plant/` — Aetherion plant FMU consumer (planned)
 
 Where every other FMU in the system is something Hemerion **exports** (a
 module wrapped for FMI), the plant FMU is something Hemerion **imports**:
@@ -201,11 +206,15 @@ shared region.
 
 ## Dependencies
 
-- **`fmu4cpp`** — vendored under `vendor/fmu4cpp`; wrapped by
-  `cmake/fmu4cpp.cmake`. Used to import the Aetherion plant FMU, and to
-  host module FMUs in-process for stepping by the master.
+- **`fmu4cpp`** — vendored under `vendor/fmu4cpp` as a directory copy of
+  upstream's `export/` subtree (not a submodule). Its targets are defined
+  directly in `vendor/CMakeLists.txt`; there is no `cmake/fmu4cpp.cmake`
+  wrapper. Hemerion uses it to *export* module FMUs via `generateFMU()`.
+  Importing an FMU is fmi4c's job, which arrives transitively through Ecos
+  in `examples/` — Hemerion does not vendor it.
 - **`Aetherion::Aetherion`** — located via `find_package(Aetherion)` /
-  `cmake/FindAetherion.cmake`; supplies the plant FMU itself.
+  `cmake/FindAetherion.cmake`; would supply the plant FMU. Nothing in the
+  tree calls it yet.
 - **`pyrenode3` / Renode** — used only by `renode/`.
 
 ---
@@ -214,6 +223,6 @@ shared region.
 
 | Preset | What runs |
 |---|---|
-| `fmu-native` | Builds module FMUs + `fmi/` master + `fmi/plant/` importer. Does **not** build `i2c_shm/tools/` — nothing in an FMU build consumes those host binaries |
-| `test-native` | Runs `tests/fmu/` and `tests/integration/` against the master, with the plant FMU in the loop. Also the preset that builds `i2c_shm/tools/`, since it sets `HEMERION_BUILD_SIM` |
+| `fmu-native` | Builds the module FMUs and the shm/SPI/I2C/UDP transports they sit on, and runs the `fmu`-labelled archive-layout tests `generateFMU()` registers. The `fmi/` master is planned and builds nothing. Does **not** build `i2c_shm/tools/` — nothing in an FMU build consumes those host binaries |
+| `test-native` | Builds and runs every `sim/` unit test (`shm_bridge`, `spi_shm`, `i2c_shm`, `udp_bridge`), and builds `i2c_shm/tools/`, since it sets `HEMERION_BUILD_SIM`. `tests/fmu/` and `tests/integration/` do not exist |
 | `test-swil` | Uses `renode/` only; `fmi/` is not involved. Being a cross build it cannot add `sim/` at all, so the SWIL BMP390 test needs a companion `test-native` build for its host tools |

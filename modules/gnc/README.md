@@ -1,5 +1,10 @@
 # modules/gnc/
 
+> **Status: not implemented.** This directory contains this README and a `package.xml` — no `include/`, no `src/`,
+> no `test/`, no `CMakeLists.txt`, and no `tools/gen_ekf_jacobians.cpp`. The root `CMakeLists.txt` skips a module
+> with no `CMakeLists.txt` silently, so there is no `hemerion_gnc` target in any preset. Everything below is design
+> intent.
+
 **Status:** Concept only. `package.xml` exists (declares the
 `hemerion_gnc` static-lib/FMU/test artifact triple per `modules/README.md`'s
 convention); no `include/`, `src/`, or `test/` exist yet.

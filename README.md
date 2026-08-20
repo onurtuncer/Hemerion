@@ -7,6 +7,7 @@
 [![Clang-Format](https://github.com/onurtuncer/Hemerion/actions/workflows/clang_format.yml/badge.svg)](https://github.com/onurtuncer/Hemerion/actions/workflows/clang_format.yml)
 [![CMake-Format](https://github.com/onurtuncer/Hemerion/actions/workflows/cmake_format.yml/badge.svg)](https://github.com/onurtuncer/Hemerion/actions/workflows/cmake_format.yml)
 [![CMake-Lint](https://github.com/onurtuncer/Hemerion/actions/workflows/cmake_lint.yml/badge.svg)](https://github.com/onurtuncer/Hemerion/actions/workflows/cmake_lint.yml)
+[![Metrix++](https://img.shields.io/badge/metrix%2B%2B-complexity%20report-blue)](https://onurtuncer.github.io/Hemerion/generated/metrixpp_report.html)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://onurtuncer.github.io/Hemerion/)
 
 <p align="center">
@@ -65,19 +66,17 @@ hemerion/
 │   └── datalogger/
 │
 ├── bsp/                    # Board support packages (one per target)
-│   ├── stm32h743_nucleo/
-│   └── template/
+│   └── stm32h743_nucleo/   # the only BSP that exists; see bsp/README.md for planned ones
 │
 ├── sim/                    # Host-side simulation targets (never cross-compiled)
 │   ├── renode/
-│   ├── fmi/
-│   │   ├── master.cpp      # FMI 2.0 co-simulation master
-│   │   └── plant/          # Imports Aetherion's plant FMU via fmu4cpp
+│   ├── fmi/                # FMI 2.0 co-simulation master -- PLANNED, package.xml only
 │   ├── shm_bridge/
-│   ├── spi_shm/           # Simulated SPI bus in shared memory; sensor FMUs answer it
+│   ├── spi_shm/            # Simulated SPI bus in shared memory; sensor FMUs answer it
+│   ├── i2c_shm/            # Simulated I2C bus + the host tools bridging it to Renode
 │   └── udp_bridge/
 │
-├── vendor/                 # Third-party deps, submodules where upstream allows (FreeRTOS, ETL, fmi4c, fmu4cpp, ...)
+├── vendor/                 # Third-party deps, submodules where upstream allows (FreeRTOS, ETL, CMSIS, STM32 HAL; fmu4cpp is a copy)
 │
 ├── apps/                   # Top-level firmware executables (link modules + bsp)
 ├── tests/                  # Cross-cutting integration and SWIL tests
@@ -110,25 +109,38 @@ HEMERION is structured around three tiers:
 
 ### Design principles
 
-**One module, three build targets.** Every module in `modules/` builds as a
-cross-compiled static library, as an x86 FMU shared library, and as a native
-test binary. No `#ifdef TARGET` in module source — target differences are
+**One module, three build targets.** Every module in `modules/` is meant to
+build as a cross-compiled static library, as an x86 FMU shared library, and as
+a native test binary. *(Reached for `sensors/`; `actuators/`, `gnc/` and
+`datalogger/` are still empty directories — see `modules/README.md` for
+per-module status.)* No `#ifdef TARGET` in module source — target differences are
 injected by the BSP and the CMake toolchain file.
 
 **BSPs own all hardware details.** A module never includes a path like
-`stm32h743xx.h` directly. It includes the BSP abstraction header
-(`hemerion/hal/gpio.h`) which the active BSP implements. Swapping a board
-means switching the preset, not editing module code.
+`stm32h743xx.h` directly; it goes through the BSP, so swapping a board means
+switching the preset, not editing module code. *(The intended form of this is
+a set of HAL abstraction headers — `hemerion/hal/gpio.h` and friends — which
+**do not exist yet**; drivers currently take a bus type from the active BSP
+directly. See `cmake/README.md` and `bsp/README.md`.)*
 
-**`vendor/` is submodules only.** No vendored source is copied into the
-tree. Every dependency exposes a proper CMake target (`FreeRTOS::Kernel`,
-`ETL::etl`, `fmi4c::fmi4c`). This keeps the cross/native compiler split
-clean — the target carries the right include paths and compile flags for
-whichever toolchain is active.
+**`vendor/` is submodules wherever upstream's layout allows.** Every
+dependency exposes a proper CMake target (`FreeRTOS::Kernel`, `ETL::etl`,
+`CMSIS::Core`, …), defined in one place — `vendor/CMakeLists.txt` — rather
+than through per-dependency wrapper modules. This keeps the cross/native
+compiler split clean: the target carries the right include paths and compile
+flags for whichever toolchain is active.
 
-**`sim/` is host-only.** Nothing under `sim/` is ever cross-compiled. Renode
-board definitions, the FMI master, and the shared-memory bridge to Aetherion
-live here and link against the native build of module FMUs.
+The one exception is **fmu4cpp**, vendored as a directory copy of upstream's
+`export/` subtree because that subtree is not separately packaged; it is
+noted as such below. `fmi4c` is *not* vendored at all — it arrives
+transitively through Ecos in `examples/`.
+
+**`sim/` is host-only.** Nothing under `sim/` is ever cross-compiled — the
+root `CMakeLists.txt` hard-errors if you try. Renode board definitions, the
+simulated I2C/SPI buses, and the shared-memory and UDP bridges to Aetherion
+live here and link against the native build of module FMUs. *(The
+Hemerion-owned FMI master, `sim/fmi/`, is still planned — the co-simulation
+that runs today is `examples/rocket_gps_ecos`, driven by Ecos.)*
 
 ### Planned: optional FPGA / AMP tier
 
@@ -199,7 +211,7 @@ The framework includes a structured verification strategy:
 - **CMSIS-Core, CMSIS-Device (H7/F4), STM32H7xx/STM32F4xx HAL drivers** — vendored via git submodules; see `vendor/CMakeLists.txt` for the `CMSIS::Core`, `CMSIS::STM32H7`, `STM32H7xx::HAL`, `CMSIS::STM32F4`, `STM32F4xx::HAL` targets
 - **Embedded Template Library (ETL)** — vendored via git submodule; STL alternative for bare-metal C++
 - **fmu4cpp** — FMI 2.0/3.0 co-simulation *export*; every module FMU is built on it via `generateFMU()` (`cmake/generate_fmu.cmake`). Vendored as a directory copy of upstream's `export/` subtree, not a submodule — see `vendor/CMakeLists.txt`
-- **fmi4c** — FMI *import*; how an FMI master (Ecos, `sim/fmi/`) loads a packaged `.fmu`
+- **fmi4c** — FMI *import*; how an FMI master loads a packaged `.fmu`. Not vendored here — Ecos fetches it as its own dependency in `examples/rocket_gps_ecos`
 - **Renode** — SWIL simulation platform
 - **Catch2 v3** — unit and integration testing
 - **CMake ≥ 3.26** with `CMakePresets.json` for cross-compilation

@@ -12,22 +12,28 @@ Reusable firmware libraries. Each module is an independent CMake subdirectory th
 
 ## Module list
 
-| Module | Responsibility |
-|---|---|
-| `sensors/` | IMU, barometer, GPS drivers; raw → SI unit conversion; FMU export |
-| `actuators/` | Servo, ESC, pyro channel drivers; FMU export |
-| `comms/` | CAN framing, EtherCAT slave stack, MAVLink codec; OpenAMP/RPMsg transport *(planned, see `bsp/README.md` AMP targets)* |
-| `gnc/` | EKF/UKF state estimation, control law; FMI co-simulation interface |
-| `rtos_core/` | FreeRTOS task definitions, queue registry, tick config, memory pools |
-| `fault/` | Health monitor, watchdog, error code registry |
-| `power/` | BMS interface, regulator enable sequencing; FMU export |
-| `datalogger/` | Flash ring buffer, COBS framing, telemetry packetiser |
+A module with no `CMakeLists.txt` is skipped by the root `CMakeLists.txt` foreach without comment, so an empty
+directory here is indistinguishable from a built one at configure time. Status is therefore stated explicitly:
+
+| Module | Status | Responsibility |
+|---|---|---|
+| `sensors/` | **built** | IMU, barometer (BMP390), GPS, radalt, mag drivers; raw → SI conversion; per-sensor hardware-simulator FMUs |
+| `rtos_core/` | **built** | Task registry, queue registry, memory pools |
+| `fault/` | **built** | Fault registry, watchdog supervisor. HAL health monitor and hardware IWDG feed are not built |
+| `power/` | **built** | Battery monitor, regulator sequencer |
+| `comms/` | **partial** | CAN framing only — one source file. EtherCAT slave stack and MAVLink codec are not built, and EtherCAT is not currently being pursued |
+| `actuators/` | **empty** | Servo, ESC, pyro channel drivers — no sources, no `CMakeLists.txt` |
+| `gnc/` | **empty** | EKF/UKF state estimation, control law — no sources, no `CMakeLists.txt` |
+| `datalogger/` | **empty** | Flash ring buffer, COBS framing, telemetry packetiser — no sources, no `CMakeLists.txt` |
+
+OpenAMP/RPMsg transport under `comms/` is planned — see `bsp/README.md`'s AMP targets.
 
 ---
 
 ## Module internal layout
 
-Every module follows the same directory convention:
+The convention modules follow. `sensors/` is the fullest realisation of it; note that its FMU subtrees live under
+`include/Hemerion/<sensor>/fmu/` rather than a top-level `fmu/`, and its tests use Catch2 rather than Unity:
 
 ```
 modules/<name>/
@@ -53,12 +59,14 @@ The sensor FMUs list `fmi2 fmi3`, so one `cmake --build` produces both an FMI 2.
 
 ## Adding a new module
 
-1. Copy `modules/template/` to `modules/<your_module>/`.
-2. Rename the CMake target (`hemerion_template` → `hemerion_<your_module>`).
-3. Add `add_subdirectory(modules/<your_module>)` in the root `CMakeLists.txt`.
-4. Implement the HAL abstraction interface your module needs in the relevant BSP under `bsp/`.
+1. Copy an existing module — `modules/power/` is the smallest complete one. (`modules/template/` is planned and not in the tree.)
+2. Rename the CMake target to `hemerion_<your_module>`.
+3. Add the directory name to the module foreach in the root `CMakeLists.txt`.
+4. Implement whatever board access your module needs in the relevant BSP under `bsp/`.
 
-No other files need to change. The three build artifacts are created automatically by the preset logic in `cmake/hemerion_module.cmake`.
+> The intended end state is that step 2 collapses into one `hemerion_add_module()` call, with the three artifacts
+> derived automatically. `cmake/hemerion_module.cmake` **has not been written** — write plain CMake for now, and see
+> `cmake/README.md`.
 
 ---
 
