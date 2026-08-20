@@ -28,6 +28,16 @@ jobs:
       image: antmicro/renode:latest
       options: --user root
     steps:
+      # Must precede the checkout: actions/checkout needs git >= 2.18 *inside the container*,
+      # and antmicro/renode ships without it. Without git the action quietly falls back to a
+      # GitHub REST API tarball, which cannot fetch submodules -- it fails with "Input
+      # 'submodules' not supported when falling back to download using the GitHub REST API"
+      # rather than anything naming the real cause.
+      - name: Install git for actions/checkout
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends git ca-certificates
+
       - uses: actions/checkout@v7
         with:
           submodules: recursive
@@ -38,7 +48,6 @@ jobs:
       # g++-14 the native workflows pin (see README.md) is not required.
       - name: Install build dependencies
         run: |
-          apt-get update -q
           apt-get install -y --no-install-recommends cmake ninja-build python3-pip
           command -v arm-none-eabi-g++ >/dev/null || apt-get install -y --no-install-recommends \
             gcc-arm-none-eabi libnewlib-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
