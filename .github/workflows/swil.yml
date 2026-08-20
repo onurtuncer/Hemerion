@@ -52,7 +52,12 @@ jobs:
           command -v arm-none-eabi-g++ >/dev/null || apt-get install -y --no-install-recommends \
             gcc-arm-none-eabi libnewlib-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
           command -v g++ >/dev/null || apt-get install -y --no-install-recommends g++
-          pip3 install pyrenode3
+          # Install from the requirements file, not `pip3 install pyrenode3`, which was wrong three ways:
+          # pyrenode3 is not on PyPI at all (antmicro ship it only from git, hence the commit pin in that
+          # file), pytest was never installed even though ctest invokes `python3 -m pytest`, and PEP 668
+          # makes a system-wide install an error on this image without --break-system-packages. The pin is
+          # also what tests/README.md tells developers to install, so CI and a dev venv now agree.
+          pip3 install --break-system-packages -r tests/swil/requirements.txt
 
       - name: Configure
         run: cmake --preset=test-swil
