@@ -299,7 +299,7 @@ def test_baro_logger_reads_the_simulated_part(renode_machine):
                             f"firmware never printed {pattern!r}, and both helpers were still running --",
                             "so this is the emulated side of the chain, not the harness.",
                             f"--- usart3 ---\n{tail(uart_log)}",
-                            f"--- cpu ---\n{cpu_state(renode_machine)}",
+                            f"--- cpu ---\n{cpu_state(renode_machine, elf)}",
                             f"--- renode (rcc chatter dropped) ---\n{renode_tail(renode_log)}",
                             f"--- {part[1]} ---\n{tail(part[2])}",
                             f"--- {bridge[1]} ---\n{tail(bridge[2])}",
