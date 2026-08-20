@@ -33,7 +33,7 @@ import time
 
 from pyrenode3.wrappers import Emulation, Monitor, TerminalTester
 
-from conftest import REPO_ROOT, firmware_elf, missing, peripheral
+from conftest import REPO_ROOT, firmware_elf, function_at, missing, peripheral
 
 CS_PATH = REPO_ROOT / "sim" / "renode" / "i2c_bridge" / "HemerionI2cBridge.cs"
 
@@ -115,17 +115,20 @@ def renode_tail(log_path: pathlib.Path, limit: int = 3000) -> str:
     return text[-limit:] if text else "(nothing but rcc chatter)"
 
 
-def cpu_state(machine) -> str:
-    """Best-effort program counter and instruction count.
+def cpu_state(machine, elf: pathlib.Path) -> str:
+    """Best-effort program counter, resolved to a function name, plus the
+    instruction count.
 
     Distinguishes a CPU spinning in a fault handler from one still making
-    progress, which is the question when the firmware produces no output at
-    all. Renode's API surface varies by version, so this must never be the
-    reason a test errors.
+    progress, and names where it is spinning -- resolved against the ELF this
+    test actually loaded, so a stale local build of the same app cannot
+    mislabel it. Renode's API surface varies by version, so this must never be
+    the reason a test errors.
     """
     try:
         cpu = peripheral(machine, "sysbus.cpu").internal
-        return f"PC={cpu.PC} executed={cpu.ExecutedInstructions}"
+        program_counter = int(cpu.PC)
+        return f"PC={program_counter:#x} ({function_at(elf, program_counter)}) executed={cpu.ExecutedInstructions}"
     except Exception as error:  # noqa: BLE001 -- diagnostics only
         return f"(unavailable: {error})"
 

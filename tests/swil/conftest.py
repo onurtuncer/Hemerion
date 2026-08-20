@@ -10,6 +10,7 @@
 # ------------------------------------------------------------------------------
 import os
 import pathlib
+import struct
 
 import pytest
 from pyrenode3.wrappers import Emulation, Monitor, Peripheral
@@ -60,6 +61,44 @@ def _is_cross_elf(path: pathlib.Path) -> bool:
     except OSError:
         return False
     return header[:4] == b"\x7fELF" and int.from_bytes(header[18:20], "little") == 0x28
+
+
+def function_at(elf_path: pathlib.Path, address: int) -> str:
+    """Name the function containing *address*, by reading the ELF's own
+    symbol table.
+
+    Done here rather than by shelling out to arm-none-eabi-addr2line because
+    the harness runs where the *toolchain need not be* -- and because a stray
+    local build of the same app resolves the same address to a different
+    (wrong) symbol, which is worse than no answer. Parsing the ELF the test
+    actually loaded cannot drift from it.
+    """
+    try:
+        data = elf_path.read_bytes()
+        section_offset, = struct.unpack_from("<I", data, 0x20)
+        entry_size, count, _ = struct.unpack_from("<HHH", data, 0x2E)
+        sections = [
+            struct.unpack_from("<IIIIIIIIII", data, section_offset + i * entry_size) for i in range(count)
+        ]
+        symtab = next(sec for sec in sections if sec[1] == 2)  # SHT_SYMTAB
+        strtab = sections[symtab[6]]
+
+        best = None
+        for i in range(symtab[5] // symtab[9]):
+            name, value, size, info, _, _ = struct.unpack_from("<IIIBBH", data, symtab[4] + i * symtab[9])
+            # STT_FUNC, and clear the Thumb bit the low address carries
+            if (info & 0xF) != 2 or not size:
+                continue
+            start = value & ~1
+            if start <= address < start + size:
+                end = data.index(b"\0", strtab[4] + name)
+                best = (data[strtab[4] + name : end].decode(), address - start, size)
+                break
+        if best is None:
+            return "no function covers that address"
+        return f"{best[0]} +{best[1]} of {best[2]}"
+    except Exception as error:  # noqa: BLE001 -- diagnostics only
+        return f"(unresolved: {error})"
 
 
 def firmware_elf(app: str) -> pathlib.Path:
