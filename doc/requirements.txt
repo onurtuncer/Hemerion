@@ -5,3 +5,8 @@ sphinx
 sphinx-rtd-theme
 breathe
 sphinxcontrib-bibtex
+
+# Measures cyclomatic complexity for doc/generate_metrixpp_report.py, which
+# doc/conf.py runs to produce the report page. Same floor as
+# .github/workflows/metrixpp.yml.
+metrixpp>=1.8.1
