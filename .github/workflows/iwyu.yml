@@ -5,9 +5,11 @@ on:
     branches:
       - main
   pull_request:
-    # The trees iwyu_tool is pointed at, plus everything that decides what ends up in
-    # compile_commands.json -- the Build step is not continue-on-error, so a CMake or
-    # submodule change alone can fail this job and must be able to trigger it.
+    # Everything that decides what ends up in compile_commands.json -- the Build step
+    # is not continue-on-error, so a CMake or submodule change alone can fail this job
+    # and must be able to trigger it. Broader than the trees iwyu_tool is pointed at
+    # (modules, apps, sim): a bsp/ or tests/ change cannot alter the report today, but
+    # over-triggering costs one job while under-triggering hides a regression.
     paths:
       - 'modules/**'
       - 'apps/**'
@@ -43,6 +45,13 @@ jobs:
       # Use a direct cmake call instead of --preset=clang-debug to avoid the
       # -Rpass=.* remarks flag, which floods the build log with thousands of
       # inlining notes and makes the IWYU output unreadable.
+      #
+      # HEMERION_BUILD_SIM is what puts sim/ into compile_commands.json. Without
+      # it the root CMakeLists never runs add_subdirectory(sim) -- SIM, FMU and
+      # EXAMPLES all default OFF -- so the nineteen translation units under sim/
+      # were absent from the database and naming `sim` below matched nothing at
+      # all. The job reported on modules/ and one app while looking like it
+      # covered five trees.
       - name: Configure
         run: |
           cmake -B build/iwyu -G Ninja \
@@ -52,19 +61,60 @@ jobs:
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DCMAKE_CXX_EXTENSIONS=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DHEMERION_BUILD_TESTS=ON
+            -DHEMERION_BUILD_TESTS=ON \
+            -DHEMERION_BUILD_SIM=ON
 
       - name: Build
         run: cmake --build build/iwyu
 
       # Informational only: surfaces IWYU suggestions without failing the build.
       # The codebase is not yet IWYU-clean; this produces a diff for review.
+      #
+      # bsp/ and tests/ are deliberately not listed. bsp/ holds six .c files that
+      # only a cross toolchain configures, and tests/ holds no C or C++ at all
+      # (tests/swil is Python), so both could only ever match nothing here --
+      # naming them made the argument list describe coverage the job did not
+      # have. Add bsp/ back if a BSP is ever buildable natively.
+      #
+      # The mappings matter as much as the trees: IWYU names the header a symbol
+      # is *defined* in, so without them it advises adding libstdc++ internals
+      # like <bits/std_abs.h> beside the <cstdlib> already present. .iwyu.imp is
+      # this repo's own list; the distribution's gcc.* files are added when the
+      # iwyu package ships them, and which of those exist varies by version, so
+      # each is probed rather than assumed.
       - name: Run include-what-you-use
         continue-on-error: true
         run: |
-          iwyu_tool -p build/iwyu modules apps bsp sim tests \
-            -- -Xiwyu --cxx17ns -Xiwyu --no_fwd_decls \
+          mappings=(-Xiwyu --mapping_file="$PWD/.iwyu.imp")
+          for shipped in /usr/share/include-what-you-use/gcc.stl.headers.imp \
+                         /usr/share/include-what-you-use/gcc.symbols.imp \
+                         /usr/share/include-what-you-use/gcc.libc.imp; do
+            if [ -f "$shipped" ]; then
+              mappings+=(-Xiwyu --mapping_file="$shipped")
+            fi
+          done
+          echo "IWYU mapping files in use: ${mappings[*]}"
+
+          iwyu_tool -p build/iwyu modules apps sim \
+            -- -Xiwyu --cxx17ns -Xiwyu --no_fwd_decls "${mappings[@]}" \
             | tee iwyu-report.txt
+
+      # Deliberately its own step, without continue-on-error: that flag exists so
+      # IWYU's *findings* never fail the job, and it would swallow this exit code
+      # too. A report that inspected nothing is the failure mode this repo keeps
+      # hitting -- three jobs so far have been green while checking nothing -- so
+      # the per-file verdict count is asserted rather than assumed. modules/ and
+      # sim/ alone are ~100 files; 50 is a floor that a real regression in
+      # compile_commands.json trips long before a few files move.
+      - name: Check the report is not empty
+        run: |
+          analysed=$(grep -cE 'has correct #includes/fwd-decls|should (add|remove) these lines' iwyu-report.txt || true)
+          echo "IWYU reported on ${analysed} files"
+          if [ "${analysed}" -lt 50 ]; then
+            echo "::error::IWYU reported on only ${analysed} files -- expected the whole of modules/ and sim/."
+            echo "::error::Something stopped compile_commands.json being populated, so the report is not trustworthy."
+            exit 1
+          fi
 
       - name: Upload IWYU report
         if: always()

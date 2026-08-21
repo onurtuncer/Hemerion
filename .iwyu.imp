@@ -1,0 +1,55 @@
+# ------------------------------------------------------------------------------
+# Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+#
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+# ------------------------------------------------------------------------------
+# Project-local include-what-you-use mappings, passed by .github/workflows/iwyu.yml.
+#
+# IWYU reports the header a symbol is *defined* in, which for libstdc++ is
+# routinely a private <bits/...> header nobody may include directly. Left
+# unmapped it tells you to add things like <bits/std_abs.h> next to the
+# <cstdlib> you already have -- advice that is wrong, and that makes the rest of
+# the report look untrustworthy too.
+#
+# The distribution's own gcc.stl.headers.imp covers most of these, and the
+# workflow passes it as well when the iwyu package ships it. This file is the
+# belt-and-braces layer, so the suppression does not depend on which mapping
+# files a given iwyu package happens to install.
+#
+# Observed so far (2026-08-21, modules/sensors/test/test_mmc5983ma.cpp):
+#   <bits/std_abs.h> suggested alongside an existing <cstdlib>.
+# The rest are the libstdc++ internals behind headers this tree already uses,
+# added ahead of time because they surface as soon as a translation unit names
+# the corresponding type.
+#
+# Format is IWYU's own (IWYUMappings.md): an unquoted `include:` key over
+# [private-header, visibility, public-header, visibility]. Comments use '#'.
+[
+  { include: ["<bits/std_abs.h>", "private", "<cstdlib>", "public"] },
+  { include: ["<bits/stdint-intn.h>", "private", "<cstdint>", "public"] },
+  { include: ["<bits/stdint-uintn.h>", "private", "<cstdint>", "public"] },
+  { include: ["<bits/types/struct_timespec.h>", "private", "<ctime>", "public"] },
+  { include: ["<bits/chrono.h>", "private", "<chrono>", "public"] },
+  { include: ["<bits/std_mutex.h>", "private", "<mutex>", "public"] },
+  { include: ["<bits/this_thread_sleep.h>", "private", "<thread>", "public"] },
+  { include: ["<bits/utility.h>", "private", "<utility>", "public"] },
+  { include: ["<bits/refwrap.h>", "private", "<functional>", "public"] },
+  { include: ["<bits/shared_ptr.h>", "private", "<memory>", "public"] },
+  { include: ["<bits/unique_ptr.h>", "private", "<memory>", "public"] },
+  { include: ["<bits/allocator.h>", "private", "<memory>", "public"] },
+  { include: ["<bits/basic_string.h>", "private", "<string>", "public"] },
+  { include: ["<bits/basic_string.tcc>", "private", "<string>", "public"] },
+  { include: ["<bits/exception.h>", "private", "<exception>", "public"] },
+  { include: ["<bits/atomic_base.h>", "private", "<atomic>", "public"] },
+  { include: ["<bits/random.h>", "private", "<random>", "public"] },
+  { include: ["<bits/random.tcc>", "private", "<random>", "public"] },
+  { include: ["<bits/stl_algo.h>", "private", "<algorithm>", "public"] },
+  { include: ["<bits/stl_algobase.h>", "private", "<algorithm>", "public"] },
+  { include: ["<bits/stl_pair.h>", "private", "<utility>", "public"] },
+  { include: ["<bits/stl_vector.h>", "private", "<vector>", "public"] },
+  { include: ["<bits/stl_iterator.h>", "private", "<iterator>", "public"] },
+  { include: ["<bits/stl_iterator_base_types.h>", "private", "<iterator>", "public"] },
+  { include: ["<bits/ios_base.h>", "private", "<ios>", "public"] },
+  { include: ["<bits/fs_path.h>", "private", "<filesystem>", "public"] },
+  { include: ["<bits/fs_dir.h>", "private", "<filesystem>", "public"] }
+]
