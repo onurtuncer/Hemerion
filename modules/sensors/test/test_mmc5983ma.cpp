@@ -22,10 +22,13 @@
 // Plain asserts + exit code, matching test_bmp390.cpp -- Unity is not yet
 // vendored (see test_ubx_parser.cpp's header comment).
 // ------------------------------------------------------------------------------
+#include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 
 #ifdef _WIN32
 #include <crtdbg.h>

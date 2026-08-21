@@ -45,6 +45,7 @@
 
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_measurement_model.h"
+#include "Hemerion/mag/mmc5983ma/mmc5983ma_registers.h"
 #include "hemerion/sim/i2c_shm/i2c_peripheral_endpoint.h"
 #include "tool_args.h"
 
