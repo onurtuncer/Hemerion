@@ -14,6 +14,8 @@
 #include "task.h"
 #include "timers.h"
 
+#include "stm32h7xx_hal.h"
+
 /* vendor/FreeRTOS-Kernel/portable/GCC/ARM_CM7/r0p1/port.c defines
    vPortSVCHandler/xPortPendSVHandler/xPortSysTickHandler, not the CMSIS
    vector-table names -- with .isr_vector in flash (read-only, see
@@ -40,9 +42,38 @@ void PendSV_Handler(void)
   __asm volatile("b xPortPendSVHandler");
 }
 
+/* Two tick consumers share this one interrupt, and both have to be served.
+
+   HAL_IncTick() advances uwTick, which is the only thing HAL_GetTick() reads
+   and therefore the only thing that lets HAL_Delay() terminate. ST's own
+   stm32h7xx_it.c calls it from here; this BSP replaced that file wholesale to
+   route SVC/PendSV/SysTick to the FreeRTOS port (see above) and did not carry
+   the call over. Nothing else in the tree calls HAL_IncTick(), so uwTick sat at
+   zero for the life of the program and every HAL_Delay() spun forever.
+
+   That is not a latent defect: apps/baro_logger hung on the BMP390's 2 ms
+   soft-reset wait (Bmp390Driver::probe -> hal_delay_ms -> HAL_Delay) before
+   printing its first UART byte, in Renode and identically on real silicon --
+   the fault was read as an emulated-I2C problem for exactly as long as nobody
+   looked at the program counter. apps/led_blink never calls HAL_Delay, which is
+   the whole reason it was unaffected and made the platform look healthy.
+
+   The scheduler-state guard is the second half. HAL_Init() enables SysTick long
+   before vTaskStartScheduler() does, so this handler fires while the kernel is
+   still uninitialised; xPortSysTickHandler() assumes a running scheduler and
+   touches its ready lists. It has been reached in that state on every boot so
+   far without visible harm, which is not the same as being safe. HAL's tick
+   must advance from HAL_Init() onward -- pre-scheduler HAL_Delay() calls in
+   board bring-up depend on it -- so the increment is unconditional and only the
+   kernel half is gated. */
 void SysTick_Handler(void)
 {
-  xPortSysTickHandler();
+  HAL_IncTick();
+
+  if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+  {
+    xPortSysTickHandler();
+  }
 }
 
 void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer, StackType_t **ppxIdleTaskStackBuffer,
