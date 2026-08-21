@@ -58,17 +58,18 @@ jobs:
           --exclude '.*CMakeFiles.*' \
           --gcov-executable gcov-14 \
           --gcov-ignore-errors=no_working_dir_found \
+          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
           --print-summary \
           --fail-under-line 1 \
           --xml build/test-native/coverage.xml \
           --xml-pretty \
           build/test-native
 
-    # The upload needs a token and has never had one: no CODECOV_TOKEN secret is configured, so the
-    # expression below expands to an empty string and Codecov answers "Token required because branch
-    # is protected". Behind the old fail_ci_if_error: false that was invisible -- the badge has never
-    # been fed, on top of the report having been empty. Checked here so the cause is named in one line
-    # rather than found in the upload CLI's debug output.
+    # The upload needs a token. For a long time none was configured, so the expression below expanded
+    # to an empty string and Codecov answered "Token required because branch is protected" -- invisible
+    # behind the old fail_ci_if_error: false, which is how the badge went unfed while the report was
+    # also empty. The secret exists now; this step stays as the guard, so that losing it again is named
+    # in one line rather than found in the upload CLI's debug output.
     #
     # Deliberately after the gcovr step, so the coverage summary is printed either way.
     - name: Check the Codecov token is configured
