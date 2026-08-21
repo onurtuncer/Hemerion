@@ -26,3 +26,18 @@ target_link_libraries(test_hemerion_i2c_shm_bmp390 PRIVATE hemerion_i2c_shm)
 
 add_test(NAME i2c_shm.bmp390 COMMAND test_hemerion_i2c_shm_bmp390)
 set_tests_properties(i2c_shm.bmp390 PROPERTIES LABELS "unit")
+
+# The same chain for the MMC5983MA. Unlike the BMP390's, this one spawns a pump thread: that part measures on command
+# and the driver's bring-up blocks polling for the result, so a single-threaded master would deadlock against a part
+# that never advances -- see the test's header comment.
+add_executable(
+  test_hemerion_i2c_shm_mmc5983ma
+  test_i2c_shm_mmc5983ma.cpp
+  ${HEMERION_I2C_SHM_MMC5983MA_SOURCES}
+  "${HEMERION_I2C_SHM_SENSORS_DIR}/src/mag/mmc5983ma/mmc5983ma_driver.cpp"
+  "${HEMERION_I2C_SHM_SENSORS_DIR}/src/mag/mag_conversion.cpp")
+target_include_directories(test_hemerion_i2c_shm_mmc5983ma PRIVATE "${HEMERION_I2C_SHM_SENSORS_DIR}/include")
+target_link_libraries(test_hemerion_i2c_shm_mmc5983ma PRIVATE hemerion_i2c_shm)
+
+add_test(NAME i2c_shm.mmc5983ma COMMAND test_hemerion_i2c_shm_mmc5983ma)
+set_tests_properties(i2c_shm.mmc5983ma PROPERTIES LABELS "unit")

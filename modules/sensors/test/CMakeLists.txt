@@ -107,3 +107,15 @@ target_link_libraries(test_hemerion_sensors_bmp390 PRIVATE hemerion_sensors)
 
 add_test(NAME sensors.bmp390 COMMAND test_hemerion_sensors_bmp390)
 set_tests_properties(sensors.bmp390 PROPERTIES LABELS "unit")
+
+# The MMC5983MA's I2C path with both ends against each other: the simulator's register/measurement model
+# (mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.cpp, compiled directly for the same reason as the emitters above) driven by the
+# real, on-target Mmc5983maDriver out of hemerion_sensors, with no transport in the picture. Unlike the BMP390's
+# equivalent, this part measures on command, so the test's bus adapter steps the device model from delay_ms() the way
+# the FMU's do_step() does -- see the test's header comment.
+add_executable(test_hemerion_sensors_mmc5983ma
+               test_mmc5983ma.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.cpp")
+target_link_libraries(test_hemerion_sensors_mmc5983ma PRIVATE hemerion_sensors)
+
+add_test(NAME sensors.mmc5983ma COMMAND test_hemerion_sensors_mmc5983ma)
+set_tests_properties(sensors.mmc5983ma PROPERTIES LABELS "unit")

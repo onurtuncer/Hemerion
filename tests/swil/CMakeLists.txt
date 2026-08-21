@@ -69,5 +69,27 @@ set_tests_properties(
              "${_swil_env}"
              TIMEOUT
              300)
+
+# The same loop for the MMC5983MA, and a strictly stronger one: the barometer is configured once and then read, while
+# this part is *commanded* -- its bring-up is a blocking SET / measure / RESET / measure / SET handshake with the
+# emulated core parked on the result, so every layer of the chain has to deliver a multi-transaction, stateful sequence
+# in order rather than just a register burst. The test asserts the bridge offset the firmware recovers equals the one
+# the peripheral independently reports being born with, which is the only check that distinguishes a working calibration
+# from a firmware that skipped it and is reporting its own offset as field.
+#
+# Same explicit TIMEOUT as swil.baro_logger, for the same reason: four processes across a TCP hop, and a wedge stops
+# Renode's virtual clock so the pytest-side budget never elapses.
+add_test(NAME swil.mag_logger COMMAND "${Python3_EXECUTABLE}" -m pytest
+                                      "${CMAKE_CURRENT_SOURCE_DIR}/test_mag_logger.py" -v)
+set_tests_properties(
+  swil.mag_logger
+  PROPERTIES LABELS
+             "swil"
+             WORKING_DIRECTORY
+             "${CMAKE_CURRENT_SOURCE_DIR}"
+             ENVIRONMENT
+             "${_swil_env}"
+             TIMEOUT
+             300)
 unset(_swil_env)
 unset(_swil_pyrenode_env)

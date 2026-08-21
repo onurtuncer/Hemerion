@@ -6,16 +6,17 @@
 # modules/sensors -- IMU/baro/radalt/mag raw-to-SI unit conversion + Hemerion packet parsers, GPS NMEA/UBX parsing.
 #
 # The raw-count-to-SI-unit conversions and Hemerion wire-protocol packet parsers for the IMU, barometer, radar altimeter
-# and magnetometer, plus the GPS NMEA/UBX parsers + driver, the IMU SPI driver and the BMP390 I2C driver (register map,
-# Bosch compensation, bring-up/poll sequence -- baro/bmp390/), are implemented. include/Hemerion/<sensor>/fmu/ subtrees
-# are per-sensor hardware simulator FMUs (truth state in, noisy raw sensor bytes out on the bus the real part uses):
-# gps/fmu/ emits UBX-NAV-PVT over UDP, baro/fmu/, radalt/fmu/ and mag/fmu/ emit the matching Hemerion raw-sample frames
-# the same way, imu/fmu/ answers a simulated SPI bus, and baro/bmp390/fmu/ answers a simulated I2C bus as a
-# register-accurate BMP390 -- see their CMakeLists.txt; none of them is the generic whole-module numeric-variable FMU
-# export package.xml's <artifact type="fmu"> describes, which remains unbuilt. None of this has a hardware dependency,
-# so this target needs no peripheral/bus libraries -- cmake/hemerion_module.cmake (the documented hemerion_add_module()
-# helper) does not exist yet, so this file uses plain CMake rather than the not-yet-built helper. Migrate to
-# hemerion_add_module() once it lands.
+# and magnetometer, plus the GPS NMEA/UBX parsers + driver, the IMU SPI driver, the BMP390 I2C driver (register map,
+# Bosch compensation, bring-up/poll sequence -- baro/bmp390/) and the MMC5983MA I2C driver (register map, SET/RESET
+# bridge-offset cancellation, bring-up/poll sequence -- mag/mmc5983ma/), are implemented. include/Hemerion/<sensor>/fmu/
+# subtrees are per-sensor hardware simulator FMUs (truth state in, noisy raw sensor bytes out on the bus the real part
+# uses): gps/fmu/ emits UBX-NAV-PVT over UDP, baro/fmu/, radalt/fmu/ and mag/fmu/ emit the matching Hemerion raw-sample
+# frames the same way, imu/fmu/ answers a simulated SPI bus, and baro/bmp390/fmu/ and mag/mmc5983ma/fmu/ answer a
+# simulated I2C bus as register-accurate parts -- see their CMakeLists.txt; none of them is the generic whole-module
+# numeric-variable FMU export package.xml's <artifact type="fmu"> describes, which remains unbuilt. None of this has a
+# hardware dependency, so this target needs no peripheral/bus libraries -- cmake/hemerion_module.cmake (the documented
+# hemerion_add_module() helper) does not exist yet, so this file uses plain CMake rather than the not-yet-built helper.
+# Migrate to hemerion_add_module() once it lands.
 # ------------------------------------------------------------------------------
 
 add_library(
@@ -31,6 +32,7 @@ add_library(
   src/radalt/radalt_packet.cpp
   src/mag/mag_conversion.cpp
   src/mag/mag_packet.cpp
+  src/mag/mmc5983ma/mmc5983ma_driver.cpp
   src/gps/nmeaParser.cpp
   src/gps/ubxParser.cpp)
 
@@ -62,7 +64,8 @@ if(HEMERION_BUILD_FMU)
     baro
     baro/bmp390
     radalt
-    mag)
+    mag
+    mag/mmc5983ma)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/Hemerion/${_hemerion_sensor_fmu}/fmu/CMakeLists.txt")
       add_subdirectory("include/Hemerion/${_hemerion_sensor_fmu}/fmu")
     endif()
