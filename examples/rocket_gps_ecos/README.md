@@ -1,6 +1,6 @@
-# examples/rocket_gps_ecos — two-stage rocket → GPS + IMU + baro FMUs → STM32 flight software, co-simulated with Ecos
+# examples/rocket_gps_ecos — two-stage rocket → GPS + IMU + baro + mag FMUs → STM32 flight software, co-simulated with Ecos
 
-End-to-end sensor-in-the-loop scenario built from five independently developed pieces:
+End-to-end sensor-in-the-loop scenario built from six independently developed pieces:
 
 ```
 ┌──────────────────────┐   FMI 2.0 variables    ┌──────────────────────┐   UBX-NAV-PVT     ┌─────────────────────────┐
@@ -14,19 +14,25 @@ End-to-end sensor-in-the-loop scenario built from five independently developed p
 │                      ├───────────────────────>│ (MEMS IMU sim: noise │   over shared     │  Bmp390Driver +         │
 │                      │   (host-computed)      │  + registers + FIFO) ├─── memory ───────>│  Bmp390Compensator      │
 │                      │                        └──────────────────────┘  bursts of counts │                         │
-│                      │   altitude             ┌──────────────────────┐  I2C transactions │  — the same modules/    │
-│                      ├───────────────────────>│ hemerion_bmp390_fmu  │<──────────────────┤  sensors code the STM32 │
-│                      │                        │ (Bosch BMP390 sim:   │   over shared     │  H743 firmware runs     │
-└──────────────────────┘                        │  ISA + registers +   ├─── memory ───────>│                         │
-        │                                       │  calibration NVM)    │  raw ADC words    └─────────────────────────┘
+│                      │   altitude             ┌──────────────────────┐  I2C transactions │  Mmc5983maDriver +      │
+│                      ├───────────────────────>│ hemerion_bmp390_fmu  │<──────────────────┤  convert_raw_to_si      │
+│                      │                        │ (Bosch BMP390 sim:   │   over shared     │                         │
+│                      │                        │  ISA + registers +   ├─── memory ───────>│  — the same modules/    │
+│                      │                        │  calibration NVM)    │  raw ADC words    │  sensors code the STM32 │
+│                      │   position + attitude  └──────────────────────┘                   │  H743 firmware runs     │
+│                      │   -> body-frame field  ┌──────────────────────┐  I2C transactions │                         │
+│                      ├───────────────────────>│ hemerion_mmc5983ma   │<──────────────────┤                         │
+└──────────────────────┘   (host-computed)      │ _fmu (MMC5983MA sim: │   over shared     │                         │
+        │                                       │  SET/RESET bridge    ├─── memory ───────>│                         │
+        │                                       │  offset + hard iron) │  18-bit counts    └─────────────────────────┘
         │                                       └──────────────────────┘
         └────────────── rocket_gps_cosim (Ecos master, fixed-step 10 Hz) ──────────┘
 ```
 
-The arrow directions are the point: **the receiver talks, the IMU and the barometer are polled.** A GPS
+The arrow directions are the point: **the receiver talks; the IMU, the barometer and the magnetometer are polled.** A GPS
 module pushes NAV solutions down a UART whenever it has them; an inertial part sits there holding samples
 until a flight computer asserts chip select and comes to get them; a barometer holds one conversion in its
-data registers until firmware reads it over I2C. Modelling all three as pushed byte streams would have
+data registers until firmware reads it over I2C. a magnetometer answers only after it has been magnetised in a known direction. Modelling all four as pushed byte streams would have
 exercised the packet parsers and nothing else.
 
 * **`TwoStageRocket.fmu`** — Aetherion's two-stage rocket plant (NASA TM-2015-218675 Scenario 17: DAVE-ML
@@ -55,6 +61,15 @@ exercised the packet parsers and nothing else.
   parameter**: it converts at whatever ODR the flight computer programs into its registers — none while the
   register still reads sleep, which is exactly the kind of coupling a register-accurate simulator exists to
   exercise.
+* **`hemerion_mmc5983ma_fmu.fmu`** — this repo's MEMSIC MMC5983MA magnetometer simulator
+  (`modules/sensors/include/Hemerion/mag/mmc5983ma/fmu/`). It takes the body-frame field the vehicle is
+  flying through — computed by the host from position *and* attitude through a centered tilted dipole, see
+  `geomagnetic_field.hpp` — and answers a second shared-memory I2C bus as a register-accurate part: product
+  ID, write-only control registers, an 18-bit data burst split across three registers per axis, and the
+  **SET/RESET magnetization state** that makes the part worth simulating at all. Its bridge offset is drawn
+  per run from the datasheet's ±0.5 gauss null-field tolerance — the size of Earth's whole field — so a
+  driver that skips the SET/RESET calibration reads its own offset as if it were a heading. Like the BMP390
+  it has no rate parameter: it measures at the rate the flight computer programs into it.
 * **`gps_flight_computer`** — host stand-in for the STM32H743 flight computer's sensor ingest paths. GPS bytes
   go through the unmodified `GpsDriver`/`UbxParser`; the IMU is driven by the unmodified **on-target**
   `ImuSpiDriver` — probe, DRDY, `STATUS`+`FIFO_COUNT` in one transfer, burst the FIFO, feed every byte to
@@ -167,6 +182,7 @@ This produces, under `build/examples-native/`:
 | `hemerion_gps_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
 | `hemerion_imu_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
 | `hemerion_bmp390_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
+| `hemerion_mmc5983ma_fmu.fmu` | `fmus/fmi2/` (also exported to `fmus/fmi3/`) |
 
 Each sensor FMU is exported for both FMI generations from the same sources. This example uses the **FMI 2.0**
 set, since Ecos imports through fmi4c; `--gps`/`--imu`/`--baro` can point at any archive you like.
@@ -224,6 +240,10 @@ Useful knobs (`--help` lists all):
   shared-memory bus is local by construction; a remote consumer needs Renode's emulated SPI instead.
 * `HEMERION_BMP390_FMU_I2C_BUS` (FMU side) and `--baro-bus` (flight-computer side) — the same convention for
   the barometer's I2C bus, default `hemerion_bmp390_i2c`.
+* `HEMERION_MMC5983MA_FMU_I2C_BUS` (FMU side) and `--mag-bus` (flight-computer side) — likewise for the
+  magnetometer, default `hemerion_mmc5983ma_i2c`. It is a *separate* bus rather than a second address on the
+  barometer's, because `sim/i2c_shm` carries one peripheral per bus; multi-drop addressing is the one thing
+  about driving two I2C parts that this example does not exercise.
 
 Ecos does not link a zip library — it spawns `tar`, or `unzip` when `SHELL` names a bash — and reports any
 failure as `Failed to unzip ... to tempdir`, which says nothing about why. Two environmental traps produce
@@ -261,22 +281,37 @@ Outputs land in `results/`:
 * `baro_samples.csv` — every BMP390 conversion the flight software read and compensated: pressure [Pa] and
   temperature [°C], timestamped from the part's own `SENSORTIME` counter read in the same burst as the data
   registers (32768 Hz, wraps every 512 s — this flight fits inside one wrap).
+* `mag_samples.csv` — every MMC5983MA measurement, in microtesla, with **two** time columns. This part has no
+  clock: nothing on it stamps a measurement, so `host_time_s` is the flight computer's own monotonic clock
+  (which equals simulation time only under `--rtf 1`) and `sim_time_s` is the flight computer placing the
+  sample on the time base it does have — the most recent IMU payload timestamp. That is what real firmware
+  does with an unstamped sensor, and it is why the IMU is the time master here.
+* `mag_samples.config` — the bridge offset the SET/RESET pair cancelled at bring-up, beside the data it made
+  valid. Without it a reader cannot tell a run whose calibration worked from a part that happened to have a
+  small offset, and `plot_results.py` could not draw the uncalibrated counterfactual.
 
 ## Plots
 
 `plot_results.py` (matplotlib) turns the four CSVs into the figures used by the Sphinx page
 (`doc/rocket_gps_ecos_cosim.rst`): the flight in 3-D with the navigated part of it distinguished, GPS
 availability against the receiver's envelope, altitude, speed over ground, the decoded-fix error against
-truth, the decoded IMU specific force and body rates against truth, and the BMP390's compensated pressure
+truth, the decoded IMU specific force and body rates against truth, the BMP390's compensated pressure
 against the atmosphere it sampled — plus the pressure altitude derived from it, which tracks truth to ~16 km
 and then flatlines at the part's range floor while the rocket keeps climbing: the honest failure mode of a
-barometric altimeter on a launch vehicle, and the reason the GPS and the IMU are on the bus too.
+barometric altimeter on a launch vehicle, and the reason the GPS and the IMU are on the bus too — and the
+magnetometer's decoded body-frame field against the field the part was handed, plus a two-panel figure
+pairing total intensity (the 1/r³ falloff over 236 km) with the **direction error a skipped SET/RESET
+calibration would have caused — 28–29° on the reference run, and tens of degrees on any run, since the
+bridge offset is redrawn each time from the datasheet's ±0.5 gauss tolerance**. That second panel replaced an earlier one plotting
+uncalibrated *magnitude*, where the two curves nearly coincided: adding an offset the size of Earth's field
+to a field that size barely changes the vector's length while swinging its direction most of a right angle,
+so magnitude is exactly the wrong place to look for it.
 
 ```
 python plot_results.py            # reads results/, writes plots/
 ```
 
-All nine come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
+All eleven come from the default configuration. The GPS ones cover the 31 s the export limits leave and shade
 the rest of the flight as the outage it is; the script skips a fix-dependent figure rather than drawing it
 empty if a configuration leaves fewer than two usable epochs (`--dyn-model 8` leaves one). The 3-D trajectory
 and the availability figure survive that case, since both are drawn from truth with the fixes only overlaid.
