@@ -7,10 +7,10 @@
 
 .. _rocket_gps_ecos_cosim:
 
-Rocket → GPS + IMU + Baro → Flight Software Co-Simulation (``examples/rocket_gps_ecos``)
-========================================================================================
+Rocket → GPS + IMU + Baro + Mag → Flight Software Co-Simulation (``examples/rocket_gps_ecos``)
+==============================================================================================
 
-``examples/rocket_gps_ecos`` couples five independently developed pieces into
+``examples/rocket_gps_ecos`` couples six independently developed pieces into
 one sensor-in-the-loop scenario, orchestrated by the
 `Ecos <https://github.com/Ecos-platform/ecos>`_ FMI co-simulation platform:
 
@@ -43,15 +43,24 @@ one sensor-in-the-loop scenario, orchestrated by the
    ``SENSORTIME`` bursts. It has no rate parameter: it converts at whatever
    ODR the flight computer programs into its registers — none while
    ``PWR_CTRL`` still reads sleep.
-5. **The flight software sensor stacks** (``gps_flight_computer``) drive all
-   three buses with the *unmodified* ``GpsDriver``/``UbxParser``,
-   ``ImuSpiDriver``/``ImuPacketParser``/``convert_raw_to_si()`` and
-   ``Bmp390Driver``/``Bmp390Compensator`` from ``modules/sensors`` — the same
-   code the STM32H743 firmware cross-compiles. Only the transport shims differ
-   from the target: a UDP socket where the receiver's UART would be, and
-   shared-memory SPI and I2C buses where ``HAL_SPI_TransmitReceive`` /
-   ``HAL_I2C_Mem_Read`` plus the GPIOs would be (or Renode's emulated
-   peripherals, see :ref:`swil_windows_setup`).
+5. **Hemerion's MMC5983MA magnetometer-simulator FMU**
+   (``hemerion_mmc5983ma_fmu.fmu``, also from ``modules/sensors``) takes the
+   body-frame magnetic field the vehicle is flying through and turns it into
+   18-bit register counts on a second shared-memory **I2C bus**. It is the
+   only part in this scenario whose bring-up the flight computer *blocks* on:
+   the MMC5983MA carries a Wheatstone-bridge offset specified only to
+   ±0.5 gauss — the size of Earth's whole field — and removing it takes a
+   SET, a measurement, a RESET, a second measurement and a final SET before
+   the first useful reading exists. See :ref:`rocket_gps_ecos_mag`.
+6. **The flight software sensor stacks** (``gps_flight_computer``) drive all
+   four buses with the *unmodified* ``GpsDriver``/``UbxParser``,
+   ``ImuSpiDriver``/``ImuPacketParser``/``convert_raw_to_si()``,
+   ``Bmp390Driver``/``Bmp390Compensator`` and ``Mmc5983maDriver`` from
+   ``modules/sensors`` — the same code the STM32H743 firmware cross-compiles.
+   Only the transport shims differ from the target: a UDP socket where the
+   receiver's UART would be, and shared-memory SPI and I2C buses where
+   ``HAL_SPI_TransmitReceive`` / ``HAL_I2C_Mem_Read`` plus the GPIOs would be
+   (or Renode's emulated peripherals, see :ref:`swil_windows_setup`).
 
 .. code-block:: text
 
@@ -66,20 +75,27 @@ one sensor-in-the-loop scenario, orchestrated by the
    │                      ├──────────────────────>│ MEMS IMU simulator:  │  over shared    │  Bmp390Driver +        │
    │                      │  (host-computed)      │ bias + noise + regs  │──────  memory ─>│  Bmp390Compensator     │
    │                      │                       │ + 16 KiB sample FIFO │  bursts of      │                        │
-   │                      │  altitude             └──────────────────────┘  raw counts     │  (the code the STM32   │
-   │                      ├──────────────────────>┌──────────────────────┐ I2C transactions│  H743 firmware runs)   │
-   └──────────────────────┘                       │ hemerion_bmp390_fmu  │<────────────────┤                        │
-            │                                     │ register-accurate    │  over shared    │                        │
-            │                                     │ BMP390: ISA + regs   │──────  memory ─>│                        │
-            │                                     │ + calibration NVM    │  raw ADC words  └────────────────────────┘
+   │                      │  altitude             └──────────────────────┘  raw counts     │  Mmc5983maDriver +     │
+   │                      ├──────────────────────>┌──────────────────────┐ I2C transactions│  convert_raw_to_si     │
+   │                      │                       │ hemerion_bmp390_fmu  │<────────────────┤                        │
+   │                      │                       │ register-accurate    │  over shared    │  (the code the STM32   │
+   │                      │                       │ BMP390: ISA + regs   │──────  memory ─>│  H743 firmware runs)   │
+   │                      │                       │ + calibration NVM    │  raw ADC words  │                        │
+   │                      │  position + attitude  └──────────────────────┘                 │                        │
+   │                      │  -> body-frame field  ┌──────────────────────┐ I2C transactions│                        │
+   │                      ├──────────────────────>│ hemerion_mmc5983ma   │<────────────────┤                        │
+   └──────────────────────┘  (host-computed)      │ _fmu: MMC5983MA with │  over shared    │                        │
+            │                                     │ SET/RESET bridge     │──────  memory ─>│                        │
+            │                                     │ offset + hard iron   │  18-bit counts  └────────────────────────┘
             │                                     └──────────────────────┘
-            └── rocket_gps_cosim: Ecos master, fixed step 0.1 s (10 Hz GPS, 100 Hz IMU, baro at programmed ODR) ──┘
+            └─ rocket_gps_cosim: Ecos master, fixed step 0.1 s (10 Hz GPS, 100 Hz IMU, baro + mag at programmed rates) ─┘
 
-The arrow directions are the point. The receiver *talks*; the IMU and the
-barometer are *polled*. Modelling all three as byte streams pushed at the
-flight computer would have exercised the packet parsers and nothing else — no
-register map, no FIFO, no chip select, no ODR register, none of the sequence
-firmware actually runs against an inertial part or a barometer.
+The arrow directions are the point. The receiver *talks*; the IMU, the
+barometer and the magnetometer are *polled*. Modelling all four as byte
+streams pushed at the flight computer would have exercised the packet parsers
+and nothing else — no register map, no FIFO, no chip select, no ODR register,
+no SET/RESET handshake, none of the sequence firmware actually runs against an
+inertial part, a barometer or a magnetometer.
 
 .. contents:: On this page
    :local:
@@ -259,6 +275,106 @@ Two consequences worth knowing when reading a run:
 * the part's FIFO is 16 KiB, about 420 frames or four seconds at 100 Hz. A
   controller slower than that loses whole samples, never framing, and finds
   out through the sticky overflow bit, which the summary line reports.
+
+.. _rocket_gps_ecos_mag:
+
+Driving the magnetometer over I2C
+---------------------------------
+
+The magnetometer is the only sensor in this scenario whose bring-up *blocks on
+the plant*, and that is what makes it worth having here. The other three parts
+are configured and then read. The MMC5983MA has to be **conditioned** first.
+
+Its sensing elements are Wheatstone bridges of anisotropic magneto-resistive
+film, and the bridge carries an electrical offset that the datasheet bounds
+only at ±0.5 gauss — which is the size of Earth's entire field. A reading
+taken without dealing with it is not a slightly noisy field measurement; it is
+a field measurement plus an unknown vector of comparable magnitude. The part
+provides the way out in hardware: an on-die coil that re-magnetises the film
+in either direction. After a SET the field enters the bridges positively,
+after a RESET negatively, and the bridge offset — being electrical, not
+magnetic — does not flip with it:
+
+.. code-block:: text
+
+   after SET     output = null + H·S + offset
+   after RESET   output = null − H·S + offset
+                 ⇒  H·S   = (set − reset) / 2      the field
+                    offset = (set + reset) / 2 − null
+
+So ``Mmc5983maDriver::calibrate_offset()`` is a five-step handshake, and every
+step is a separate I2C transaction with a poll loop between:
+
+.. code-block:: cpp
+
+    Mmc5983maDriver mag_driver(mag_bus);
+    mag_driver.probe();     // product ID, software reset, bandwidth, SET,
+                            // then: SET → measure → RESET → measure →
+                            //       average → SET again → continuous mode
+
+    while (true)
+    {
+      MagSample sample;
+      if (mag_driver.read_sample(sample) == Mmc5983maReadResult::kSample)
+      {
+        // Status polled, seven data bytes burst, Meas_M_Done acknowledged,
+        // null field and the calibrated bridge offset subtracted, converted
+        // to microtesla by the same convert_raw_to_si() the IMU path uses.
+      }
+    }
+
+That final SET is not decoration. Leaving the part RESET produces readings
+that are still offset-corrected and still the right magnitude, and every axis
+negated — the failure this example is best placed to catch, because a
+sign-flipped magnetometer looks entirely healthy in a summary line.
+
+Three consequences worth knowing when reading a run:
+
+* **Start order stops being free.** The other probes only need the bus to
+  exist; this one needs the co-simulation to be *stepping*, because the part
+  only measures when the master advances it. ``gps_flight_computer`` therefore
+  retries the magnetometer probe on ``kMeasurementTimeout`` rather than
+  failing, and reports the difference between "not being stepped" and "wrong
+  part". A real board never needs that retry.
+* **The truth field is host-computed**, like the IMU's specific force and for
+  the same reason: it depends on where the vehicle is *and* how it is
+  pointing, and an Ecos connection modifier sees one source variable.
+  ``geomagnetic_field.hpp`` maps ``lat``/``lon``/``alt`` through a centered
+  tilted dipole and rotates the result into body axes with the plant's
+  ``yaw``/``pitch``/``roll``. It is a dipole, not the WMM — the header is
+  explicit about what that costs, particularly at Scenario 17's equatorial
+  Atlantic pad.
+* **The die temperature is wired, the sample rate is not.** ``rocket::out.T_K``
+  feeds ``mag::temperature_c`` through a connection modifier, so the part
+  reports ambient at its 0.8 °C resolution. The measurement rate is a register
+  the flight computer writes, exactly as with the BMP390's ODR.
+
+The magnetometer's own lines from a paced reference run (``--rtf 1``):
+
+.. code-block:: text
+
+   [fc] MMC5983MA identified on I2C (product ID matched), bridge offset +2656/-1690/+1395 LSB (+16.21/-10.31/+8.51 uT) cancelled, measuring at 50 Hz
+   [fc] mag      1  t=    0.6 s  b=(  -5.14,  -29.96,   -2.14) uT  |b|= 30.47 uT
+   [fc] mag    500  t=  161.8 s  b=(  -5.06,  -27.55,   +0.90) uT  |b|= 28.03 uT
+   [fc] 574 MMC5983MA measurements read over 2368 I2C transactions (0 failed)
+   [fc] field magnitude 27.191 to 30.5587 uT over the flight (1/r^3 falloff with altitude)
+
+The bring-up line is the one to read. **That part was born with a bridge
+offset of +16.2 / −10.3 / +8.5 µT** against a field of about 30 µT. The driver
+measured it and removed it before reporting anything, which is why the samples
+that follow are a field and not a puzzle.
+
+The offset is drawn afresh each run from the datasheet's ±0.5 gauss tolerance,
+so it is not a fixed property of the part and neither is the damage it would
+have done: the run above would have been ~28° out, an earlier one with a
+larger offset ~65°. What is fixed is the order of magnitude — an offset
+comparable to Earth's field, and a heading error in the tens of degrees.
+
+One modelling limit is worth stating plainly: ``sim/i2c_shm`` carries one
+peripheral per bus, so the BMP390 and the MMC5983MA sit on **two separate
+simulated buses** here, where a real board would put both on I2C1 at 0x76 and
+0x30. Multi-drop addressing is the one thing about driving two I2C parts that
+this example does not exercise.
 
 Building
 --------
@@ -440,9 +556,22 @@ it while altitude climbs is the vehicle decelerating in thinning air.
 Flight computer console
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Every 50th decoded fix, every 1000th decoded IMU sample and every 500th baro
-conversion is printed; the data is what the *sensors* report — truth plus the
-injected noise — decoded from raw bytes:
+Every 50th decoded fix, every 1000th decoded IMU sample, every 500th baro
+conversion and every 500th magnetometer measurement is printed; the data is
+what the *sensors* report — truth plus the injected noise — decoded from raw
+bytes.
+
+.. note::
+
+   The transcript below is the original three-sensor reference run, captured
+   on the WSL2 host described in :ref:`rocket_gps_ecos_setup` before the
+   magnetometer was added, and it is left as it was recorded rather than
+   having later numbers spliced into it. A current run prints two more
+   bring-up lines and the ``[fc] mag`` stream alongside these; the
+   magnetometer's own lines, from a paced run on a different machine, are
+   quoted in :ref:`rocket_gps_ecos_mag`. Sample *counts* for the two polled
+   I2C parts depend strongly on how fast the host runs the master — see the
+   ``--rtf 1`` note under `Running`_.
 
 .. code-block:: text
 
@@ -702,6 +831,40 @@ PNG detached from its caption has no other way to tell you which it is.
    the reason a launch vehicle carries all three sensors at once. Each sample
    is timestamped from the part's own ``SENSORTIME`` counter, read in the
    same shadowed burst as the data registers.
+
+.. figure:: _static/rocket_gps_ecos/mag_body_field.png
+   :width: 100%
+   :alt: Three body-axis magnetic field components against time, decoded MMC5983MA samples riding on the truth curves, staging marker at 37.4 s
+
+   The magnetometer channel: body-frame field decoded by the on-target
+   ``Mmc5983maDriver`` over the simulated I2C bus, against the field the FMU
+   was handed. The three axes are doing three different things — body Y
+   carries almost the whole field because the vehicle flies due east across a
+   mostly-northward one, while X and Z hold the small residue as it pitches
+   over — which is exactly the geometry a swapped axis or a sign error would
+   destroy, and exactly what a magnitude plot would hide. The constant gap
+   between samples and truth is the simulated part's **hard iron**: a real
+   field the installation adds, which no amount of SET/RESET removes.
+
+.. figure:: _static/rocket_gps_ecos/mag_magnitude.png
+   :width: 100%
+   :alt: Two panels — total field intensity falling from 31 to 27.5 microtesla over the flight, and the direction error a skipped calibration would have caused, rising from 60 to 66 degrees
+
+   Top: total intensity, the near-rotation-invariant quantity, so this panel
+   is about the flight rather than the attitude — the field weakens as the
+   vehicle climbs (1/r³ over 236 km) and shifts as it flies 2000 km east
+   relative to the tilted dipole axis.
+
+   Bottom: what skipping the SET/RESET calibration would have cost, drawn
+   from the same samples with the measured bridge offset added back — **28–29°
+   on this run**, and tens of degrees on any run, since the offset is redrawn
+   each time from the datasheet's ±0.5 gauss tolerance. The first version of
+   this figure plotted the uncalibrated
+   *magnitude* and the two curves nearly coincided — which is true, and is
+   precisely why magnitude is the wrong place to look: adding an offset the
+   size of Earth's field to a field that size barely changes the length of the
+   vector while swinging its direction most of a right angle. Heading is what
+   a magnetometer is for, so the angle is the honest measure of the damage.
 
 One detail matters when comparing fixes against truth: the Ecos master
 propagates connections *between* steps, so the fix emitted at the end of step

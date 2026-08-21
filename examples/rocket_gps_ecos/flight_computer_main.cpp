@@ -56,6 +56,9 @@
 #include "Hemerion/baro/baro_types.h"
 #include "Hemerion/baro/bmp390/bmp390_driver.h"
 #include "Hemerion/baro/bmp390/bmp390_registers.h"
+#include "Hemerion/mag/mag_types.h"
+#include "Hemerion/mag/mmc5983ma/mmc5983ma_driver.h"
+#include "Hemerion/mag/mmc5983ma/mmc5983ma_registers.h"
 #include "Hemerion/gps/gpsDriver.hpp"
 #include "Hemerion/imu/fmu/imu_noise_model.h"  // ImuNoiseConfig: the simulated part's register sensitivity
 #include "Hemerion/imu/imu_conversion.h"
@@ -105,22 +108,33 @@ using hemerion::sensors::imu::ImuSample;
 using hemerion::sensors::imu::ImuSpiBus;
 using hemerion::sensors::imu::ImuSpiDriver;
 using hemerion::sensors::imu::ImuSpiError;
+using hemerion::sensors::mag::MagSample;
+using hemerion::sensors::mag::mmc5983ma::kMmc5983maI2cAddress;
+using hemerion::sensors::mag::mmc5983ma::kMmc5983maLsbPerMicrotesla;
+using hemerion::sensors::mag::mmc5983ma::Mmc5983maConfig;
+using hemerion::sensors::mag::mmc5983ma::Mmc5983maDriver;
+using hemerion::sensors::mag::mmc5983ma::Mmc5983maError;
+using hemerion::sensors::mag::mmc5983ma::Mmc5983maI2cBus;
+using hemerion::sensors::mag::mmc5983ma::Mmc5983maReadResult;
 using hemerion::sim::i2c_shm::I2cShmController;
 using hemerion::sim::spi_shm::SpiShmController;
 
 struct Options
 {
-  std::uint16_t gps_port = 5762;                 // GPS FMU default UDP destination
-  std::string imu_bus = "hemerion_imu_spi";      // IMU FMU default SPI bus name
-  std::string baro_bus = "hemerion_bmp390_i2c";  // BMP390 FMU default I2C bus name
-  long imu_wait_s = 120;                         // how long to wait for the sensor FMUs to bring their buses up
+  std::uint16_t gps_port = 5762;                   // GPS FMU default UDP destination
+  std::string imu_bus = "hemerion_imu_spi";        // IMU FMU default SPI bus name
+  std::string baro_bus = "hemerion_bmp390_i2c";    // BMP390 FMU default I2C bus name
+  std::string mag_bus = "hemerion_mmc5983ma_i2c";  // MMC5983MA FMU default I2C bus name
+  long imu_wait_s = 120;                           // how long to wait for the sensor FMUs to bring their buses up
   std::filesystem::path gps_csv_path = "results/gps_fixes.csv";
   std::filesystem::path imu_csv_path = "results/imu_samples.csv";
   std::filesystem::path baro_csv_path = "results/baro_samples.csv";
+  std::filesystem::path mag_csv_path = "results/mag_samples.csv";
   double fix_period_s = 0.1;   // co-sim communication step; maps fix index -> sim time for the CSV
   int print_every = 50;        // console line every N fixes (50 = every 5 s of sim time at 10 Hz)
   int imu_print_every = 1000;  // console line every N IMU samples (1000 = every 10 s at 100 Hz)
   int baro_print_every = 500;  // console line every N baro conversions (500 = every 10 s at 50 Hz)
+  int mag_print_every = 500;   // console line every N magnetometer samples
   long quiet_ms = 3000;        // exit after this long with no sensor data, once at least one sample arrived
   long max_wall_s = 900;       // hard wall-clock cap
 };
@@ -128,6 +142,7 @@ struct Options
 void print_usage()
 {
   std::cout << "usage: gps_flight_computer [--port <udp port>] [--imu-bus <name>] [--baro-bus <name>]\n"
+               "                           [--mag-bus <name>]\n"
                "                           [--imu-wait-s <s>] [--csv <file>] [--imu-csv <file>]\n"
                "                           [--baro-csv <file>] [--fix-period <s>]\n"
                "                           [--print-every <n>] [--imu-print-every <n>] [--baro-print-every <n>]\n"
@@ -138,6 +153,8 @@ void print_usage()
                "               the FMU reads the same name from HEMERION_IMU_FMU_SPI_BUS)\n"
                "  --baro-bus   shared-memory I2C bus the BMP390 FMU answers on (default hemerion_bmp390_i2c;\n"
                "               the FMU reads the same name from HEMERION_BMP390_FMU_I2C_BUS)\n"
+               "  --mag-bus    shared-memory I2C bus the MMC5983MA FMU answers on (default\n"
+               "               hemerion_mmc5983ma_i2c; must match HEMERION_MMC5983MA_FMU_I2C_BUS)\n"
                "  --imu-wait-s how long to wait for those buses to appear, so either process may start first\n";
 }
 
@@ -151,18 +168,21 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 13> kValueOptions = { {
+constexpr std::array<ValueOption, 16> kValueOptions = { {
     { "--port", [](Options& o, const char* v) { o.gps_port = static_cast<std::uint16_t>(std::stoi(v)); } },
     { "--imu-bus", [](Options& o, const char* v) { o.imu_bus = v; } },
     { "--baro-bus", [](Options& o, const char* v) { o.baro_bus = v; } },
+    { "--mag-bus", [](Options& o, const char* v) { o.mag_bus = v; } },
     { "--imu-wait-s", [](Options& o, const char* v) { o.imu_wait_s = std::stol(v); } },
     { "--csv", [](Options& o, const char* v) { o.gps_csv_path = v; } },
     { "--imu-csv", [](Options& o, const char* v) { o.imu_csv_path = v; } },
     { "--baro-csv", [](Options& o, const char* v) { o.baro_csv_path = v; } },
+    { "--mag-csv", [](Options& o, const char* v) { o.mag_csv_path = v; } },
     { "--fix-period", [](Options& o, const char* v) { o.fix_period_s = std::stod(v); } },
     { "--print-every", [](Options& o, const char* v) { o.print_every = std::stoi(v); } },
     { "--imu-print-every", [](Options& o, const char* v) { o.imu_print_every = std::stoi(v); } },
     { "--baro-print-every", [](Options& o, const char* v) { o.baro_print_every = std::stoi(v); } },
+    { "--mag-print-every", [](Options& o, const char* v) { o.mag_print_every = std::stoi(v); } },
     { "--quiet-ms", [](Options& o, const char* v) { o.quiet_ms = std::stol(v); } },
     { "--max-wall-s", [](Options& o, const char* v) { o.max_wall_s = std::stol(v); } },
 } };
@@ -301,6 +321,84 @@ private:
   std::size_t failed_transactions_ = 0;
 };
 
+/// @brief Mmc5983maI2cBus over the shared-memory I2C bus the MMC5983MA FMU
+/// answers on.
+///
+/// Same role as ShmI2cBus above and the same one-file difference from the
+/// STM32 build, where these are HAL_I2C_Mem_Read/Write
+/// (Hemerion/mag/mmc5983ma/mmc5983ma_hal_i2c_bus.h). Two things differ from
+/// the barometer's adapter, both because of the part rather than the
+/// transport:
+///
+/// * **A clock.** The MMC5983MA has no SENSORTIME counterpart -- nothing on
+///   the part timestamps a measurement -- so the driver stamps samples from
+///   whatever monotonic clock the board offers. Here that is this process's,
+///   counted from construction; on the target it is a DWT cycle counter or a
+///   free-running timer passed to the HAL adapter. Which is why the sample
+///   log below carries the flight computer's *own* time base alongside it.
+/// * **A longer transaction budget.** Bring-up blocks on a triggered
+///   measurement that only advances when the co-simulation steps, so a
+///   transaction timeout has to outlast a communication step, not a
+///   conversion.
+class ShmMagI2cBus final : public Mmc5983maI2cBus
+{
+public:
+  ShmMagI2cBus(I2cShmController& controller, std::chrono::milliseconds timeout)
+    : controller_(controller), timeout_(timeout), start_(std::chrono::steady_clock::now())
+  {
+  }
+
+  bool write_register(std::uint8_t reg, std::uint8_t value) override
+  {
+    const std::array<std::uint8_t, 2> frame = { reg, value };
+    return complete(controller_.transaction(kMmc5983maI2cAddress, frame.data(), frame.size(), nullptr, 0, timeout_));
+  }
+
+  bool read_registers(std::uint8_t reg, std::uint8_t* out, std::size_t count) override
+  {
+    return complete(controller_.transaction(kMmc5983maI2cAddress, &reg, 1, out, count, timeout_));
+  }
+
+  void delay_ms(std::uint32_t milliseconds) override
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+  }
+
+  [[nodiscard]] std::uint64_t now_us() const override
+  {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start_).count());
+  }
+
+  [[nodiscard]] bool interrupt_line() const override { return controller_.interrupt_line(); }
+
+  [[nodiscard]] bool peripheral_present() const { return controller_.peripheral_present(); }
+
+  [[nodiscard]] std::size_t transactions() const { return transactions_; }
+  [[nodiscard]] std::size_t failed_transactions() const { return failed_transactions_; }
+
+private:
+  bool complete(I2cShmController::Result result)
+  {
+    if (result != I2cShmController::Result::kOk)
+    {
+      if (controller_.peripheral_present())
+      {
+        ++failed_transactions_;
+      }
+      return false;
+    }
+    ++transactions_;
+    return true;
+  }
+
+  I2cShmController& controller_;
+  std::chrono::milliseconds timeout_;
+  std::chrono::steady_clock::time_point start_;
+  std::size_t transactions_ = 0;
+  std::size_t failed_transactions_ = 0;
+};
+
 void print_fix(long index, double sim_time_s, const GpsFix& fix)
 {
   std::printf("[fc] fix %5ld  t=%7.1f s  lat=%11.7f  lon=%12.7f  alt=%9.1f m  vel=%7.1f m/s  crs=%5.1f deg  sats=%u\n",
@@ -381,6 +479,16 @@ int main(int argc, char** argv)
     return EXIT_FAILURE;
   }
 
+  std::optional<I2cShmController> mag_i2c =
+      I2cShmController::attach_within(options.mag_bus, std::chrono::seconds(options.imu_wait_s));
+  if (!mag_i2c.has_value())
+  {
+    std::cerr << "error: no MMC5983MA answered on I2C bus '" << options.mag_bus
+              << "' -- start rocket_gps_cosim (or point --mag-bus / HEMERION_MMC5983MA_FMU_I2C_BUS at the right "
+                 "bus)\n";
+    return EXIT_FAILURE;
+  }
+
   // A transfer that a live peripheral does not answer within a second means
   // the simulated part is hung, not merely busy.
   ShmSpiBus imu_bus(*spi, std::chrono::milliseconds(1000));
@@ -419,6 +527,62 @@ int main(int argc, char** argv)
       return EXIT_FAILURE;
   }
 
+  // The MMC5983MA bring-up is the one place in this example where the flight
+  // computer *blocks on the plant*. calibrate_offset() writes SET, triggers a
+  // measurement and polls Status until it lands -- and the simulated part only
+  // measures when the co-simulation steps it. So unlike the other two probes,
+  // a failure here is usually "the master has not started stepping yet"
+  // rather than "the part is wrong", and the retry is the fix. A real board
+  // never needs it; a co-simulated one does, and pretending otherwise would
+  // make the example fragile in exactly the way start-order races are.
+  ShmMagI2cBus mag_bus(*mag_i2c, std::chrono::milliseconds(2000));
+  Mmc5983maDriver mag_driver(mag_bus);
+  const Mmc5983maConfig mag_config;
+  bool mag_up = false;
+  for (int attempt = 0; attempt < 20 && !mag_up; ++attempt)
+  {
+    switch (mag_driver.probe(mag_config))
+    {
+      case Mmc5983maError::kNone:
+        mag_up = true;
+        break;
+      case Mmc5983maError::kMeasurementTimeout:
+        // The part answered every register but never finished a measurement:
+        // it is powered but not being stepped. Wait for the master.
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        break;
+      case Mmc5983maError::kIdentityMismatch:
+        std::cerr << "error: the part on I2C bus '" << options.mag_bus << "' is not an MMC5983MA\n";
+        return EXIT_FAILURE;
+      case Mmc5983maError::kTransferFailed:
+        std::cerr << "error: I2C transaction to the MMC5983MA failed during probe\n";
+        return EXIT_FAILURE;
+      case Mmc5983maError::kInvalidConfiguration:
+        std::cerr << "error: the MMC5983MA configuration was rejected by the driver\n";
+        return EXIT_FAILURE;
+    }
+  }
+  if (!mag_up)
+  {
+    std::cerr << "error: the MMC5983MA never completed its SET/RESET calibration -- is rocket_gps_cosim "
+                 "stepping?\n";
+    return EXIT_FAILURE;
+  }
+  {
+    // The bridge offset is worth a line of its own: it is what the SET/RESET
+    // pair bought, it is the size of Earth's field, and a run that printed
+    // zeroes here would be one whose field values are quietly all offset.
+    const auto& offset = mag_driver.bridge_offset();
+    std::printf("[fc] MMC5983MA identified on I2C (product ID matched), bridge offset %+d/%+d/%+d LSB "
+                "(%+.2f/%+.2f/%+.2f uT) cancelled, measuring at 50 Hz\n",
+                offset.x,
+                offset.y,
+                offset.z,
+                static_cast<double>(offset.x) / kMmc5983maLsbPerMicrotesla,
+                static_cast<double>(offset.y) / kMmc5983maLsbPerMicrotesla,
+                static_cast<double>(offset.z) / kMmc5983maLsbPerMicrotesla);
+  }
+
   std::ofstream gps_csv = open_csv(options.gps_csv_path);
   if (!gps_csv)
   {
@@ -444,6 +608,40 @@ int main(int argc, char** argv)
   }
   baro_csv << "sample_index,sim_time_s,pressure_pa,temperature_c\n";
 
+  std::ofstream mag_csv = open_csv(options.mag_csv_path);
+  if (!mag_csv)
+  {
+    std::cerr << "error: cannot open " << options.mag_csv_path.string() << " for writing\n";
+    return EXIT_FAILURE;
+  }
+  // Two time columns, because this part forces the question the other two
+  // answer for you. The BMP390 stamps its own conversions (SENSORTIME) and
+  // IMU frames carry the simulation clock in their payload; an MMC5983MA
+  // sample carries nothing, so `host_time_s` is this process's clock -- which
+  // equals simulation time only under --rtf 1 -- and `sim_time_s` is the
+  // flight computer aligning the sample to the time base it does have, the
+  // most recent IMU payload timestamp. That is what real firmware does with
+  // an unstamped sensor, and it is why the IMU is the time master here.
+  mag_csv << "sample_index,sim_time_s,host_time_s,mag_x_ut,mag_y_ut,mag_z_ut\n";
+
+  {
+    // The bridge offset beside the data it made valid, in the same
+    // key=value shape rocket_gps_cosim uses for its own run configuration.
+    // Without it a reader of mag_samples.csv cannot tell a run whose
+    // calibration worked from one whose part happened to have a small offset,
+    // and plot_results.py could not draw the uncalibrated counterfactual.
+    std::ofstream mag_config =
+        open_csv(options.mag_csv_path.parent_path() / (options.mag_csv_path.stem().string() + ".config"));
+    if (mag_config)
+    {
+      const auto& offset = mag_driver.bridge_offset();
+      mag_config << "bridge_offset_x_lsb=" << offset.x << "\n"
+                 << "bridge_offset_y_lsb=" << offset.y << "\n"
+                 << "bridge_offset_z_lsb=" << offset.z << "\n"
+                 << "lsb_per_microtesla=" << kMmc5983maLsbPerMicrotesla << "\n";
+    }
+  }
+
   GpsDriver gps_driver(GpsProtocol::kUbx);
   // On real hardware the IMU driver knows the full-scale ranges because it
   // configured the part's registers itself; here the "configuration" is the
@@ -458,6 +656,11 @@ int main(int argc, char** argv)
   long valid_fix_count = 0;  // epochs that actually carried a solution
   long imu_sample_count = 0;
   long baro_sample_count = 0;
+  long mag_sample_count = 0;
+  // The flight computer's own time base, taken from the IMU payload stamps
+  // and used to place the magnetometer samples that carry none.
+  double imu_sim_time_s = 0.0;
+  bool mag_gone = false;
   long checksum_errors = 0;
   long imu_checksum_errors = 0;
   long imu_fifo_overflows = 0;
@@ -469,6 +672,8 @@ int main(int argc, char** argv)
   double max_body_rate_rad_s = 0.0;
   double min_pressure_pa = std::numeric_limits<double>::infinity();
   double min_temperature_c = std::numeric_limits<double>::infinity();
+  double max_field_ut = 0.0;
+  double min_field_ut = std::numeric_limits<double>::infinity();
   bool imu_bus_failed = false;
   bool baro_gone = false;
 
@@ -586,6 +791,7 @@ int main(int argc, char** argv)
         ++imu_sample_count;
         // IMU frames carry the simulation clock in their payload.
         const double sim_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
+        imu_sim_time_s = sim_time_s;
         const double specific_force_mps2 = std::sqrt(static_cast<double>(sample.accel_x) * sample.accel_x +
                                                      static_cast<double>(sample.accel_y) * sample.accel_y +
                                                      static_cast<double>(sample.accel_z) * sample.accel_z);
@@ -651,6 +857,57 @@ int main(int argc, char** argv)
     }
   };
 
+  // The same polling sequence the firmware's magnetometer task performs:
+  // Status, then the seven-byte data burst, then acknowledge. Like the
+  // barometer the data registers hold exactly one measurement, so an unpaced
+  // master overwrites conversions between polls and the stream lands at
+  // roughly one per communication step rather than the 50 Hz the part is
+  // configured for.
+  auto poll_mag = [&]() {
+    if (mag_gone)
+    {
+      return;
+    }
+    for (;;)
+    {
+      MagSample sample;
+      const Mmc5983maReadResult result = mag_driver.read_sample(sample);
+      if (result == Mmc5983maReadResult::kTransferFailed)
+      {
+        // Same split as the IMU and the baro: against a live part this is a
+        // fault, against a powered-down one it is the co-simulation ending.
+        mag_gone = true;
+        return;
+      }
+      if (result != Mmc5983maReadResult::kSample)
+      {
+        return;
+      }
+      last_sensor_data = std::chrono::steady_clock::now();
+      any_data = true;
+      ++mag_sample_count;
+
+      const double host_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
+      const double magnitude_ut = std::sqrt((static_cast<double>(sample.mag_x_ut) * sample.mag_x_ut) +
+                                            (static_cast<double>(sample.mag_y_ut) * sample.mag_y_ut) +
+                                            (static_cast<double>(sample.mag_z_ut) * sample.mag_z_ut));
+      max_field_ut = std::max(max_field_ut, magnitude_ut);
+      min_field_ut = std::min(min_field_ut, magnitude_ut);
+      mag_csv << mag_sample_count << ',' << imu_sim_time_s << ',' << host_time_s << ',' << sample.mag_x_ut << ','
+              << sample.mag_y_ut << ',' << sample.mag_z_ut << '\n';
+      if (mag_sample_count == 1 || mag_sample_count % options.mag_print_every == 0)
+      {
+        std::printf("[fc] mag  %5ld  t=%7.1f s  b=(%+7.2f, %+7.2f, %+7.2f) uT  |b|=%6.2f uT\n",
+                    mag_sample_count,
+                    imu_sim_time_s,
+                    static_cast<double>(sample.mag_x_ut),
+                    static_cast<double>(sample.mag_y_ut),
+                    static_cast<double>(sample.mag_z_ut),
+                    magnitude_ut);
+      }
+    }
+  };
+
   while (true)
   {
     const auto now = std::chrono::steady_clock::now();
@@ -680,6 +937,7 @@ int main(int argc, char** argv)
     drain_gps(std::chrono::milliseconds(5));
     poll_imu();
     poll_baro();
+    poll_mag();
   }
 
   // The co-simulation stopping does not mean the last datagrams have been
@@ -712,12 +970,24 @@ int main(int argc, char** argv)
             << imu_checksum_errors << " checksum errors, " << imu_fifo_overflows << " FIFO overflows, "
             << imu_bus.failed_transfers() << " failed transfers)\n"
             << "[fc] " << baro_sample_count << " BMP390 conversions read over " << baro_bus.transactions()
-            << " I2C transactions (" << baro_bus.failed_transactions() << " failed)\n";
+            << " I2C transactions (" << baro_bus.failed_transactions() << " failed)\n"
+            << "[fc] " << mag_sample_count << " MMC5983MA measurements read over " << mag_bus.transactions()
+            << " I2C transactions (" << mag_bus.failed_transactions() << " failed)\n";
   if (baro_sample_count > 0)
   {
     std::cout << "[fc] min pressure " << min_pressure_pa << " Pa, min temperature " << min_temperature_c
               << " C (both at the top of the observed trajectory)\n";
   }
+  if (mag_sample_count > 0)
+  {
+    // The span is the 1/r^3 falloff made visible: the field the part sees on
+    // the pad against the field it sees at the top of the trajectory. Body
+    // rotation moves the components around but not the magnitude, so this is
+    // an altitude story rather than an attitude one.
+    std::cout << "[fc] field magnitude " << min_field_ut << " to " << max_field_ut
+              << " uT over the flight (1/r^3 falloff with altitude)\n";
+  }
+
   // With a launch-vehicle envelope in force the receiver can hold no usable
   // fix at all, and "max altitude 0 m" would read as a measurement rather than
   // as the absence of one.
@@ -733,6 +1003,8 @@ int main(int argc, char** argv)
   std::cout << "[fc] max |specific force| " << max_specific_force_mps2 << " m/s2, max |body rate| "
             << max_body_rate_rad_s << " rad/s\n"
             << "[fc] fixes written to " << options.gps_csv_path.string() << ", IMU samples to "
-            << options.imu_csv_path.string() << ", baro samples to " << options.baro_csv_path.string() << "\n";
-  return (fix_count > 0 && imu_sample_count > 0 && baro_sample_count > 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            << options.imu_csv_path.string() << ", baro samples to " << options.baro_csv_path.string()
+            << ", magnetometer samples to " << options.mag_csv_path.string() << "\n";
+  return (fix_count > 0 && imu_sample_count > 0 && baro_sample_count > 0 && mag_sample_count > 0) ? EXIT_SUCCESS :
+                                                                                                    EXIT_FAILURE;
 }

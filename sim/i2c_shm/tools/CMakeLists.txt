@@ -22,3 +22,8 @@ add_executable(bmp390_shm_peripheral bmp390_shm_peripheral.cpp ${HEMERION_I2C_SH
 target_include_directories(bmp390_shm_peripheral PRIVATE "${HEMERION_I2C_SHM_SENSORS_DIR}/include")
 target_link_libraries(bmp390_shm_peripheral PRIVATE hemerion_i2c_shm)
 target_compile_features(bmp390_shm_peripheral PRIVATE cxx_std_23)
+
+add_executable(mmc5983ma_shm_peripheral mmc5983ma_shm_peripheral.cpp ${HEMERION_I2C_SHM_MMC5983MA_SOURCES})
+target_include_directories(mmc5983ma_shm_peripheral PRIVATE "${HEMERION_I2C_SHM_SENSORS_DIR}/include")
+target_link_libraries(mmc5983ma_shm_peripheral PRIVATE hemerion_i2c_shm)
+target_compile_features(mmc5983ma_shm_peripheral PRIVATE cxx_std_23)

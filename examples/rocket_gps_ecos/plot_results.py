@@ -751,12 +751,157 @@ def plot_baro_altitude(truth, baro, out: Path, caption: str) -> None:
     plt.close(fig)
 
 
+def read_mag_config(mag_path: Path) -> dict[str, float]:
+    """Reads the `<mag stem>.config` sidecar gps_flight_computer writes.
+
+    Carries the bridge offset the SET/RESET pair cancelled at bring-up, which
+    is what lets the magnitude figure draw the reading an uncalibrated driver
+    would have produced from the very same samples.
+    """
+    path = mag_path.with_suffix(".config")
+    if not path.exists():
+        return {}
+    values: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        key, _, value = line.partition("=")
+        try:
+            values[key.strip()] = float(value)
+        except ValueError:
+            continue
+    return values
+
+
+def truth_field(truth) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Truth time and body-field columns with the t = 0 row dropped.
+
+    The host writes mag::b_*_ut after stepping, so the first logged row holds
+    the variables' FMI start value -- zero -- not a measurement of anything.
+    Plotting it puts a point at the origin and rescales every axis around it.
+    """
+    times, bx, by, bz = [], [], [], []
+    for t, x, y, z in zip(truth["time"], truth["b_x_ut"], truth["b_y_ut"], truth["b_z_ut"]):
+        if x == 0.0 and y == 0.0 and z == 0.0:
+            continue
+        times.append(t)
+        bx.append(x)
+        by.append(y)
+        bz.append(z)
+    return times, bx, by, bz
+
+
+def plot_mag_body_field(truth, mag, out: Path, caption: str) -> None:
+    """Decoded body-frame field against the field the part was handed.
+
+    The truth CSV's b_x/b_y/b_z columns are the mag:: input variables -- the
+    zero-order-held value the FMU sampled, already one communication step
+    behind rocket truth like every connection -- so no realignment is needed,
+    exactly as for the IMU's specific force.
+
+    Three curves that move in three different ways: body X and Z swap
+    magnitude as the vehicle pitches over, while Y stays near the full field
+    because the vehicle flies due east across a mostly-northward field. That
+    is the geometry the magnetometer exists to observe, and getting it wrong
+    (a sign flip, a swapped axis) would be obvious here and nowhere else.
+    """
+    fig, ax = new_figure()
+    t_truth, bx, by, bz = truth_field(truth)
+    for axis, color in (("x", TRUTH), ("y", GPS), ("z", INK_2)):
+        ax.plot(mag["sim_time_s"], mag[f"mag_{axis}_ut"],
+                linestyle="none", marker=".", markersize=3, alpha=0.45, color=color,
+                label=f"decoded body {axis.upper()}")
+        ax.plot(t_truth, {"x": bx, "y": by, "z": bz}[axis], color=color, linewidth=1.3,
+                label=f"truth body {axis.upper()}")
+    t_stage = staging_time(truth)
+    if t_stage is not None:
+        annotate_event(ax, t_stage, f"stage 1 separation\n t = {t_stage:.1f} s")
+    ax.set_xlabel("simulation time [s]")
+    ax.set_ylabel("magnetic field, body axes [µT]")
+    ax.set_title("Magnetometer: MMC5983MA counts decoded over I2C vs. the field applied")
+    legend(ax)
+    stamp(fig, caption)
+    fig.savefig(out / "mag_body_field.png", facecolor=SURFACE)
+    plt.close(fig)
+
+
+def plot_mag_magnitude(truth, mag, mag_config: dict[str, float], out: Path, caption: str) -> None:
+    """Two things the decoded stream shows that a single trace cannot.
+
+    **Top: total intensity.** Magnitude is the near-rotation-invariant
+    quantity, so this panel is about the flight rather than the attitude. The
+    field weakens as the vehicle climbs (1/r³ costs ~10% over 236 km) and
+    shifts as it flies 2000 km east relative to the tilted dipole axis. The
+    decoded samples sit a little under truth throughout: that gap is the
+    simulated part's *hard iron*, a real field the installation adds, which no
+    amount of SET/RESET removes -- only a magnetic calibration flown through
+    attitudes can.
+
+    **Bottom: what skipping the calibration would have cost.** The first
+    version of this figure drew the uncalibrated magnitude on the top panel
+    and the two curves nearly coincided -- which is true, and is exactly why
+    magnitude is the wrong place to look. Adding a bridge offset the size of
+    Earth's field to a field that size barely changes the *length* of the
+    vector while swinging its *direction* most of a right angle. Heading is
+    what a magnetometer is for, so the angle between the calibrated reading
+    and the one an uncalibrated driver would have logged is the honest measure
+    of the damage, and it runs to tens of degrees.
+    """
+    fig, (ax_mag, ax_err) = plt.subplots(2, 1, figsize=(8.0, 5.6), dpi=150, sharex=True)
+    fig.patch.set_facecolor(SURFACE)
+    style_axis(ax_mag)
+    style_axis(ax_err)
+
+    decoded = [math.sqrt(x * x + y * y + z * z)
+               for x, y, z in zip(mag["mag_x_ut"], mag["mag_y_ut"], mag["mag_z_ut"])]
+    ax_mag.plot(mag["sim_time_s"], decoded,
+                linestyle="none", marker=".", markersize=3, alpha=0.55, color=GPS,
+                label="|B| from decoded MMC5983MA samples")
+    t_truth, bx, by, bz = truth_field(truth)
+    ax_mag.plot(t_truth,
+                [math.sqrt(x * x + y * y + z * z) for x, y, z in zip(bx, by, bz)],
+                color=TRUTH, linewidth=1.4, label="|B| applied to the part (dipole truth)")
+    ax_mag.set_ylabel("total intensity |B| [µT]")
+    ax_mag.set_title("Field intensity, and the heading a skipped calibration would have cost")
+    legend(ax_mag)
+
+    scale = mag_config.get("lsb_per_microtesla", 0.0)
+    if scale > 0.0:
+        offset = tuple(mag_config.get(f"bridge_offset_{a}_lsb", 0.0) / scale for a in "xyz")
+        angles = []
+        for x, y, z in zip(mag["mag_x_ut"], mag["mag_y_ut"], mag["mag_z_ut"]):
+            ux, uy, uz = x + offset[0], y + offset[1], z + offset[2]
+            norm = math.sqrt(x * x + y * y + z * z) * math.sqrt(ux * ux + uy * uy + uz * uz)
+            if norm <= 0.0:
+                angles.append(0.0)
+                continue
+            cosine = min(1.0, max(-1.0, ((x * ux) + (y * uy) + (z * uz)) / norm))
+            angles.append(math.degrees(math.acos(cosine)))
+        ax_err.plot(mag["sim_time_s"], angles,
+                    linestyle="none", marker=".", markersize=3, alpha=0.6, color=LIMIT,
+                    label="angle between the calibrated field and an uncalibrated one")
+        ax_err.annotate(f"bridge offset cancelled at bring-up: "
+                        f"{offset[0]:+.1f} / {offset[1]:+.1f} / {offset[2]:+.1f} µT",
+                        xy=(0.98, 0.08), xycoords="axes fraction", ha="right",
+                        fontsize=8, color=INK_2)
+        legend(ax_err)
+    else:
+        ax_err.annotate("no mag_samples.config sidecar -- cannot draw the uncalibrated counterfactual",
+                        xy=(0.5, 0.5), xycoords="axes fraction", ha="center",
+                        fontsize=9, color=INK_2)
+
+    ax_err.set_xlabel("simulation time [s]")
+    ax_err.set_ylabel("direction error [deg]")
+    stamp(fig, caption)
+    fig.savefig(out / "mag_magnitude.png", facecolor=SURFACE)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--truth", type=Path, default=Path("results/rocket_truth.csv"))
     parser.add_argument("--fixes", type=Path, default=Path("results/gps_fixes.csv"))
     parser.add_argument("--imu", type=Path, default=Path("results/imu_samples.csv"))
     parser.add_argument("--baro", type=Path, default=Path("results/baro_samples.csv"))
+    parser.add_argument("--mag", type=Path, default=Path("results/mag_samples.csv"))
     parser.add_argument("--out", type=Path, default=Path("plots"))
     args = parser.parse_args()
 
@@ -806,6 +951,16 @@ def main() -> None:
         baro = read_fixes(args.baro)  # same plain-CSV shape again
         plot_baro_pressure(truth, baro, args.out, caption)
         plot_baro_altitude(truth, baro, args.out, caption)
+        figures += 2
+
+    if args.mag.exists() and "b_x_ut" in truth:
+        # The truth guard matters: a truth log from before the magnetometer
+        # was wired in has no b_* columns, and half a figure is worse than
+        # none.
+        mag = read_fixes(args.mag)  # same plain-CSV shape again
+        mag_config = read_mag_config(args.mag)
+        plot_mag_body_field(truth, mag, args.out, caption)
+        plot_mag_magnitude(truth, mag, mag_config, args.out, caption)
         figures += 2
     print(f"wrote {figures} figures to {args.out}/")
 

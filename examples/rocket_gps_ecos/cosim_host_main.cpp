@@ -68,6 +68,8 @@
 // header the build fails loudly rather than the check silently rotting.
 #include "util/unzipper.hpp"
 
+#include "geomagnetic_field.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -90,6 +92,9 @@
 
 namespace
 {
+using hemerion::examples::rocket_gps_ecos::FieldBody;
+using hemerion::examples::rocket_gps_ecos::FieldNed;
+using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
 
 // Compile-time defaults injected by CMakeLists.txt; both can be overridden on
 // the command line, so an empty default (FMU not found at configure time) is
@@ -106,6 +111,9 @@ namespace
 #ifndef HEMERION_BMP390_FMU_PATH
 #define HEMERION_BMP390_FMU_PATH ""
 #endif
+#ifndef HEMERION_MMC5983MA_FMU_PATH
+#define HEMERION_MMC5983MA_FMU_PATH ""
+#endif
 
 struct Options
 {
@@ -113,6 +121,7 @@ struct Options
   std::filesystem::path gps_fmu = HEMERION_GPS_FMU_PATH;
   std::filesystem::path imu_fmu = HEMERION_IMU_FMU_PATH;
   std::filesystem::path baro_fmu = HEMERION_BMP390_FMU_PATH;
+  std::filesystem::path mag_fmu = HEMERION_MMC5983MA_FMU_PATH;
   std::filesystem::path csv_path = "results/rocket_truth.csv";
   // NASA TM-2015-218675 Scenario 17 runs to 200 s: stage 1 burns out at 37.4 s, the vehicle coasts, stage 2
   // ignites at 131.8 s and burns out at 193 s, and the check-case data ends 7 s later with the vehicle still
@@ -153,6 +162,7 @@ void print_usage()
 {
   std::cout << "usage: rocket_gps_cosim [--rocket <TwoStageRocket.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
                "                        [--imu <hemerion_imu_fmu.fmu>] [--baro <hemerion_bmp390_fmu.fmu>]\n"
+               "                        [--mag <hemerion_mmc5983ma_fmu.fmu>]\n"
                "                        [--imu-rate <hz>] [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                        [--stg2-ignition <s>] [--lat0 <deg>] [--lon0 <deg>] [--alt0 <m>]\n"
                "                        [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
@@ -162,6 +172,9 @@ void print_usage()
                "  --imu       path to the packaged hemerion_imu_fmu.fmu (default: build-tree artifact)\n"
                "  --baro      path to the packaged hemerion_bmp390_fmu.fmu (default: build-tree artifact;\n"
                "              no rate option -- the part converts at the ODR the flight computer programs)\n"
+               "  --mag       path to the packaged hemerion_mmc5983ma_fmu.fmu (default: build-tree artifact;\n"
+               "              no rate option either -- the part measures at the rate the flight computer\n"
+               "              programs into Internal control 2, and on command during its bring-up)\n"
                "  --imu-rate  IMU output data rate [Hz] (default 100)\n"
                "  --dyn-model u-blox dynModel code for the receiver's platform model (default -1 = no platform\n"
                "              envelope, leaving COCOM as the only limit; 8 = airborne <4 g, whose acceleration\n"
@@ -189,11 +202,12 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 15> kValueOptions = { {
+constexpr std::array<ValueOption, 16> kValueOptions = { {
     { "--rocket", [](Options& o, const char* v) { o.rocket_fmu = v; } },
     { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
     { "--baro", [](Options& o, const char* v) { o.baro_fmu = v; } },
+    { "--mag", [](Options& o, const char* v) { o.mag_fmu = v; } },
     { "--imu-rate", [](Options& o, const char* v) { o.imu_rate_hz = std::stod(v); } },
     { "--dyn-model", [](Options& o, const char* v) { o.dynamic_platform = std::stoi(v); } },
     { "--reacq", [](Options& o, const char* v) { o.reacquisition_time_s = std::stod(v); } },
@@ -468,7 +482,8 @@ int main(int argc, char** argv)
   for (const auto& [label, path] : { std::pair{ "rocket", options.rocket_fmu },
                                      std::pair{ "gps", options.gps_fmu },
                                      std::pair{ "imu", options.imu_fmu },
-                                     std::pair{ "baro", options.baro_fmu } })
+                                     std::pair{ "baro", options.baro_fmu },
+                                     std::pair{ "mag", options.mag_fmu } })
   {
     if (path.empty() || !std::filesystem::exists(path))
     {
@@ -477,7 +492,7 @@ int main(int argc, char** argv)
     }
   }
 
-  // All three archives take the same extraction path, so one probe settles it.
+  // All four archives take the same extraction path, so one probe settles it.
   // Cheapest to use our own GPS FMU: it is small and always in the build tree.
   if (!preflight_fmu_extraction(options.gps_fmu))
   {
@@ -496,6 +511,7 @@ int main(int argc, char** argv)
     ss.add_model("gps", options.gps_fmu.string());
     ss.add_model("imu", options.imu_fmu.string());
     ss.add_model("baro", options.baro_fmu.string());
+    ss.add_model("mag", options.mag_fmu.string());
 
     // The rocket reports geodetic position in radians; the GPS FMU takes degrees.
     const std::function<double(const double&)> rad2deg = [](const double& rad) {
@@ -521,6 +537,13 @@ int main(int argc, char** argv)
     // else about its behaviour -- rate included -- is register state the
     // flight computer programs over I2C.
     ss.make_connection<double>("rocket::out.alt_m", "baro::h_m");
+
+    // The magnetometer's die temperature: ambient air, near enough for a part
+    // whose temperature channel quantizes at 0.8 C. The field itself has no
+    // rocket output to connect -- it is computed in the stepping loop below,
+    // for the same reason specific force is.
+    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
+    ss.make_connection<double>("rocket::out.T_K", "mag::temperature_c", kelvin2celsius);
 
     // NASA TM-2015-218675 Scenario 17's initial conditions: equatorial pad on
     // the prime meridian, due east, 55.22 deg nose-up. These are the
@@ -580,7 +603,13 @@ int main(int argc, char** argv)
                             // like every other connection).
                             "imu::f_x_mps2",
                             "imu::f_y_mps2",
-                            "imu::f_z_mps2" },
+                            "imu::f_z_mps2",
+                            // Likewise for the magnetometer: the body-frame truth field
+                            // the host computed and wrote, so a decoded sample can be
+                            // compared against what the part was actually given.
+                            "mag::b_x_ut",
+                            "mag::b_y_ut",
+                            "mag::b_z_ut" },
                           { "rocket::out.staged" });
     write_run_config(options.csv_path, options);
 
@@ -604,6 +633,21 @@ int main(int argc, char** argv)
     auto* imu_fy = sim->get_real_property("imu::f_y_mps2");
     auto* imu_fz = sim->get_real_property("imu::f_z_mps2");
 
+    // Magnetic-field plumbing, the same shape and for the same reason: the
+    // field a magnetometer sees depends on where the vehicle is *and* how it
+    // is pointing -- four rocket outputs -- and an Ecos connection modifier
+    // sees one. GeomagneticDipole owns the model; geomagnetic_field.hpp is
+    // explicit about it being a centered dipole rather than the WMM, and about
+    // what that costs at this particular launch site.
+    auto* latitude = sim->get_real_property("rocket::out.lat_rad");
+    auto* longitude = sim->get_real_property("rocket::out.lon_rad");
+    auto* yaw = sim->get_real_property("rocket::out.yaw_rad");
+    auto* pitch = sim->get_real_property("rocket::out.pitch_rad");
+    auto* roll = sim->get_real_property("rocket::out.roll_rad");
+    auto* mag_bx = sim->get_real_property("mag::b_x_ut");
+    auto* mag_by = sim->get_real_property("mag::b_y_ut");
+    auto* mag_bz = sim->get_real_property("mag::b_z_ut");
+
     double apogee_m = 0.0;
     double apogee_time_s = 0.0;
     double staging_time_s = -1.0;
@@ -613,6 +657,7 @@ int main(int argc, char** argv)
               << "[cosim] gps:    " << options.gps_fmu.string() << "\n"
               << "[cosim] imu:    " << options.imu_fmu.string() << "\n"
               << "[cosim] baro:   " << options.baro_fmu.string() << "\n"
+              << "[cosim] mag:    " << options.mag_fmu.string() << "\n"
               << "[cosim] step " << options.step_s << " s (" << 1.0 / options.step_s << " Hz GPS, "
               << options.imu_rate_hz << " Hz IMU; BMP390 converts at the ODR the flight computer programs), stop "
               << options.stop_s << " s\n"
@@ -643,6 +688,18 @@ int main(int argc, char** argv)
         imu_fy->set_value(aero_fy->get_value() / mass_kg);
         imu_fz->set_value(aero_fz->get_value() / mass_kg);
       }
+
+      // Where the vehicle is and how it is pointing, turned into the body-frame
+      // field the part is immersed in. Written after the step like the specific
+      // force above, so it carries the same one-communication-step transport
+      // delay every Ecos connection does.
+      const FieldNed field_ned =
+          GeomagneticDipole::field_ned(latitude->get_value(), longitude->get_value(), altitude->get_value());
+      const FieldBody field_body =
+          GeomagneticDipole::to_body(field_ned, yaw->get_value(), pitch->get_value(), roll->get_value());
+      mag_bx->set_value(field_body.x_ut);
+      mag_by->set_value(field_body.y_ut);
+      mag_bz->set_value(field_body.z_ut);
       // After the specific-force write, so the logged imu:: inputs are the ones
       // the FMU will sample on the next step -- matching what csv_writer
       // recorded as a post-step listener.
@@ -680,6 +737,8 @@ int main(int argc, char** argv)
     std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
               << " UBX-NAV-PVT frames emitted and " << sim->iterations() * std::max(1L, imu_frames_per_step)
               << " IMU samples buffered for the SPI controller\n"
+              << "[cosim] the BMP390 and the MMC5983MA each answered at whatever rate the flight computer programmed "
+                 "them to\n"
               // Scenario 17 is a rocket *to orbit*: inside the reference
               // window the vehicle is still climbing at cut-off, so this is
               // the highest altitude reached, not an apogee.

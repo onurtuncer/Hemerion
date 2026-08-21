@@ -29,6 +29,11 @@ set(HEMERION_I2C_SHM_SENSORS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../modules/sens
 set(HEMERION_I2C_SHM_BMP390_SOURCES "${HEMERION_I2C_SHM_SENSORS_DIR}/src/baro/bmp390/bmp390_compensation.cpp"
                                     "${HEMERION_I2C_SHM_SENSORS_DIR}/src/baro/bmp390/fmu/bmp390_i2c_slave.cpp")
 
+# The MMC5983MA device model, named the same way and for the same reason. Shorter than the BMP390's list by one file:
+# that part needs its compensation polynomial compiled in on both sides, this one's transfer function is a single scalar
+# living in a header.
+set(HEMERION_I2C_SHM_MMC5983MA_SOURCES "${HEMERION_I2C_SHM_SENSORS_DIR}/src/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.cpp")
+
 if(HEMERION_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
   add_subdirectory(test)
 endif()
