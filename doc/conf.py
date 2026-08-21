@@ -182,6 +182,15 @@ breathe_show_include = True
 # Whether to add '()' to function entries in the index and elsewhere
 add_function_parentheses = True
 
+# -- Diagrams ----------------------------------------------------------------
+
+# The hand-drawn figures under api/ are mostly boxes of text, which vector
+# output keeps legible at any zoom and on a high-DPI screen. Doxygen's own
+# automatic graphs are switched off (HAVE_DOT = NO): with only four one-level
+# inheritance relationships in the tree, and base classes already named and
+# cross-linked in every signature, they would restate the line above them.
+graphviz_output_format = 'svg'
+
 # -- C++ domain --------------------------------------------------------------
 
 primary_domain = 'cpp'

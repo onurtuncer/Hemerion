@@ -224,6 +224,18 @@ jobs:
         with:
           path: build/sphinx
 
+      - name: Upload docs preview
+        # Pull requests do not deploy, so without this there is no way to look
+        # at what a docs change actually renders as. The hand-drawn figures in
+        # particular cannot be reviewed from the source: a contributor without
+        # Graphviz installed can check the DOT parses and nothing more.
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v5
+        with:
+          name: docs-preview
+          path: build/sphinx
+          retention-days: 7
+
   deploy:
     needs: build-docs
     if: github.event_name != 'pull_request'
