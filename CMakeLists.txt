@@ -33,6 +33,54 @@ project(
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ------------------------------------------------------------------------------
+# Stale-cache guard: a toolchain file that is named but never ran.
+#
+# CMAKE_TOOLCHAIN_FILE is honoured only on a build tree's *first* configure. Point a preset at a toolchain file it did
+# not previously name, re-run `cmake --preset` against a directory configured before that change, and CMake adopts none
+# of it -- while still writing CMAKE_TOOLCHAIN_FILE into the cache. The build tree then reads as correctly configured by
+# every obvious check (the cache names the right file) while compiling with none of that file's flags or definitions.
+# The only surface warning is one "Manually-specified variables were not used by the project" line in a wall of
+# configure output, and it is not an error.
+#
+# The discriminator is the file having actually run: every toolchain file under toolchains/ sets
+# HEMERION_TOOLCHAIN_APPLIED as a normal variable, which is present on a healthy configure *and on every reconfigure of
+# a healthy tree* (CMake re-reads an adopted toolchain file each time), and absent exactly when the cache was built
+# without it.
+#
+# Scoped to our own files: a foreign toolchain (vcpkg, a distribution's cross file, a user's own) will not set the
+# sentinel and must not be failed over it.
+# ------------------------------------------------------------------------------
+if(CMAKE_TOOLCHAIN_FILE AND NOT HEMERION_TOOLCHAIN_APPLIED)
+  file(REAL_PATH "${CMAKE_TOOLCHAIN_FILE}" _hemerion_named_toolchain)
+  file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/toolchains" _hemerion_toolchain_dir)
+  # Compared case-insensitively: on Windows the same path reaches us spelled both "D:/dev/..." and "D:/Dev/...".
+  string(TOLOWER "${_hemerion_named_toolchain}" _hemerion_named_toolchain)
+  string(TOLOWER "${_hemerion_toolchain_dir}/" _hemerion_toolchain_dir)
+  string(FIND "${_hemerion_named_toolchain}" "${_hemerion_toolchain_dir}" _hemerion_toolchain_is_ours)
+
+  if(_hemerion_toolchain_is_ours EQUAL 0)
+    get_filename_component(_hemerion_build_dir_name "${CMAKE_BINARY_DIR}" NAME)
+    message(
+      FATAL_ERROR
+        "${CMAKE_TOOLCHAIN_FILE} is named by this configure but was never applied: "
+        "${CMAKE_BINARY_DIR} was configured before that toolchain file was in play, and CMake honours "
+        "CMAKE_TOOLCHAIN_FILE only on a build tree's first configure. Everything it sets -- compiler, flags, "
+        "definitions -- is silently missing from this build tree.
+"
+        "Reconfigure from scratch:
+"
+        "    cmake --preset ${_hemerion_build_dir_name} --fresh
+"
+        "(or delete ${CMAKE_BINARY_DIR} and configure again). Preset names match their build directory name; if this "
+        "tree was not made by a preset, delete it and configure again however you did the first time.")
+  endif()
+
+  unset(_hemerion_named_toolchain)
+  unset(_hemerion_toolchain_dir)
+  unset(_hemerion_toolchain_is_ours)
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -52,15 +100,65 @@ option(HEMERION_BUILD_SIM "Build host-side simulation targets (sim/) -- never cr
 option(HEMERION_BUILD_EXAMPLES "Build host-side co-simulation examples (examples/) -- requires HEMERION_BUILD_FMU" OFF)
 option(HEMERION_BUILD_DOCS "Build Doxygen/Sphinx documentation" OFF)
 
+# ------------------------------------------------------------------------------
+# Native-build instrumentation. Both default OFF and are turned on by the workflow that wants them
+# (.github/workflows/sanitizers.yml, coverage.yml) rather than baked into test-native, so the ordinary build-and-test
+# jobs stay fast and the coverage run does not measure a sanitizer-instrumented binary.
+#
+# Included here, before any add_subdirectory(), because both work by add_compile_options()/add_link_options() at
+# directory scope -- which only reach directories processed after the call.
+# ------------------------------------------------------------------------------
+option(HEMERION_ENABLE_SANITIZERS "Build native targets with ASan + UBSan (GCC/Clang only)" OFF)
+option(HEMERION_ENABLE_COVERAGE "Build native targets with gcov coverage instrumentation (GCC/Clang only)" OFF)
+include(sanitizers)
+include(coverage)
+
 # Must run before any add_subdirectory() that calls add_test() (every module's test/CMakeLists.txt, plus tests/ below)
 # -- enable_testing() only takes effect in directories processed after it runs, so calling it down in the "cross-cutting
 # integration / SWIL tests" block (after modules/apps/sim are already added) left ctest unable to see any module-level
 # test.
-if(HEMERION_BUILD_TESTS)
+#
+# HEMERION_BUILD_FMU counts too, even though it turns HEMERION_BUILD_TESTS off: generateFMU() registers one
+# "fmu"-labelled archive-layout test per packaged FMU (cmake/fmu_archive_test.cmake), and without enable_testing() here
+# those would be recorded and never written out -- leaving the fmu-native test preset filtering on a label no test in
+# the tree carried, which is exactly the vacuous pass it used to be.
+if(HEMERION_BUILD_TESTS OR HEMERION_BUILD_FMU)
   enable_testing()
 endif()
 
 set(HEMERION_BSP "" CACHE STRING "Active board support package directory under bsp/ (empty = none selected)")
+
+# ------------------------------------------------------------------------------
+# A named BSP must exist. Every use of HEMERION_BSP below is guarded with EXISTS, which means a preset naming a board
+# that is not in the tree configured and built perfectly happily -- the BSP was skipped, no target was defined, and
+# every app, each of which guards on its BSP target, skipped itself in turn. cross-stm32f446 has been doing exactly that
+# in CI: green, and producing five module static libraries and zero executables for a board with no bsp/ directory. A
+# typo in the value did the same thing, silently.
+#
+# An empty HEMERION_BSP is still fine and means "no board" -- that is what the native presets use.
+# ------------------------------------------------------------------------------
+if(HEMERION_BSP AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${HEMERION_BSP}/CMakeLists.txt")
+  file(GLOB _hemerion_bsp_candidates RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/bsp" "${CMAKE_CURRENT_SOURCE_DIR}/bsp/*")
+  set(_hemerion_bsp_available "")
+  foreach(_hemerion_bsp_candidate IN LISTS _hemerion_bsp_candidates)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bsp/${_hemerion_bsp_candidate}/CMakeLists.txt")
+      list(APPEND _hemerion_bsp_available "${_hemerion_bsp_candidate}")
+    endif()
+  endforeach()
+  message(
+    FATAL_ERROR
+      "HEMERION_BSP is set to '${HEMERION_BSP}', but bsp/${HEMERION_BSP}/CMakeLists.txt does not exist. "
+      "Nothing board-specific would be built and every app would silently skip itself.
+"
+      "Available: ${_hemerion_bsp_available}
+"
+      "Leave HEMERION_BSP empty for a host build that needs no board. If you did not ask for this value, it is "
+      "cached from an earlier configure of ${CMAKE_BINARY_DIR} -- reconfigure with --fresh, or pass "
+      "-DHEMERION_BSP= to clear it.")
+endif()
+unset(_hemerion_bsp_candidates)
+unset(_hemerion_bsp_candidate)
+unset(_hemerion_bsp_available)
 
 if(HEMERION_BUILD_FMU AND CMAKE_CROSSCOMPILING)
   message(FATAL_ERROR "HEMERION_BUILD_FMU requires a native toolchain, not a cross-compiling one")
@@ -115,10 +213,20 @@ endif()
 # ------------------------------------------------------------------------------
 # Host-side simulation targets -- Renode glue, FMI master, shm/UDP/SPI bridges.
 #
-# Added before modules/ because the IMU hardware-simulator FMU answers a shared-memory SPI bus (sim/spi_shm) instead of
-# emitting UDP like the other four sensor FMUs, so that target has to exist by the time modules/sensors is processed.
-# Nothing under sim/ depends on modules/, so the order is free. Building FMUs or examples implies the transports they
-# sit on, hence the widened condition.
+# Nothing under sim/ depends on modules/, so this can go first, and it does. The dependency runs the other way exactly
+# once: the IMU hardware-simulator FMU answers a shared-memory SPI bus (sim/spi_shm) instead of emitting UDP like the
+# other four sensor FMUs, which makes it the one module target that links a sim/ library.
+#
+# That ordering is a guard, not a requirement -- an earlier version of this comment claimed the target "has to exist by
+# the time modules/sensors is processed", which is not true of either CMake or this tree. target_link_libraries()
+# accepts a name that is not a target yet and resolves it at generate time, so the link itself is indifferent to the
+# order. What does read LINK_TARGETS at configure time is generateFMU()'s _bundle_link_libraries(), through if(TARGET)
+# and get_target_property(): a name it has not seen yet is silently skipped, not diagnosed. hemerion_spi_shm is STATIC
+# and that macro skips STATIC libraries regardless, so today the order changes nothing observable at all. It starts to
+# matter the day an FMU's sim/ dependency is SHARED -- bundled, its runtime lands next to the model binary in the
+# archive; skipped, the FMU packages cleanly and fails to load only once unzipped on a machine without that library.
+#
+# Building FMUs or examples implies the transports they sit on, hence the widened condition.
 # ------------------------------------------------------------------------------
 if((HEMERION_BUILD_SIM OR HEMERION_BUILD_FMU OR HEMERION_BUILD_EXAMPLES)
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sim/CMakeLists.txt")

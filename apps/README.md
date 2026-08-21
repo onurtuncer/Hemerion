@@ -6,16 +6,23 @@ Top-level firmware executables. An app is the only thing in the repository that 
 
 ## App list
 
-| App | Target | Description |
-|---|---|---|
-| `gnc_flight/` | STM32H743 | Main GNC flight computer: sensors → EKF → control → actuators |
-| `can_actuator_link/` | STM32F446 | Minimal CAN actuator command sender; demonstrates `modules/comms` framing |
-| `datalink/` | STM32F446 | Telemetry downlink + uplink: MAVLink over UART/radio |
-| `led_blink/` | STM32H743 | Minimal FreeRTOS LED blink demo; primary SWIL example via `tests/swil/test_led_blink.py` |
+Every app guards its targets behind `if(TARGET hemerion_bsp_stm32h743_nucleo)`, and `apps/CMakeLists.txt` skips a
+subdirectory with no `CMakeLists.txt`, so an app that is not built simply does not appear — no configure error.
+
+| App | Status | Target | Description |
+|---|---|---|---|
+| `led_blink/` | **built** | STM32H743 | Minimal FreeRTOS LED blink demo; the gating SWIL example via `tests/swil/test_led_blink.py` |
+| `baro_logger/` | **built** | STM32H743 | First firmware consumer of the BMP390 I2C driver; drives the full SWIL I2C chain via `tests/swil/test_baro_logger.py` (currently informational — it hangs before its first print) |
+| `can_actuator_link/` | **built** | STM32F446 nominally | Minimal CAN actuator command sender; demonstrates `modules/comms` framing. No F446 BSP exists, so it only builds under the H743 BSP guard |
+| `gnc_flight/` | **planned** | STM32H743 | Main GNC flight computer: sensors → EKF → control → actuators. README only — no sources, no `CMakeLists.txt`, and `modules/gnc` is empty |
+| `datalink/` | **planned** | STM32F446 | Telemetry downlink + uplink: MAVLink over UART/radio. Named in `apps/CMakeLists.txt`; the directory does not exist |
 
 ---
 
 ## App internal layout
+
+The intended convention. Neither `task_config.hpp` nor `fmu_topology.yaml` exists in any app today — the two built
+apps are a single `main.cpp` plus a `CMakeLists.txt`.
 
 ```
 apps/<name>/
@@ -31,10 +38,12 @@ Apps are thin by design. If logic ends up in `main.cpp` beyond task creation and
 
 ## Build and flash
 
+`gnc_flight` is used below as the eventual example; substitute `led_blink` or `baro_logger` to run these today.
+
 ```bash
-# Build the GNC flight app for Nucleo-H743
+# Build an app for Nucleo-H743
 cmake --preset renode-h743
-cmake --build --preset renode-h743 --target gnc_flight
+cmake --build --preset renode-h743 --target led_blink
 
 # Flash via OpenOCD
 openocd -f interface/stlink.cfg -f target/stm32h7x.cfg \
@@ -46,9 +55,13 @@ STM32_Programmer_CLI -c port=SWD -d build/renode-h743/apps/gnc_flight/gnc_flight
 
 ---
 
-## FMU co-simulation wiring
+## FMU co-simulation wiring — planned, not implemented
 
-`fmu_topology.yaml` describes how module FMUs are connected when the app runs in co-simulation mode under the `sim/fmi/` master. Example:
+> **Nothing in this section exists.** No app has an `fmu_topology.yaml`, and `sim/fmi/` holds only a `package.xml` —
+> there is no master to read one. The co-simulation that runs today wires its FMUs in C++ in
+> `examples/rocket_gps_ecos`. There is no `sim/fmi/README.md`.
+
+`fmu_topology.yaml` would describe how module FMUs are connected when the app runs in co-simulation mode under the `sim/fmi/` master. Example:
 
 ```yaml
 fmus:
@@ -70,9 +83,11 @@ The FMI master in `sim/fmi/` reads this file at startup and resolves variable re
 
 ---
 
-## Task priority scheme
+## Task priority scheme — planned
 
-Use the constants in `task_config.hpp` rather than raw numbers. Suggested priority bands:
+> No app has a `task_config.hpp` yet. These are the bands to use when one is written.
+
+Use named constants rather than raw numbers. Suggested priority bands:
 
 | Band | Priority | Used for |
 |---|---|---|

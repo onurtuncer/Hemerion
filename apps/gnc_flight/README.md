@@ -1,5 +1,9 @@
 # apps/gnc_flight/
 
+> **Status: not implemented.** This directory contains this README and nothing else — no `main.cpp`, no
+> `task_config.hpp`, no `CMakeLists.txt`, so `apps/CMakeLists.txt` skips it and no `gnc_flight` target exists.
+> `modules/gnc` is likewise empty. Everything below is design intent.
+
 **Status:** Concept only. Listed in `apps/README.md`'s app table
 ("Main GNC flight computer: sensors → EKF → control → actuators",
 target STM32H743) but no `CMakeLists.txt`, `main.cpp`, `task_config.hpp`,

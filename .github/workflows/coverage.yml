@@ -19,11 +19,21 @@ jobs:
     - name: Install dependencies
       run: sudo apt update && sudo apt install -y lcov gcovr g++-14
 
+    # The -D *is* the coverage flags. This step carried this title while passing none of them: nothing in the tree
+    # set --coverage, so gcovr below ran over a build tree with no .gcno or .gcda and produced an empty report that
+    # uploaded successfully. The codecov badge measured nothing.
     - name: Configure (native host + coverage flags)
-      run: cmake --preset=test-native
+      run: cmake --preset=test-native -DHEMERION_ENABLE_COVERAGE=ON
       env:
         CC: gcc-14
         CXX: g++-14
+
+    # Proof the instrumentation is present, before spending a build on it. If the flag ever stops reaching the
+    # compiler, this fails here rather than an empty report uploading clean.
+    - name: Verify the coverage flags reached the compiler
+      run: |
+        grep -q -- '--coverage' build/test-native/compile_commands.json \
+          || { echo "::error::HEMERION_ENABLE_COVERAGE=ON but no --coverage in compile_commands.json"; exit 1; }
 
     - name: Build
       run: cmake --build --preset=test-native
@@ -32,20 +42,45 @@ jobs:
       run: ctest --preset=test-native
       continue-on-error: true
 
+    # --fail-under-line 1 is an anti-vacuous guard, not a quality bar: an uninstrumented tree reports 0 %, so a
+    # future regression that stops coverage being collected fails this step instead of quietly uploading an empty
+    # report behind fail_ci_if_error: false.
     - name: Generate coverage report (Cobertura XML)
       run: |
         gcovr \
           --root . \
-          --exclude 'tests/.*' \
-          --exclude 'vendor/.*' \
-          --exclude 'cmake/.*' \
+          --exclude '.*/tests/.*' \
+          --exclude '.*/test/.*' \
+          --exclude '.*/examples/.*' \
+          --exclude '.*/vendor/.*' \
+          --exclude '.*/cmake/.*' \
           --exclude '.*/_deps/.*' \
           --exclude '.*CMakeFiles.*' \
           --gcov-executable gcov-14 \
           --gcov-ignore-errors=no_working_dir_found \
+          --print-summary \
+          --fail-under-line 1 \
           --xml build/test-native/coverage.xml \
           --xml-pretty \
           build/test-native
+
+    # The upload needs a token and has never had one: no CODECOV_TOKEN secret is configured, so the
+    # expression below expands to an empty string and Codecov answers "Token required because branch
+    # is protected". Behind the old fail_ci_if_error: false that was invisible -- the badge has never
+    # been fed, on top of the report having been empty. Checked here so the cause is named in one line
+    # rather than found in the upload CLI's debug output.
+    #
+    # Deliberately after the gcovr step, so the coverage summary is printed either way.
+    - name: Check the Codecov token is configured
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      run: |
+        if [ -z "$CODECOV_TOKEN" ]; then
+          echo "::error::CODECOV_TOKEN is not set in this repository's secrets, so the upload below will be"
+          echo "::error::rejected and the README's codecov badge will stay stale. Add it from codecov.io"
+          echo "::error::(Settings -> Secrets and variables -> Actions), or drop the upload step and the badge."
+          exit 1
+        fi
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v7
@@ -53,5 +88,7 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: onurtuncer/Hemerion
         files: build/test-native/coverage.xml
-        fail_ci_if_error: false
+        # true, not false: a failed upload leaves the README badge showing a stale number while the job
+        # reports success -- the same quiet-failure shape this file already had once.
+        fail_ci_if_error: true
         verbose: true

@@ -27,7 +27,8 @@
       "name": "native-base",
       "hidden": true,
       "inherits": "base",
-      "description": "Native host build (Linux GCC/Clang or Windows MSVC). No toolchain file is forced here so the same preset name works on every CI runner — toolchains/x86_64-linux.cmake and toolchains/x86_64-windows-msvc.cmake remain available for callers who want their stricter flags applied explicitly.",
+      "toolchainFile": "${sourceDir}/toolchains/x86_64-native.cmake",
+      "description": "Native host build (Linux GCC/Clang or Windows MSVC). x86_64-native.cmake dispatches on the host to x86_64-linux.cmake or x86_64-windows-msvc.cmake, so one preset name still works on every CI runner — and, unlike before, those files actually apply: naming no toolchain file at all kept the presets portable by making both host files dead weight. Neither may set CMAKE_SYSTEM_NAME, which would flip CMAKE_CROSSCOMPILING even on a matching host and trip the root CMakeLists guards on FMU/SIM/EXAMPLES builds.",
       "cacheVariables": {
         "CMAKE_CXX_STANDARD": "23",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
@@ -45,22 +46,12 @@
       }
     },
     {
-      "name": "cross-stm32f446",
-      "inherits": "cross-base",
-      "displayName": "Cross — STM32F446 custom (ECS gateway)",
-      "description": "Firmware cross-compiled for the custom STM32F446 ECS gateway BSP. Build only — see tests/README.md CI matrix.",
-      "cacheVariables": {
-        "HEMERION_BSP": "stm32f446_custom"
-      }
-    },
-    {
       "name": "fmu-native",
       "inherits": "native-base",
       "displayName": "FMU (native)",
       "description": "Builds every module as an x86 FMI 2.0 and FMI 3.0 co-simulation FMU for Aetherion co-simulation",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "HEMERION_BSP": "native_linux",
         "HEMERION_BUILD_FMU": "ON",
         "HEMERION_BUILD_TESTS": "OFF"
       }
@@ -78,10 +69,9 @@
       "name": "test-native",
       "inherits": "native-base",
       "displayName": "Unit + integration tests (native)",
-      "description": "Native host build with module test binaries; cmake/sanitizers.cmake enables ASan/UBSan here on supported compilers",
+      "description": "Native host build with module test binaries. Sanitizers and coverage are opt-in, not automatic: pass -DHEMERION_ENABLE_SANITIZERS=ON (cmake/sanitizers.cmake) or -DHEMERION_ENABLE_COVERAGE=ON (cmake/coverage.cmake), which is what the sanitizers and coverage workflows do.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "HEMERION_BSP": "native_linux",
         "HEMERION_BUILD_FMU": "OFF",
         "HEMERION_BUILD_TESTS": "ON",
         "HEMERION_BUILD_SIM": "ON"
@@ -100,7 +90,6 @@
 
   "buildPresets": [
     { "name": "renode-h743", "configurePreset": "renode-h743" },
-    { "name": "cross-stm32f446", "configurePreset": "cross-stm32f446" },
     { "name": "fmu-native", "configurePreset": "fmu-native" },
     { "name": "examples-native", "configurePreset": "examples-native" },
     { "name": "test-native", "configurePreset": "test-native" },
@@ -117,9 +106,10 @@
     {
       "name": "fmu-native",
       "configurePreset": "fmu-native",
+      "description": "Verifies every packaged .fmu archive's layout. The label is carried by the tests generateFMU() registers per archive, so 'no tests matched' means the FMU build stopped producing them -- hence noTestsAction error, not ignore: with ignore this preset passed while running nothing at all.",
       "filter": { "include": { "label": "fmu" } },
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "ignore", "stopOnFailure": false }
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
     },
     {
       "name": "test-swil",

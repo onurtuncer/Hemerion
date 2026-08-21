@@ -13,6 +13,11 @@
 # belong on the BSP's interface target -- see bsp/README.md -- so this single file covers all variants.
 # ------------------------------------------------------------------------------
 
+# Proof this file was processed, read by the stale-cache guard in the root CMakeLists.txt. Deliberately a normal
+# variable and not a cache entry: it must vanish the moment the file stops running, which is exactly what a cache entry
+# would not do.
+set(HEMERION_TOOLCHAIN_APPLIED "arm-none-eabi")
+
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 
