@@ -16,8 +16,12 @@
 # belt-and-braces layer, so the suppression does not depend on which mapping
 # files a given iwyu package happens to install.
 #
-# Observed so far (2026-08-21, modules/sensors/test/test_mmc5983ma.cpp):
-#   <bits/std_abs.h> suggested alongside an existing <cstdlib>.
+# Observed so far (2026-08-21):
+#   <bits/std_abs.h> beside an existing <cstdlib>, in
+#     modules/sensors/test/test_mmc5983ma.cpp;
+#   <bits/types/sig_atomic_t.h> beside an existing <csignal>, in both
+#     sim/i2c_shm/tools/*_shm_peripheral.cpp -- which only became visible once
+#     this job started analysing sim/ at all.
 # The rest are the libstdc++ internals behind headers this tree already uses,
 # added ahead of time because they surface as soon as a translation unit names
 # the corresponding type.
@@ -29,6 +33,7 @@
   { include: ["<bits/stdint-intn.h>", "private", "<cstdint>", "public"] },
   { include: ["<bits/stdint-uintn.h>", "private", "<cstdint>", "public"] },
   { include: ["<bits/types/struct_timespec.h>", "private", "<ctime>", "public"] },
+  { include: ["<bits/types/sig_atomic_t.h>", "private", "<csignal>", "public"] },
   { include: ["<bits/chrono.h>", "private", "<chrono>", "public"] },
   { include: ["<bits/std_mutex.h>", "private", "<mutex>", "public"] },
   { include: ["<bits/this_thread_sleep.h>", "private", "<thread>", "public"] },
