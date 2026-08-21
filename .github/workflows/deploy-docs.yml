@@ -154,6 +154,12 @@ jobs:
           # 3. No documentation warnings. The tree builds clean today, so any
           #    new one is a real regression: a broken \ref, an undocumented
           #    parameter, or prose Doxygen could not parse.
+          #
+          #    The runner's Doxygen sets the bar, and it is older than what a
+          #    contributor is likely to have locally (1.9.8 here). That is the
+          #    useful direction for the skew to run, since the older parser is
+          #    the stricter one about resolving link requests -- but it does
+          #    mean a clean local run is not proof. This log is the authority.
           if [ -s "${LOG}" ]; then
             echo "::error::Doxygen reported documentation warnings"
             cat "${LOG}"

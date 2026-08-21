@@ -90,7 +90,7 @@ public:
   [[nodiscard]] virtual bool interrupt_line() const = 0;
 };
 
-/// Result of Mmc5983maDriver::probe() and ::calibrate_offset().
+/// Result of Mmc5983maDriver::probe() and Mmc5983maDriver::calibrate_offset().
 enum class Mmc5983maError : std::uint8_t
 {
   kNone,                 ///< The part is identified, offset-calibrated and measuring.
