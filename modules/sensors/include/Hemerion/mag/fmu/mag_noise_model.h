@@ -16,7 +16,7 @@
 /// saturation. Soft-iron distortion is deliberately out of scope for now --
 /// a diagonal-only error model keeps the inverse trivially equal to
 /// convert_raw_to_si(). Host-only -- this lives under the fmu/ subtree built
-/// only when HEMERION_BUILD_FMU is on, never cross-compiled, so <random> is
+/// only when HEMERION_BUILD_FMU is on, never cross-compiled, so `<random>` is
 /// fine here (unlike the on-target conversion code one directory up).
 ///
 /// The counts produced here are the exact inverse of convert_raw_to_si()

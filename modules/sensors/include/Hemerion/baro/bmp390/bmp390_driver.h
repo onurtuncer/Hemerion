@@ -15,20 +15,18 @@
 /// and burst the shadowed data registers -- and nothing about *how* the bytes
 /// reach the part.
 ///
-/// That last part is what @ref Bmp390I2cBus abstracts, and it is the only
-/// piece that differs between builds: on hardware it wraps
-/// `HAL_I2C_Mem_Read/Write` (see @ref bmp390_hal_i2c_bus.h); in the host
-/// co-simulation it wraps the shared-memory I2C bus (`sim/i2c_shm`) the
-/// BMP390 hardware-simulator FMU answers on; under Renode it would wrap the
-/// emulated I2C peripheral. The driver and the compensation below it are the
-/// same object code in all three.
+/// That last part is what @ref hemerion::sensors::baro::bmp390::Bmp390I2cBus "Bmp390I2cBus" abstracts, and it is the
+/// only piece that differs between builds: on hardware it wraps `HAL_I2C_Mem_Read/Write` (see @ref
+/// bmp390_hal_i2c_bus.h); in the host co-simulation it wraps the shared-memory I2C bus (`sim/i2c_shm`) the BMP390
+/// hardware-simulator FMU answers on; under Renode it would wrap the emulated I2C peripheral. The driver and the
+/// compensation below it are the same object code in all three.
 ///
 /// One virtual call per transaction is the deliberate cost of that: an I2C
 /// transaction is tens of microseconds of bus time, so the indirection is
 /// noise, and the alternative (templating the driver on its bus) would put
 /// the register sequence in a header and recompile it per transport.
 ///
-/// No allocation, no exceptions, no <random>, fixed-size buffers -- this
+/// No allocation, no exceptions, no `<random>`, fixed-size buffers -- this
 /// header is cross-compiled into firmware.
 
 #pragma once

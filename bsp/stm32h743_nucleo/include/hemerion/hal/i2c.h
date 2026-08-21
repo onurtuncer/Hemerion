@@ -35,13 +35,24 @@
 extern "C" {
 #endif
 
-/** Configures I2Cx as a bus master, 7-bit addressing, 100 kHz standard mode. */
+/**
+ * Configures I2Cx as a bus master, 7-bit addressing, 100 kHz standard mode.
+ *
+ * @param instance Peripheral index; only 1 (I2C1) is wired up.
+ */
 void hal_i2c_init(uint8_t instance);
 
 /**
  * Blocking register write: START, target+W, reg, data bytes, STOP.
  *
+ * @param instance       Peripheral index; only 1 (I2C1) is wired up.
  * @param target_address 7-bit target address (unshifted).
+ * @param reg            Register index sent as the first data byte.
+ * @param data           Bytes written to @p reg onwards; may be NULL only
+ *                       when @p len is 0.
+ * @param len            Number of bytes to write from @p data.
+ * @param timeout_ms     Upper bound on the whole transaction, in
+ *                       milliseconds.
  * @return true once every byte is acknowledged and transmitted; false on
  *         NACK, bus error, timeout, or an uninitialized instance.
  */
@@ -56,8 +67,15 @@ bool hal_i2c_mem_write(uint8_t instance,
  * Blocking register read: START, target+W, reg, repeated START, target+R,
  * data bytes, STOP.
  *
+ * @param instance       Peripheral index; only 1 (I2C1) is wired up.
  * @param target_address 7-bit target address (unshifted).
- * @return true once len bytes are received; false on NACK, bus error,
+ * @param reg            Register index the read starts from.
+ * @param data           Caller-owned buffer of at least @p len bytes,
+ *                       written only on success.
+ * @param len            Number of bytes to read into @p data.
+ * @param timeout_ms     Upper bound on the whole transaction, in
+ *                       milliseconds.
+ * @return true once @p len bytes are received; false on NACK, bus error,
  *         timeout, or an uninitialized instance.
  */
 bool hal_i2c_mem_read(uint8_t instance,

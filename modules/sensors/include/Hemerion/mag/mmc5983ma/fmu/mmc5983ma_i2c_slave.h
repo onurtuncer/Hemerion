@@ -12,7 +12,8 @@
 /// (on-target) writes control registers and bursts the data block, this class
 /// answers them with the part's documented I2C behaviour:
 ///
-/// * **Addressing.** The part acks @ref kMmc5983maI2cAddress and nothing
+/// * **Addressing.** The part acks @ref hemerion::sensors::mag::mmc5983ma::kMmc5983maI2cAddress "kMmc5983maI2cAddress"
+/// and nothing
 ///   else, so a driver pointed at the wrong address sees the address NACK a
 ///   missing part produces electrically.
 /// * **Register pointer.** The first byte after START in write mode sets the
@@ -36,10 +37,10 @@
 ///   driver in the wild reads it.
 /// * **SET/RESET.** The magnetization sign the coil pulses leave behind is
 ///   *the* piece of state this part has that a plain register file does not.
-///   It is served to the measurement model through @ref sensing_state(), so
-///   a measurement taken after a RESET really comes back negated, and a
-///   driver that forgets to leave the part SET really reads a sign-flipped
-///   field.
+///   It is served to the measurement model through @ref
+///   hemerion::sensors::mag::mmc5983ma::fmu::Mmc5983maI2cSlave::sensing_state() "sensing_state()", so a measurement
+///   taken after a RESET really comes back negated, and a driver that forgets to leave the part SET really reads a
+///   sign-flipped field.
 ///
 /// **Coherence.** The part documents no data-register shadowing, so on real
 /// silicon a burst can in principle straddle two measurements. Here it

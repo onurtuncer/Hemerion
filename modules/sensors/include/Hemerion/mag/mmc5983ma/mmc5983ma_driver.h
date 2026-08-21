@@ -15,22 +15,21 @@
 /// then poll `Status` and burst the seven data bytes -- and nothing about
 /// *how* the bytes reach the part.
 ///
-/// That last part is what @ref Mmc5983maI2cBus abstracts, and it is the only
-/// piece that differs between builds: on hardware it wraps
-/// `hal_i2c_mem_read/write` (see @ref mmc5983ma_hal_i2c_bus.h); in the host
-/// co-simulation it wraps the shared-memory I2C bus (`sim/i2c_shm`) the
-/// MMC5983MA hardware-simulator FMU answers on; under Renode it wraps the
-/// emulated I2C peripheral. The driver is the same object code in all three.
+/// That last part is what @ref hemerion::sensors::mag::mmc5983ma::Mmc5983maI2cBus "Mmc5983maI2cBus" abstracts, and it
+/// is the only piece that differs between builds: on hardware it wraps `hal_i2c_mem_read/write` (see @ref
+/// mmc5983ma_hal_i2c_bus.h); in the host co-simulation it wraps the shared-memory I2C bus (`sim/i2c_shm`) the MMC5983MA
+/// hardware-simulator FMU answers on; under Renode it wraps the emulated I2C peripheral. The driver is the same object
+/// code in all three.
 ///
 /// **Why there is no compensation layer here.** Unlike the BMP390 one module
 /// subtree over, this part has no calibration NVM and no compensation
-/// polynomial: sensitivity is the fixed scalar @ref kMmc5983maScale, so
-/// decoding is a bit unpack, a null-field subtraction and
-/// convert_raw_to_si(). What the driver *does* own instead is the bridge
-/// offset -- see @ref Mmc5983maDriver::calibrate_offset(), which is the only
-/// non-obvious thing about driving this part correctly.
+/// polynomial: sensitivity is the fixed scalar @ref hemerion::sensors::mag::mmc5983ma::kMmc5983maScale
+/// "kMmc5983maScale", so decoding is a bit unpack, a null-field subtraction and convert_raw_to_si(). What the driver
+/// *does* own instead is the bridge offset -- see @ref
+/// hemerion::sensors::mag::mmc5983ma::Mmc5983maDriver::calibrate_offset() "Mmc5983maDriver::calibrate_offset()", which
+/// is the only non-obvious thing about driving this part correctly.
 ///
-/// No allocation, no exceptions, no <random>, fixed-size buffers -- this
+/// No allocation, no exceptions, no `<random>`, fixed-size buffers -- this
 /// header is cross-compiled into firmware.
 
 #pragma once

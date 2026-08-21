@@ -10,7 +10,8 @@
 ///
 /// The generic barometer FMU (baro/fmu/baro_noise_model.h) quantizes with a
 /// made-up linear scale; this model instead produces the 24-bit words a
-/// BMP390 with @ref kBmp390ReferenceCalibration would have converted:
+/// BMP390 with @ref hemerion::sensors::baro::bmp390::fmu::kBmp390ReferenceCalibration "kBmp390ReferenceCalibration"
+/// would have converted:
 ///
 ///   1. truth altitude through the ICAO Standard Atmosphere (reused from
 ///      BaroNoiseModel's layers) to ambient pressure and temperature;
@@ -29,7 +30,7 @@
 /// construction. Words beyond the ADC range saturate, as the real converter
 /// does outside its operating envelope.
 ///
-/// Host-only: <random> lives here, never in the on-target code.
+/// Host-only: `<random>` lives here, never in the on-target code.
 
 #pragma once
 
