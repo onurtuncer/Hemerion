@@ -65,6 +65,11 @@ jobs:
       - name: Build
         run: cmake --build --preset=test-swil
 
+      # One target per simulated part, and the list has to grow with tests/swil. Running the suite by label
+      # rather than by name means a new SWIL test is picked up automatically -- swil.mag_logger duly failed
+      # here the first time, with HEMERION_SWIL_STRICT turning its missing peripheral into a failure rather
+      # than the skip that would have read as a pass.
+      #
       # These cannot come from the build above: sim/ is host-only and the root CMakeLists hard-errors on
       # HEMERION_BUILD_SIM under a cross toolchain, so test-swil never even adds sim/. Without this step
       # test_baro_logger.py finds no tools, pytest.skip()s, and ctest scores the skip as a pass — which is how this job
@@ -72,7 +77,7 @@ jobs:
       - name: Build the host-side bridge tools (native)
         run: |
           cmake --preset=test-native
-          cmake --build --preset=test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+          cmake --build --preset=test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral mmc5983ma_shm_peripheral
 
       # HEMERION_SWIL_STRICT turns "artefact not built" from a skip into a failure, so a future gap in the steps above
       # cannot quietly reproduce that vacuous pass.
