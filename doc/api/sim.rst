@@ -31,6 +31,59 @@ They are how a hardware-simulator FMU gets to *be* a part on a bus rather than
 merely publish a signal, which is what lets the on-target driver run its real
 register sequence in co-simulation.
 
+The two operate at different rates and answer to different clocks, which is
+the reason they are separate mechanisms rather than one:
+
+.. graphviz::
+   :align: center
+   :caption: Step bridges carry one simulation step, driven by the master's
+             clock. Bus links carry one bus transaction, driven by whenever
+             the firmware asks — many of them within a single step.
+   :alt: A step bridge connects the FMI master to a plant process over either
+         a shared-memory segment or a UDP datagram pair, carrying inputs one
+         way and outputs the other, once per simulation step. Separately, a
+         bus link connects firmware's driver to a simulated sensor part over
+         a shared-memory I2C or SPI region, carrying one register transaction
+         at a time, many per step.
+
+   digraph sim_transports {
+       bgcolor="transparent"
+       rankdir=LR
+       node [shape=box style="rounded,filled" fillcolor="#eef3f8" color="#41597a"
+             fontname="Helvetica" fontsize=10 margin="0.16,0.09"]
+       edge [color="#41597a" fontname="Helvetica" fontsize=9]
+
+       subgraph cluster_step {
+           label="step bridge — once per simulation step, master's clock"
+           fontname="Helvetica"
+           fontsize=10
+           color="#9aa7b5"
+           style=dashed
+           master [label="FMI master"]
+           sbr    [label="shm_bridge\nor udp_bridge" fillcolor="#e6e6e6"]
+           plant  [label="plant process\n(Aetherion)"]
+           master -> sbr [label="  inputs"]
+           sbr -> plant
+           plant -> sbr [label="  outputs"]
+           sbr -> master
+       }
+
+       subgraph cluster_bus {
+           label="bus link — once per transaction, firmware's clock"
+           fontname="Helvetica"
+           fontsize=10
+           color="#9aa7b5"
+           style=dashed
+           drv  [label="driver\n(controller side)" fillcolor="#d6e4f2"]
+           bl   [label="i2c_shm\nor spi_shm" fillcolor="#e6e6e6"]
+           part [label="simulated part\n(peripheral side)"]
+           drv -> bl [label="  address + write"]
+           bl -> part
+           part -> bl [label="  read bytes"]
+           bl -> drv
+       }
+   }
+
 Both bus links run their peripheral side on a service thread rather than only
 when the FMU steps, and for the same reason: real silicon answers its address
 whenever the controller starts a transaction, not when the part's physics model

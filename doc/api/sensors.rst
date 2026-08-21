@@ -76,7 +76,64 @@ why those parts have both a ``*_i2c_slave.h`` and a ``*_measurement_model.h``.
 
 The measurement model of a register-accurate part is, by construction, the
 inverse of the driver's compensation: it takes a truth value and produces the
-raw words that would compensate back to it.
+raw words that would compensate back to it. Following the BMP390 all the way
+round shows what that buys — the loop closes, and every box on the right-hand
+side is the same code that runs on the STM32:
+
+.. graphviz::
+   :align: center
+   :caption: A register-accurate sensor round trip. The simulator encodes
+             truth into the words real silicon would have produced; the
+             firmware decodes them back. What is being tested is the whole
+             right-hand side, not just the arithmetic.
+   :alt: A truth altitude enters the BMP390 measurement model, which applies
+         the atmosphere and error model and the inverse compensation to
+         produce raw conversion words. Those are served from the simulated
+         part's register file over the shared-memory I2C bus to Bmp390Driver,
+         which reads them and runs the datasheet compensation to recover a
+         BaroSample in pascals and degrees Celsius, agreeing with the original
+         truth to within the modelled error.
+
+   digraph sensor_roundtrip {
+       bgcolor="transparent"
+       rankdir=LR
+       node [shape=box style="rounded,filled" color="#41597a" fontname="Helvetica"
+             fontsize=10 margin="0.16,0.09"]
+       edge [color="#41597a" fontname="Helvetica" fontsize=9]
+
+       subgraph cluster_host {
+           label="host-only (fmu/)"
+           fontname="Helvetica"
+           fontsize=10
+           color="#9aa7b5"
+           style=dashed
+           truth [label="truth altitude\nfrom the plant model" fillcolor="#eef3f8"]
+           model [label="Bmp390MeasurementModel\natmosphere + error model\n+ inverse compensation" fillcolor="#eef3f8"]
+           slave [label="Bmp390I2cSlave\nregister file, drdy, status" fillcolor="#eef3f8"]
+       }
+
+       subgraph cluster_target {
+           label="same object code as on the STM32H743"
+           fontname="Helvetica"
+           fontsize=10
+           color="#9aa7b5"
+           style=dashed
+           driver [label="Bmp390Driver\nbring-up + burst read" fillcolor="#d6e4f2"]
+           comp   [label="Bmp390Compensator\ndatasheet 8.4" fillcolor="#d6e4f2"]
+           sample [label="BaroSample\nPa, degrees C" fillcolor="#d6e4f2"]
+       }
+
+       bus [label="simulated I2C bus\nsim/i2c_shm" shape=box style=filled fillcolor="#e6e6e6"]
+
+       truth  -> model  [label="  h [m]"]
+       model  -> slave  [label="  raw 24-bit words"]
+       slave  -> bus
+       bus    -> driver [label="  register reads"]
+       driver -> comp
+       comp   -> sample
+       sample -> truth  [label="  agrees to within\l  the modelled error\l"
+                         style=dashed constraint=false color="#7a8a9a"]
+   }
 
 Sensor families
 ===============

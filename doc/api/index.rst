@@ -82,12 +82,69 @@ tier.
 **Both.** A handful of types are deliberately the same object code in either
 build: the register maps, the wire-protocol constants and parsers, and the
 sensor drivers. A driver achieves this by taking its bus as an injected
-interface — ``Bmp390I2cBus``, ``Mmc5983maI2cBus``, ``ImuSpiBus`` — so the
-identical driver runs over the board's HAL on hardware, over ``sim/i2c_shm``
-or ``sim/spi_shm`` in co-simulation, and over an emulated peripheral under
-Renode. That the register sequence is exercised unchanged in all three is the
-point of the arrangement, and it is why those interfaces are pure virtual
-rather than template parameters.
+interface — ``Bmp390I2cBus``, ``Mmc5983maI2cBus``, ``ImuSpiBus`` — so one
+driver reaches its part through whichever transport the build has, and the
+register sequence is exercised unchanged in every one of them. That is why
+these interfaces are pure virtual rather than template parameters: one
+virtual call per bus transaction is noise against tens of microseconds of bus
+time, while templating the driver on its transport would put the register
+sequence in a header and recompile it per build.
+
+The BMP390 is the fullest example. One ``Bmp390Driver`` reaches four
+different things through four implementations of the same interface — real
+silicon, a simulated part with no transport at all, the same part over a
+shared-memory bus, and the co-simulation:
+
+.. graphviz::
+   :align: center
+   :caption: One driver, four transports. Only the bottom row differs between
+             builds; everything above the interface is identical object code.
+   :alt: Bmp390Driver calls the abstract Bmp390I2cBus interface, which has four
+         implementations: Bmp390HalI2cBus reaching BMP390 silicon over STM32
+         I2C1, DirectBus reaching the simulated part with no transport, ShmBus
+         reaching it over the shared-memory I2C bus, and ShmI2cBus reaching the
+         BMP390 simulator FMU in the rocket_gps_ecos co-simulation.
+
+   digraph injected_bus {
+       bgcolor="transparent"
+       rankdir=TB
+       node [shape=box style="rounded,filled" fillcolor="#eef3f8" color="#41597a"
+             fontname="Helvetica" fontsize=10 margin="0.16,0.09"]
+       edge [color="#41597a" fontname="Helvetica" fontsize=9]
+
+       driver [label="Bmp390Driver\nidentify, reset, read NVM,\nconfigure, poll, burst read"
+               fillcolor="#d6e4f2"]
+       iface  [label="Bmp390I2cBus\npure virtual\none call = one transaction"
+               style="rounded,filled,dashed" fillcolor="#ffffff"]
+
+       hal    [label="Bmp390HalI2cBus\nmodules/sensors"]
+       direct [label="DirectBus\nunit test"]
+       shmt   [label="ShmBus\nsim/i2c_shm test"]
+       shme   [label="ShmI2cBus\nrocket_gps_ecos"]
+
+       silicon [label="BMP390 silicon\nover STM32 I2C1" shape=box style=filled fillcolor="#e6e6e6"]
+       slave1  [label="Bmp390I2cSlave\nno transport" shape=box style=filled fillcolor="#e6e6e6"]
+       slave2  [label="Bmp390I2cSlave\nover shared memory" shape=box style=filled fillcolor="#e6e6e6"]
+       fmu     [label="BMP390 simulator FMU\nover shared memory" shape=box style=filled fillcolor="#e6e6e6"]
+
+       driver -> iface [label="  calls"]
+       hal    -> iface [arrowhead=empty style=dashed]
+       direct -> iface [arrowhead=empty style=dashed]
+       shmt   -> iface [arrowhead=empty style=dashed]
+       shme   -> iface [arrowhead=empty style=dashed]
+
+       hal    -> silicon
+       direct -> slave1
+       shmt   -> slave2
+       shme   -> fmu
+
+       { rank=same; hal; direct; shmt; shme }
+       { rank=same; silicon; slave1; slave2; fmu }
+   }
+
+A Renode adapter would be a fifth, wrapping the emulated I2C peripheral; it
+is described in ``bmp390_driver.h`` as the shape such a thing would take, and
+is not built.
 
 Conventions
 ===========
