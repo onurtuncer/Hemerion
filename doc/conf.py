@@ -62,6 +62,24 @@ source_encoding = 'utf-8'
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
+# -- Metrix++ complexity report ----------------------------------------------
+
+# doc/generated/metrixpp_report.rst is rewritten on every build so the report
+# published to GitHub Pages describes the sources it ships with. With metrix++
+# missing the generator writes a placeholder page instead of failing the build.
+_doc_dir = os.path.abspath(os.path.dirname(__file__))
+if _doc_dir not in sys.path:
+    sys.path.insert(0, _doc_dir)
+
+from generate_metrixpp_report import write_report
+
+_repo_root = os.path.abspath(os.path.join(_doc_dir, '..'))
+write_report(
+    repo_root=_repo_root,
+    out_path=os.path.join(_doc_dir, 'generated', 'metrixpp_report.rst'),
+    work_dir=os.path.join(_repo_root, 'build', 'metrixpp'),
+)
+
 # -- Options for HTML output -------------------------------------------------
 
 html_theme = 'sphinx_rtd_theme'

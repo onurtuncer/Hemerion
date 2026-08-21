@@ -9,6 +9,10 @@ on:
       - 'apps/**'
       - 'bsp/**'
       - 'sim/**'
+      # doc/conf.py runs doc/generate_metrixpp_report.py over these two as well,
+      # so a change in either moves numbers on the published report page.
+      - 'tests/**'
+      - 'examples/**'
       - 'get_project_name.py'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
@@ -88,6 +92,9 @@ jobs:
           echo "Doxygen XML:"
           ls "${OUT}/xml/" | head -5
 
+      # doc/conf.py runs metrix++ here (installed from doc/requirements.txt) and
+      # writes doc/generated/metrixpp_report.rst, the complexity report page the
+      # README badge links to.
       - name: Build Sphinx HTML
         run: |
           echo "Building Sphinx docs..."

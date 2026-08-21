@@ -50,4 +50,10 @@ Flight Dynamics with Spatial Vector Algebra
 
    bsp_freertos_wiring
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Code quality
+
+   generated/metrixpp_report
+
 :ref:`genindex`

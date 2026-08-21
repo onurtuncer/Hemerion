@@ -41,6 +41,9 @@
 
 # Build directories
 build/
+
+# Written by doc/generate_metrixpp_report.py on every documentation build
+doc/generated/
 Build/
 build-*/
 
