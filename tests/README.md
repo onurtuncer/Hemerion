@@ -244,13 +244,15 @@ other build jobs; Renode startup adds ~30 s, which is cheap against that
 blind spot. The job is `concurrency`-grouped, so a new push to a PR cancels
 the superseded run.
 
-`swil.led_blink` gates; `swil.baro_logger` runs in a `continue-on-error` step
-for now, the way IWYU, Metrix++ and the examples clang-tidy pass do. It fails
-for a reason that predates the harness: `baro_logger` hangs before its first
-print and emits *no* usart3 output at all, while `led_blink` prints happily on
-the same platform — so the emulated I2C path is what needs fixing, not the
-test. Note this is a `continue-on-error` step and **not** a skip: a skipped
-pytest is a passed ctest, which is how this suite spent months green while
-testing nothing. The test still runs, still reports, and still captures the
-Renode log and both helper logs on failure. Drop `continue-on-error` from
-`swil.yml` once the emulated I2C path works.
+Both SWIL tests gate. `swil.baro_logger` spent months failing before its first
+UART byte, quarantined behind `continue-on-error`, and the failure was recorded
+here as the emulated I2C path being broken. That diagnosis was wrong, and worth
+recording as such: sampling the program counter three times put the CPU at
+`HAL_Delay +24 of 36` every time, wedged on one instruction. Nothing in the tree
+called `HAL_IncTick()`, so `uwTick` never advanced and every `HAL_Delay()` was an
+unconditional hang -- reached by `Bmp390Driver::probe()`'s 2 ms soft-reset wait
+and by nothing in `led_blink`, which is why only one of the two ever printed. An
+A/B run under Renode showed `i2c1` logging the same NACK with and without the
+fix: the transfer had been reaching the bus the whole time, and the firmware
+simply never survived the delay to report it. With `bsp/stm32h743_nucleo`'s
+`SysTick_Handler` fixed, the full loop passes in about 11 seconds.
