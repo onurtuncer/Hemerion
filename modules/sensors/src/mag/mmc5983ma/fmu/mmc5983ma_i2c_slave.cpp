@@ -166,6 +166,18 @@ std::uint8_t Mmc5983maI2cSlave::read_register(std::uint8_t address)
     return data_[address];
   }
 
+  // Internal control 0..3 are Mode: W on the datasheet, so they read back as
+  // zero -- like every reserved address, which is why this is a guard rather
+  // than a case group returning the same thing as `default`. Serving the
+  // stored value instead would be the friendly choice and would hide a real
+  // firmware bug: a read-modify-write of a control register reads zero on the
+  // part, so it clobbers every bit it meant to preserve.
+  if (address >= reg_address(Mmc5983maRegister::kInternalControl0) &&
+      address <= reg_address(Mmc5983maRegister::kInternalControl3))
+  {
+    return 0;
+  }
+
   switch (address)
   {
     case reg_address(Mmc5983maRegister::kTout):
@@ -174,14 +186,6 @@ std::uint8_t Mmc5983maI2cSlave::read_register(std::uint8_t address)
       return status_;
     case reg_address(Mmc5983maRegister::kProductId):
       return kMmc5983maProductId;
-    case reg_address(Mmc5983maRegister::kInternalControl0):
-    case reg_address(Mmc5983maRegister::kInternalControl1):
-    case reg_address(Mmc5983maRegister::kInternalControl2):
-    case reg_address(Mmc5983maRegister::kInternalControl3):
-      // Mode: W on the datasheet. Returning the stored value would be the
-      // friendly thing to do and would hide a real firmware bug: a
-      // read-modify-write of a control register reads zero on the part.
-      return 0;
     default:
       return 0;
   }
