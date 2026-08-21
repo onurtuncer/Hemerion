@@ -82,6 +82,17 @@ jobs:
       # this repo's own list; the distribution's gcc.* files are added when the
       # iwyu package ships them, and which of those exist varies by version, so
       # each is probed rather than assumed.
+      #
+      # Three files come back with no verdict at all, and it is worth knowing
+      # which rather than reading the count as complete coverage:
+      # sim/i2c_shm/src/i2c_shm_link.cpp, sim/spi_shm/src/spi_shm_link.cpp and
+      # sim/i2c_shm/test/test_i2c_shm_mmc5983ma.cpp. Each constructs a
+      # std::thread from a lambda, and IWYU's frontend fails to instantiate
+      # libstdc++ 14's std::tuple<lambda> ("no matching function for call to
+      # 'get'", inside <tuple> itself). Plain clang++ compiles all three -- the
+      # Build step above does exactly that -- so this is an IWYU/libstdc++
+      # mismatch rather than anything wrong with the sources, and it will go
+      # away with a newer iwyu package rather than with a change here.
       - name: Run include-what-you-use
         continue-on-error: true
         run: |
