@@ -3,31 +3,32 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
-// hemerion/sim/spi_shm/spi_shm_protocol.h
-//
-// Wire format of a simulated SPI bus carried in shared memory: one region per
-// bus, mapped by exactly two local processes -- the controller (the MCU side,
-// which drives chip select and the clock) and the peripheral (the simulated
-// part, e.g. a sensor FMU). Both sides reinterpret this struct over the same
-// bytes of a named segment (see sim/shm_bridge/shm_segment.h), so it must stay
-// a single stable, standard-layout block: no virtual functions, no pointers,
-// no type whose representation could differ across the two binaries.
-//
-// Granularity. Real SPI shifts one bit at a time and the peripheral's MISO
-// byte k is a function of MOSI bytes 0..k-1. Handshaking over shared memory
-// per *bit* or per *byte* would cost a round trip each and buy nothing: a
-// firmware driver hands the peripheral a whole chip-select-framed transfer
-// (HAL_SPI_TransmitReceive() and friends), never a byte at a time, so the
-// controller cannot make byte k's MOSI content depend on byte k-1's MISO
-// either. One transfer is therefore one handshake here -- and the peripheral
-// side still shifts the posted buffer byte by byte through its own state
-// machine (see SpiPeripheral in spi_shm_link.h), so the MISO bytes are exactly
-// what per-bit clocking would have produced.
-//
-// The interrupt_line field is the peripheral's data-ready output (DRDY on most
-// MEMS parts): a level the peripheral drives and the controller samples,
-// standing in for the GPIO/EXTI line a board would wire between them.
-// ------------------------------------------------------------------------------
+
+/// @file spi_shm_protocol.h
+/// @brief Shared-memory wire format of a simulated SPI bus.
+///
+/// Wire format of a simulated SPI bus carried in shared memory: one region per
+/// bus, mapped by exactly two local processes -- the controller (the MCU side,
+/// which drives chip select and the clock) and the peripheral (the simulated
+/// part, e.g. a sensor FMU). Both sides reinterpret this struct over the same
+/// bytes of a named segment (see sim/shm_bridge/shm_segment.h), so it must stay
+/// a single stable, standard-layout block: no virtual functions, no pointers,
+/// no type whose representation could differ across the two binaries.
+///
+/// Granularity. Real SPI shifts one bit at a time and the peripheral's MISO
+/// byte k is a function of MOSI bytes 0..k-1. Handshaking over shared memory
+/// per *bit* or per *byte* would cost a round trip each and buy nothing: a
+/// firmware driver hands the peripheral a whole chip-select-framed transfer
+/// (HAL_SPI_TransmitReceive() and friends), never a byte at a time, so the
+/// controller cannot make byte k's MOSI content depend on byte k-1's MISO
+/// either. One transfer is therefore one handshake here -- and the peripheral
+/// side still shifts the posted buffer byte by byte through its own state
+/// machine (see SpiPeripheral in spi_shm_link.h), so the MISO bytes are exactly
+/// what per-bit clocking would have produced.
+///
+/// The interrupt_line field is the peripheral's data-ready output (DRDY on most
+/// MEMS parts): a level the peripheral drives and the controller samples,
+/// standing in for the GPIO/EXTI line a board would wire between them.
 #pragma once
 
 #include <array>
@@ -39,20 +40,23 @@
 namespace hemerion::sim::spi_shm
 {
 
+/// Layout version stamped into SpiBusRegion::protocol_version. Bump it on any
+/// change to the region's field order, types, or sizes; the controller side
+/// refuses to attach to a region carrying a different value.
 inline constexpr std::uint32_t kProtocolVersion = 1;
 
-// Longest single chip-select-framed transfer the bus carries. Generous next to
-// the burst sizes a sensor driver uses (tens of bytes), and the whole region is
-// allocated once per run, so there is no reason to make it tight.
+/// Longest single chip-select-framed transfer the bus carries. Generous next to
+/// the burst sizes a sensor driver uses (tens of bytes), and the whole region is
+/// allocated once per run, so there is no reason to make it tight.
 inline constexpr std::size_t kMaxTransferBytes = 256;
 
-// Transfer handshake. Each transition is driven by exactly one side:
-//   kIdle            -> kTransferPosted     driven by the controller
-//   kTransferPosted  -> kTransferComplete   driven by the peripheral
-//   kTransferComplete-> kIdle               driven by the controller
-// kShutdownRequested is set by the peripheral when it powers down and is a
-// terminal state -- it never transitions back to kIdle, so a controller
-// blocked mid-transfer fails fast instead of timing out.
+/// Transfer handshake. Each transition is driven by exactly one side:
+///   kIdle            -> kTransferPosted     driven by the controller
+///   kTransferPosted  -> kTransferComplete   driven by the peripheral
+///   kTransferComplete-> kIdle               driven by the controller
+/// kShutdownRequested is set by the peripheral when it powers down and is a
+/// terminal state -- it never transitions back to kIdle, so a controller
+/// blocked mid-transfer fails fast instead of timing out.
 enum class BusPhase : std::uint32_t
 {
   kIdle = 0,
@@ -61,29 +65,34 @@ enum class BusPhase : std::uint32_t
   kShutdownRequested = 3,
 };
 
-// The full shared-memory region. Constructed exactly once, in place, by the
-// peripheral (see SpiShmPeripheral::create); the controller only ever
-// reinterprets an already-constructed region -- never reconstructs it.
+/// The full shared-memory region. Constructed exactly once, in place, by the
+/// peripheral (see SpiShmPeripheral::create); the controller only ever
+/// reinterprets an already-constructed region -- never reconstructs it.
 struct SpiBusRegion
 {
-  std::uint32_t protocol_version = kProtocolVersion;
+  std::uint32_t protocol_version = kProtocolVersion;  ///< kProtocolVersion the peripheral built this region with.
+  /// Current BusPhase, as the underlying integer. The field both processes
+  /// write, and the one that publishes every other field below.
   std::atomic<std::uint32_t> phase{ static_cast<std::uint32_t>(BusPhase::kIdle) };
-  // Non-zero once the peripheral is servicing transfers: the simulated part
-  // has finished powering up. A controller that posts before this is talking
-  // to a chip that is not there yet.
+  /// Non-zero once the peripheral is servicing transfers: the simulated part
+  /// has finished powering up. A controller that posts before this is talking
+  /// to a chip that is not there yet.
   std::atomic<std::uint32_t> peripheral_ready{ 0 };
+  /// Non-zero while a controller holds the bus: the simulated part is wired
+  /// to something. The peripheral uses it to tell an idle run from an
+  /// abandoned one.
   std::atomic<std::uint32_t> controller_attached{ 0 };
-  // Data-ready line, peripheral -> controller. A level, not an edge, exactly
-  // like DRDY: the controller samples it whenever it likes.
+  /// Data-ready line, peripheral -> controller. A level, not an edge, exactly
+  /// like DRDY: the controller samples it whenever it likes.
   std::atomic<std::uint32_t> interrupt_line{ 0 };
-  std::atomic<std::uint64_t> transfer_index{ 0 };
+  std::atomic<std::uint64_t> transfer_index{ 0 };  ///< Transfers completed so far this run.
 
-  // Only valid while phase is kTransferPosted (mosi/length) or
-  // kTransferComplete (miso): the writer fills them in before the store that
-  // publishes the phase, and the reader observes them after the matching load.
-  std::uint32_t length = 0;
-  std::array<std::uint8_t, kMaxTransferBytes> mosi{};
-  std::array<std::uint8_t, kMaxTransferBytes> miso{};
+  /// Only valid while phase is kTransferPosted (mosi/length) or
+  /// kTransferComplete (miso): the writer fills them in before the store that
+  /// publishes the phase, and the reader observes them after the matching load.
+  std::uint32_t length = 0;                            ///< Bytes clocked in this chip-select frame.
+  std::array<std::uint8_t, kMaxTransferBytes> mosi{};  ///< Controller -> peripheral; first `length` valid.
+  std::array<std::uint8_t, kMaxTransferBytes> miso{};  ///< Peripheral -> controller; first `length` valid.
 };
 
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free,

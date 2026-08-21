@@ -3,15 +3,16 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 // ------------------------------------------------------------------------------
-// hemerion/sim/shm_bridge/shm_segment.h
-//
-// Cross-platform named shared-memory segment, host-only. Wraps shm_open()+
-// mmap() on POSIX and CreateFileMapping()+MapViewOfFile() on Windows behind
-// one RAII type -- every other shm_bridge type only needs a fixed-size block
-// of bytes shared between two local processes, not the platform API used to
-// get one. The platform handles live in the .cpp; this header stays free of
-// <windows.h>/<sys/mman.h> so it is safe to include from either side.
-// ------------------------------------------------------------------------------
+
+/// @file shm_segment.h
+/// @brief Cross-platform named shared-memory segment, host-only.
+///
+/// Wraps shm_open()+mmap() on POSIX and CreateFileMapping()+MapViewOfFile()
+/// on Windows behind one RAII type -- every other shm_bridge type only needs
+/// a fixed-size block of bytes shared between two local processes, not the
+/// platform API used to get one. The platform handles live in the .cpp; this
+/// header stays free of `<windows.h>`/`<sys/mman.h>` so it is safe to include
+/// from either side.
 #pragma once
 
 #include <cstddef>
@@ -21,17 +22,21 @@
 namespace hemerion::sim::shm_bridge
 {
 
+/// @brief RAII handle on a named shared-memory segment, host-only.
+///
+/// Neither copyable nor default-constructible: a handle either owns a live
+/// mapping or does not exist. Use create() or open_existing() to get one.
 class ShmSegment
 {
 public:
-  // Creates a new named segment sized to exactly `size_bytes`. Fails (returns
-  // std::nullopt) if a segment with this name already exists -- the owner
-  // (the FMI master) is expected to create it once per simulation run.
+  /// Creates a new named segment sized to exactly `size_bytes`. Fails (returns
+  /// std::nullopt) if a segment with this name already exists -- the owner
+  /// (the FMI master) is expected to create it once per simulation run.
   [[nodiscard]] static std::optional<ShmSegment> create(const std::string& name, std::size_t size_bytes);
 
-  // Opens a segment previously created by create() with a matching name.
-  // Fails if no such segment exists yet -- callers should retry/backoff
-  // rather than treat this as fatal, since the peer process may start first.
+  /// Opens a segment previously created by create() with a matching name.
+  /// Fails if no such segment exists yet -- callers should retry/backoff
+  /// rather than treat this as fatal, since the peer process may start first.
   [[nodiscard]] static std::optional<ShmSegment> open_existing(const std::string& name, std::size_t size_bytes);
 
   ShmSegment(const ShmSegment&) = delete;
@@ -42,8 +47,8 @@ public:
 
   [[nodiscard]] void* data() const noexcept { return data_; }
   [[nodiscard]] std::size_t size() const noexcept { return size_; }
-  // True if this handle is the one that created the underlying OS object --
-  // that handle is the one responsible for unlinking it (POSIX) on destruction.
+  /// True if this handle is the one that created the underlying OS object --
+  /// that handle is the one responsible for unlinking it (POSIX) on destruction.
   [[nodiscard]] bool owns_segment() const noexcept { return owns_segment_; }
 
 private:
@@ -56,7 +61,7 @@ private:
   std::string name_;
 
 #if defined(_WIN32)
-  void* mapping_handle_ = nullptr;  // HANDLE, stored as void* to keep this header OS-agnostic
+  void* mapping_handle_ = nullptr;  ///< HANDLE, stored as void* to keep this header OS-agnostic
 #else
   int fd_ = -1;
 #endif

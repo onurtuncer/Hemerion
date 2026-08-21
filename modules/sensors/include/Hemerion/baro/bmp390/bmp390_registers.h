@@ -24,7 +24,7 @@
 /// conversion words, xlsb first (`DATA_0` = press_xlsb ... `DATA_5` =
 /// temp_msb). They mean nothing in SI units until run through the
 /// per-part calibration polynomial -- see @ref bmp390_compensation.h and the
-/// NVM block parsed by @ref parse_bmp390_calibration().
+/// NVM block parsed by @ref hemerion::sensors::baro::bmp390::parse_bmp390_calibration() "parse_bmp390_calibration()".
 ///
 /// No allocation, no exceptions, constexpr throughout -- this header is
 /// cross-compiled into firmware.

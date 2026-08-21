@@ -217,6 +217,10 @@ private:
 
 }  // namespace hemerion::sensors::imu::fmu
 
+/// @cond FMI_ENTRY_POINTS
+/// fmu4cpp's C entry points. Excluded from the API reference: they are
+/// the FMI 2.0/3.0 ABI the packaging layer requires, not Hemerion API,
+/// and fmu4cpp's own headers are not part of the Doxygen input.
 fmu4cpp::model_info fmu4cpp::get_model_info()
 {
   model_info info;
@@ -229,3 +233,4 @@ fmu4cpp::model_info fmu4cpp::get_model_info()
 }
 
 FMU4CPP_INSTANTIATE(hemerion::sensors::imu::fmu::ImuSimulatorFmu);
+/// @endcond

@@ -20,7 +20,7 @@
 /// byte -- bit 7 selects read (1) or write (0), bits 6..0 carry the register
 /// address. The part is still shifting that byte in while it shifts a byte
 /// out, so the first MISO byte of any transfer is a don't-care
-/// (@ref kImuSpiDummyByte). Data bytes follow from the second byte on.
+/// (@ref hemerion::sensors::imu::kImuSpiDummyByte "kImuSpiDummyByte"). Data bytes follow from the second byte on.
 ///
 /// **Auto-increment.** Successive bytes of a multi-byte read or write walk up
 /// the register map, so `STATUS`, `FIFO_COUNT_L` and `FIFO_COUNT_H` come out

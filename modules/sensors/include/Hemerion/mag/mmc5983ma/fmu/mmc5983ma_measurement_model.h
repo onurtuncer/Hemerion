@@ -36,7 +36,7 @@
 /// @ref hemerion::sensors::mag::convert_raw_to_si() recovers the noisy truth
 /// to quantization error by construction.
 ///
-/// Host-only: <random> lives here, never in the on-target code.
+/// Host-only: `<random>` lives here, never in the on-target code.
 
 #pragma once
 

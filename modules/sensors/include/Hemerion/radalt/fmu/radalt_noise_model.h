@@ -16,7 +16,7 @@
 /// model reports kRadAltStatusNoReturn with a zeroed range word, exactly as
 /// a real part loses ground track rather than clipping. Host-only -- this
 /// lives under the fmu/ subtree built only when HEMERION_BUILD_FMU is on,
-/// never cross-compiled, so <random> is fine here (unlike the on-target
+/// never cross-compiled, so `<random>` is fine here (unlike the on-target
 /// conversion code one directory up).
 ///
 /// The counts produced here are the exact inverse of convert_raw_to_si()

@@ -13,6 +13,22 @@ on:
       # so a change in either moves numbers on the published report page.
       - 'tests/**'
       - 'examples/**'
+      - 'package.xml'
+      - 'get_project_name.py'
+      - '.github/workflows/deploy-docs.yml'
+  pull_request:
+    # The API reference is generated from the headers, so a pull request that
+    # renames or adds one can break the docs build without touching doc/.
+    # Build (but do not deploy) on every such change.
+    paths:
+      - 'doc/**'
+      - 'modules/**'
+      - 'apps/**'
+      - 'bsp/**'
+      - 'sim/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'package.xml'
       - 'get_project_name.py'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
@@ -25,8 +41,14 @@ permissions:
 # Allow one concurrent deployment; cancel any in-progress run so the
 # latest commit is always what gets deployed.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Doxygen writes XML here and Sphinx reads it from here. conf.py falls back to
+  # running Doxygen itself when this directory has no index.xml, so the two stay
+  # consistent whether or not the step below ran.
+  DOXYGEN_OUT: ${{ github.workspace }}/build/doxygen
 
 jobs:
   build-docs:
@@ -46,6 +68,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r doc/requirements.txt
           echo "Sphinx version: $(sphinx-build --version)"
+          echo "Breathe version: $(python -c 'import breathe; print(breathe.__version__)')"
 
       - name: Install system dependencies
         run: |
@@ -55,6 +78,12 @@ jobs:
             poppler-utils
           echo "Doxygen version: $(doxygen --version)"
           echo "pdflatex version: $(pdflatex --version | head -1)"
+
+      - name: Check API reference covers every public header
+        # Cheap, and it fails for the reason a reader would care about: a header
+        # was added or renamed and no api/ page names it any more. Run before
+        # the build so that failure is not buried under Sphinx output.
+        run: python doc/check_api_coverage.py
 
       - name: Build TikZ figures to PNG
         run: |
@@ -77,39 +106,127 @@ jobs:
 
       - name: Generate Doxyfile and build XML
         run: |
+          set -euo pipefail
           REPO="$(pwd)"
-          OUT="${REPO}/build/doxygen"
-          mkdir -p "${OUT}"
-          echo "Substituting Doxyfile.in placeholders..."
+          mkdir -p "${DOXYGEN_OUT}"
+          # package.xml is the single source of truth for the version, as it is
+          # for CMake and conf.py.
+          VERSION="$(sed -n 's/.*<package[^>]* version="\([0-9.]*\)".*/\1/p' package.xml | head -1)"
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Could not read version=\"X.Y.Z\" from package.xml"
+            exit 1
+          fi
+          echo "Project version: ${VERSION}"
           sed \
             -e "s|@CMAKE_PROJECT_NAME@|Hemerion|g" \
+            -e "s|@HEMERION_VERSION@|${VERSION}|g" \
             -e "s|@CMAKE_SOURCE_DIR@|${REPO}|g" \
             -e "s|@CMAKE_BINARY_DIR@|${REPO}/build|g" \
-            -e "s|@DOXYGEN_OUTPUT_DIR@|${OUT}|g" \
+            -e "s|@DOXYGEN_OUTPUT_DIR@|${DOXYGEN_OUT}|g" \
             doc/Doxyfile.in > "${REPO}/build/Doxyfile"
-          echo "Running Doxygen..."
           doxygen "${REPO}/build/Doxyfile"
-          echo "Doxygen XML:"
-          ls "${OUT}/xml/" | head -5
+
+      - name: Check Doxygen parsed the headers cleanly
+        run: |
+          set -euo pipefail
+          LOG="${DOXYGEN_OUT}/doxygen-warnings.log"
+          INDEX="${DOXYGEN_OUT}/xml/index.xml"
+
+          # 1. Doxygen must have produced XML at all. Sphinx will happily build
+          #    a site full of empty API pages otherwise.
+          if [ ! -f "${INDEX}" ]; then
+            echo "::error::Doxygen produced no XML index at ${INDEX}"
+            exit 1
+          fi
+
+          # 2. It must have found the headers. The tree has ~70 public headers;
+          #    a threshold well under that catches a broken INPUT path or a
+          #    mis-substituted @CMAKE_SOURCE_DIR@ without failing on every new
+          #    file. Raise it if it ever stops being a floor.
+          FILES=$(grep -c 'kind="file"' "${INDEX}")
+          CLASSES=$(grep -cE 'kind="(class|struct)"' "${INDEX}")
+          echo "Doxygen XML: ${FILES} files, ${CLASSES} classes/structs"
+          if [ "${FILES}" -lt 60 ] || [ "${CLASSES}" -lt 60 ]; then
+            echo "::error::Doxygen XML looks empty (${FILES} files, ${CLASSES} classes) -- expected at least 60 of each"
+            exit 1
+          fi
+
+          # 3. No documentation warnings. The tree builds clean today, so any
+          #    new one is a real regression: a broken \ref, an undocumented
+          #    parameter, or prose Doxygen could not parse.
+          #
+          #    The runner's Doxygen sets the bar, and it is older than what a
+          #    contributor is likely to have locally (1.9.8 here). That is the
+          #    useful direction for the skew to run, since the older parser is
+          #    the stricter one about resolving link requests -- but it does
+          #    mean a clean local run is not proof. This log is the authority.
+          if [ -s "${LOG}" ]; then
+            echo "::error::Doxygen reported documentation warnings"
+            cat "${LOG}"
+            exit 1
+          fi
+          echo "Doxygen reported no documentation warnings."
 
       # doc/conf.py runs metrix++ here (installed from doc/requirements.txt) and
       # writes doc/generated/metrixpp_report.rst, the complexity report page the
       # README badge links to.
       - name: Build Sphinx HTML
         run: |
-          echo "Building Sphinx docs..."
-          sphinx-build -T -b html \
-            -Dbreathe_projects.Hemerion="$(pwd)/build/doxygen/xml" \
-            doc/ build/sphinx
+          set -euo pipefail
+          sphinx-build -T --keep-going -b html \
+            -D breathe_projects.Hemerion="${DOXYGEN_OUT}/xml" \
+            doc/ build/sphinx 2>&1 | tee build/sphinx-build.log
           echo "Sphinx output pages: $(find build/sphinx -name '*.html' | wc -l)"
 
+      - name: Check Sphinx reported nothing but the known duplicate-scope notices
+        run: |
+          set -euo pipefail
+          # -W is not usable here. Breathe re-emits the enclosing namespace for
+          # every doxygenfile directive, and docutils reports each repeat as a
+          # duplicate target id. conf.py suppresses the matching C++ domain
+          # warning, but the docutils one has no category narrower than
+          # 'docutils', and suppressing that would hide real markup errors. So
+          # filter exactly those two shapes and fail on anything else, which
+          # keeps genuine warnings -- a bad cross-reference, an unparseable
+          # declaration, a page missing from a toctree -- fatal.
+          grep -E 'WARNING|ERROR' build/sphinx-build.log \
+            | grep -vE 'Duplicate ID: "namespace[a-z0-9_]*"' \
+            | grep -vE 'Duplicate explicit target name: "namespace[a-z0-9_]*"' \
+            > build/sphinx-unexpected.log || true
+          if [ -s build/sphinx-unexpected.log ]; then
+            echo "::error::Sphinx reported warnings other than the known duplicate namespace scopes"
+            cat build/sphinx-unexpected.log
+            exit 1
+          fi
+          echo "No unexpected Sphinx warnings."
+
+      - name: Check the API pages rendered actual API
+        run: |
+          set -euo pipefail
+          # A doxygenfile directive that resolves to nothing renders as a
+          # heading with no content, and Sphinx exits 0. Count the rendered C++
+          # declarations instead: each one is a `sig-object cpp` block.
+          SIGS=$(grep -ro 'sig-object cpp' build/sphinx/api/ | wc -l)
+          PAGES=$(find build/sphinx/api -name '*.html' | wc -l)
+          echo "API reference: ${PAGES} pages, ${SIGS} rendered C++ declarations"
+          if [ "${PAGES}" -lt 12 ]; then
+            echo "::error::Expected at least 12 API pages, found ${PAGES}"
+            exit 1
+          fi
+          if [ "${SIGS}" -lt 800 ]; then
+            echo "::error::API pages rendered only ${SIGS} declarations -- Breathe is not finding the Doxygen XML"
+            exit 1
+          fi
+
       - name: Upload pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
           path: build/sphinx
 
   deploy:
     needs: build-docs
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

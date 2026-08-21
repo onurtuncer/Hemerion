@@ -14,7 +14,7 @@
 /// quantization to the configured full-scale sensitivity with int16
 /// register saturation. Host-only -- this lives under the fmu/ subtree
 /// built only when HEMERION_BUILD_FMU is on, never cross-compiled, so
-/// <random> is fine here (unlike the on-target conversion code one
+/// `<random>` is fine here (unlike the on-target conversion code one
 /// directory up).
 ///
 /// The counts produced here are the exact inverse of convert_raw_to_si()

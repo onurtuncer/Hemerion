@@ -714,93 +714,35 @@ corresponding parser; per-sensor round-trip tests
 (``modules/sensors/test/``) feed the emitter's output back through the real
 parser to prove the two stay in sync.
 
-API reference
--------------
+Interface reference
+-------------------
 
-GPS
-~~~
+The declarations behind everything above are documented once, in the
+:ref:`API reference <api-sensors>`, and cross-referenced from here rather than
+repeated:
 
-.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsTruthSample
-   :members:
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
 
-.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsNoiseConfig
-   :members:
+   * - Sensor
+     - Reference page
+   * - IMU
+     - :doc:`api/sensors_imu` — sample types, SPI register map, driver, and the
+       simulated part with its FIFO.
+   * - Barometer
+     - :doc:`api/sensors_baro` — the part-independent layer and the full BMP390
+       stack, driver and simulator both.
+   * - Magnetometer
+     - :doc:`api/sensors_mag` — the part-independent layer and the MMC5983MA
+       stack, including bridge-offset calibration.
+   * - GPS
+     - :doc:`api/sensors_gps` — fix types, the NMEA and UBX parsers, and the
+       receiver noise and dynamics models.
+   * - Radar altimeter
+     - :doc:`api/sensors_radalt` — sample types, wire protocol, and the
+       signal-level error model.
 
-.. doxygenclass:: hemerion::sensors::gps::fmu::GpsNoiseModel
-   :members:
-
-.. doxygenenum:: hemerion::sensors::gps::fmu::GpsDynamicPlatform
-
-.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsDynamicsLimits
-   :members:
-
-.. doxygenfunction:: hemerion::sensors::gps::fmu::limits_for
-
-.. doxygenenum:: hemerion::sensors::gps::fmu::GpsDynamicsVerdict
-
-.. doxygenstruct:: hemerion::sensors::gps::fmu::GpsDynamicsConfig
-   :members:
-
-.. doxygenclass:: hemerion::sensors::gps::fmu::GpsDynamicsModel
-   :members:
-
-IMU
-~~~
-
-.. doxygenstruct:: hemerion::sensors::imu::fmu::ImuTruthSample
-   :members:
-
-.. doxygenstruct:: hemerion::sensors::imu::fmu::ImuNoiseConfig
-   :members:
-
-.. doxygenclass:: hemerion::sensors::imu::fmu::ImuNoiseModel
-   :members:
-
-The SPI interface, simulator side and on-target side:
-
-.. doxygenclass:: hemerion::sensors::imu::fmu::ImuSpiSlave
-   :members:
-
-.. doxygenenum:: hemerion::sensors::imu::ImuSpiRegister
-
-.. doxygenclass:: hemerion::sensors::imu::ImuSpiBus
-   :members:
-
-.. doxygenclass:: hemerion::sensors::imu::ImuSpiDriver
-   :members:
-
-Barometer
-~~~~~~~~~
-
-.. doxygenstruct:: hemerion::sensors::baro::fmu::BaroTruthSample
-   :members:
-
-.. doxygenstruct:: hemerion::sensors::baro::fmu::BaroNoiseConfig
-   :members:
-
-.. doxygenclass:: hemerion::sensors::baro::fmu::BaroNoiseModel
-   :members:
-
-Radar altimeter
-~~~~~~~~~~~~~~~
-
-.. doxygenstruct:: hemerion::sensors::radalt::fmu::RadAltTruthSample
-   :members:
-
-.. doxygenstruct:: hemerion::sensors::radalt::fmu::RadAltNoiseConfig
-   :members:
-
-.. doxygenclass:: hemerion::sensors::radalt::fmu::RadAltNoiseModel
-   :members:
-
-Magnetometer
-~~~~~~~~~~~~
-
-.. doxygenstruct:: hemerion::sensors::mag::fmu::MagTruthSample
-   :members:
-
-.. doxygenstruct:: hemerion::sensors::mag::fmu::MagNoiseConfig
-   :members:
-
-.. doxygenclass:: hemerion::sensors::mag::fmu::MagNoiseModel
-   :members:
+:doc:`api/sensors` explains the shape all five share, and
+:doc:`api/sim` documents the simulated buses the register-accurate parts answer
+on.

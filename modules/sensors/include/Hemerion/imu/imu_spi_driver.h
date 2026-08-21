@@ -13,7 +13,7 @@
 /// the FIFO port, hand every byte to ImuPacketParser -- and nothing about
 /// *how* the bytes reach the part.
 ///
-/// That last part is what @ref ImuSpiBus abstracts, and it is the only piece
+/// That last part is what @ref hemerion::sensors::imu::ImuSpiBus "ImuSpiBus" abstracts, and it is the only piece
 /// that differs between builds: on hardware it wraps `HAL_SPI_TransmitReceive`
 /// plus the chip-select and data-ready GPIOs; in the host co-simulation
 /// (`examples/rocket_gps_ecos`) it wraps the shared-memory SPI bus
@@ -26,7 +26,7 @@
 /// noise, and the alternative (templating the driver on its bus) would put
 /// the register sequence in a header and recompile it per transport.
 ///
-/// No allocation, no exceptions, no <random>, fixed-size buffers -- this
+/// No allocation, no exceptions, no `<random>`, fixed-size buffers -- this
 /// header is cross-compiled into firmware.
 
 #pragma once

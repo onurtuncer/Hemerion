@@ -52,8 +52,18 @@ Flight Dynamics with Spatial Vector Algebra
 
 .. toctree::
    :maxdepth: 2
+   :caption: API reference
+
+   api/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: Code quality
 
    generated/metrixpp_report
 
-:ref:`genindex`
+Indices
+=======
+
+* :ref:`genindex`
+* :ref:`search`

@@ -25,10 +25,10 @@
 /// **Data words.** Field is 18-bit *unsigned*, split across three registers
 /// per axis: `Xout0` holds X[17:10], `Xout1` holds X[9:2], and `XYZout2`
 /// packs the low two bits of all three axes. Null field (zero applied field)
-/// reads @ref kMmc5983maNullFieldOutput, not zero, so a driver must subtract
-/// it before the counts mean anything signed. Sensitivity is a fixed scalar
-/// -- 16384 counts/gauss, i.e. @ref kMmc5983maLsbPerMicrotesla -- with no
-/// per-part calibration NVM and no compensation polynomial, so
+/// reads @ref hemerion::sensors::mag::mmc5983ma::kMmc5983maNullFieldOutput "kMmc5983maNullFieldOutput", not zero, so a
+/// driver must subtract it before the counts mean anything signed. Sensitivity is a fixed scalar
+/// -- 16384 counts/gauss, i.e. @ref hemerion::sensors::mag::mmc5983ma::kMmc5983maLsbPerMicrotesla
+/// "kMmc5983maLsbPerMicrotesla" -- with no per-part calibration NVM and no compensation polynomial, so
 /// @ref hemerion::sensors::mag::convert_raw_to_si() converts the result
 /// directly.
 ///

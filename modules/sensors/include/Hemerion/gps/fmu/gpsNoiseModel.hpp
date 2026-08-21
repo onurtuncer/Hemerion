@@ -11,7 +11,7 @@
 /// one) into a GpsFix that looks like it came from a real u-blox M9N:
 /// Gaussian position/velocity noise plus the receiver's own self-reported
 /// accuracy estimate. Host-only -- this lives under the fmu/ subtree built
-/// only when HEMERION_BUILD_FMU is on, never cross-compiled, so <random>
+/// only when HEMERION_BUILD_FMU is on, never cross-compiled, so `<random>`
 /// and dynamic allocation are fine here (unlike the on-target driver code
 /// one directory up).
 ///

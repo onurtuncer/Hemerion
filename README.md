@@ -220,7 +220,22 @@ The framework includes a structured verification strategy:
 
 ## 📚 Documentation
 
-- [Detailed Documentation](https://onurtuncer.github.io/Hemerion/)
+- [Detailed Documentation](https://onurtuncer.github.io/Hemerion/) — guides, sensor models, and co-simulation walkthroughs
+- [API Reference](https://onurtuncer.github.io/Hemerion/api/index.html) — every public header, generated from the source comments
+
+Both are built from `doc/`. To build them locally:
+
+```bash
+pip install -r doc/requirements.txt   # plus doxygen on PATH
+sphinx-build -b html doc build/sphinx
+```
+
+`doc/conf.py` runs Doxygen itself when `build/doxygen/xml` is missing, so that
+single command produces the whole site including the API reference. The CMake
+route (`-DHEMERION_BUILD_DOCS=ON`) runs the same two steps as an explicit target.
+
+Adding a public header? `doc/check_api_coverage.py` fails CI until an
+`api/` page documents it.
 
 ---
 
