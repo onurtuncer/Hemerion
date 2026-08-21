@@ -25,7 +25,26 @@ jobs:
 
       - name: Run CMake Lint
         run: |
-          sudo pip3 install --break-system-packages cmakelang
+          set -euo pipefail
+          # Pinned for the same reason as cmake_format.yml: cmakelang's checks change
+          # between releases, so an unpinned install turns any upstream release into a red
+          # main branch on files nobody touched. .cmake-format's disabled_codes names the
+          # false positives specific to this version -- move both together.
+          sudo pip3 install --break-system-packages 'cmakelang==0.6.13'
+
+          # The `--` is load-bearing. `--config-files` takes nargs='+', so without a
+          # terminator it swallows the entire file list xargs appends after it as *config
+          # files*, leaving zero paths to lint: the job reported "files scanned: 0" and
+          # exited 0 for as long as it had existed, while the tree accumulated findings.
           find . \( -path ./build -o -path ./vendor -o -path ./.venv \) -prune \
             -o -type f \( -name CMakeLists.txt -o -name "*.cmake" \) -print \
-            | xargs cmake-lint --config-files .cmake-format
+            | xargs cmake-lint --config-files .cmake-format -- | tee lint.log
+
+          # And the guard that would have caught the above: a clean exit means nothing if
+          # nothing was inspected, so assert the count cmake-lint reports is non-zero.
+          scanned=$(sed -n 's/^files scanned: \([0-9]\+\)$/\1/p' lint.log | tail -1)
+          if [ -z "${scanned:-}" ] || [ "$scanned" -eq 0 ]; then
+            printf '\033[0;31mCMake lint scanned %s files -- the job is vacuous, not passing.\033[0m\n' "${scanned:-<no count reported>}"
+            exit 1
+          fi
+          printf 'CMake lint scanned %s files.\n' "$scanned"
