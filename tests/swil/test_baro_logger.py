@@ -33,7 +33,7 @@ import time
 
 from pyrenode3.wrappers import Emulation, Monitor, TerminalTester
 
-from conftest import REPO_ROOT, firmware_elf, function_at, missing, peripheral
+from conftest import REPO_ROOT, firmware_elf, function_at, missing, peripheral, uart_file_backend
 
 CS_PATH = REPO_ROOT / "sim" / "renode" / "i2c_bridge" / "HemerionI2cBridge.cs"
 
@@ -302,7 +302,11 @@ def test_baro_logger_reads_the_simulated_part(renode_machine):
         renode_log = work_dir / "renode.log"
         uart_log = work_dir / "usart3.log"
         try_monitor(monitor, f"logFile @{renode_log.as_posix()}")
-        try_monitor(monitor, f"sysbus.usart3 CreateFileBackend @{uart_log.as_posix()}")
+        # Asks for an eagerly flushed backend: CreateFileBackend's writer is
+        # otherwise buffered until the emulation is torn down, which is after
+        # every assertion here has run -- so the "--- usart3 ---" section of
+        # each failure message below would quote an empty file.
+        uart_file_backend(monitor, "sysbus.usart3", uart_log)
 
         renode_machine.load_elf(str(elf))
         tester = TerminalTester(peripheral(renode_machine, "sysbus.usart3"), timeout=30.0)

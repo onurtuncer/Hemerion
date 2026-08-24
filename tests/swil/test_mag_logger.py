@@ -47,7 +47,7 @@ import time
 
 from pyrenode3.wrappers import Emulation, Monitor, TerminalTester
 
-from conftest import REPO_ROOT, firmware_elf, function_at, missing, peripheral
+from conftest import REPO_ROOT, firmware_elf, function_at, missing, peripheral, uart_file_backend
 
 CS_PATH = REPO_ROOT / "sim" / "renode" / "i2c_bridge" / "HemerionI2cBridge.cs"
 
@@ -281,6 +281,55 @@ def wait_for(tester, pattern: str, treat_as_regex: bool = False):
     return tester.WaitFor(pattern, None, treat_as_regex, False, False, False)
 
 
+def captured(match, pattern: str, log_path: pathlib.Path, timeout_s: float = 10.0):
+    """The integer capture groups of *pattern*, taken from the very line the
+    tester matched -- falling back to the UART file capture.
+
+    Reading the file instead was the original bug here: TerminalTester matches
+    the live UART stream, but CreateFileBackend's writer is buffered and, in a
+    Renode that cannot be asked to flush eagerly, holds everything until the
+    emulation is torn down. So a line the tester had demonstrably just seen was
+    absent from the file microseconds later, and the test failed quoting an
+    empty capture.
+
+    The result object carries the matched text, but under a name that has moved
+    between Renode versions, and its own `groups` indexing differs again -- so
+    the text is fetched by whichever name exists and re-matched with Python's
+    regex, which makes the numbers come from the same line the tester stopped
+    on rather than from whatever the file happens to hold.
+    """
+    for attribute in ("line", "Line"):
+        text = getattr(match, attribute, None)
+        if isinstance(text, str):
+            found = re.search(pattern, text)
+            if found:
+                return tuple(int(group) for group in found.groups())
+
+    # Last resort, for a Renode whose result object exposes the text under
+    # neither name. Scanned newest-first so a repeating line (the field print)
+    # yields the most recent one, and retried because this is precisely the
+    # path taken when the backend is the buffered kind.
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            lines = log_path.read_text(errors="replace").splitlines()
+        except OSError:
+            lines = []
+        for line in reversed(lines):
+            found = re.search(pattern, line)
+            if found:
+                return tuple(int(group) for group in found.groups())
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"the tester matched {pattern!r}, but neither its result object nor the UART capture "
+        f"still held the line -- so the numbers could not be read back.\n"
+        f"--- usart3 ---\n{tail(log_path)}"
+    )
+
+
 def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
     elf = firmware_elf("mag_logger")
     peripheral_tool = host_tool("mmc5983ma_shm_peripheral")
@@ -355,7 +404,9 @@ def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
         renode_log = work_dir / "renode.log"
         uart_log = work_dir / "usart3.log"
         try_monitor(monitor, f"logFile @{renode_log.as_posix()}")
-        try_monitor(monitor, f"sysbus.usart3 CreateFileBackend @{uart_log.as_posix()}")
+        # Asks for an eagerly flushed backend, so the capture quoted by a
+        # failure below is the UART's actual output and not an empty file.
+        uart_file_backend(monitor, "sysbus.usart3", uart_log)
 
         renode_machine.load_elf(str(elf))
         tester = TerminalTester(peripheral(renode_machine, "sysbus.usart3"), timeout=45.0)
@@ -389,18 +440,11 @@ def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
         expect("MAG up: MMC5983MA identified")
 
         # The assertion this test exists for. TerminalTester's match object
-        # does not expose groups portably across Renode versions, so the line
-        # is re-read from the UART capture.
-        expect(OFFSET_PATTERN, treat_as_regex=True)
-        offset_match = None
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and offset_match is None:
-            offset_match = re.search(OFFSET_PATTERN, uart_log.read_text(errors="replace"))
-            if offset_match is None:
-                time.sleep(0.2)
-        assert offset_match is not None, f"offset line never reached the UART capture:\n{tail(uart_log)}"
-
-        recovered = tuple(int(group) for group in offset_match.groups())
+        # does not expose its groups portably across Renode versions, so
+        # captured() re-matches the line it stopped on -- rather than re-reading
+        # the UART file, which the buffered backend can leave empty for the
+        # whole run.
+        recovered = captured(expect(OFFSET_PATTERN, treat_as_regex=True), OFFSET_PATTERN, uart_log)
         # One count of slack per axis: the pair averages two rounded 18-bit
         # words and halves the sum with integer division.
         for axis, (got, want) in enumerate(zip(recovered, truth_offset)):
@@ -421,16 +465,9 @@ def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
             # the next measurement -- rather than the first read being a
             # lucky power-on state.
             field_match = expect(FIELD_PATTERN, treat_as_regex=True)
-            assert field_match is not None
 
-        field_match = None
-        for line in reversed(uart_log.read_text(errors="replace").splitlines()):
-            field_match = re.search(FIELD_PATTERN, line)
-            if field_match:
-                break
-        assert field_match is not None, f"no field line in the UART capture:\n{tail(uart_log)}"
-
-        got_nt = tuple(int(group) for group in field_match.groups())
+        # The second of those two lines, read back the same way as the offset.
+        got_nt = captured(field_match, FIELD_PATTERN, uart_log)
         want_nt = (TRUTH_X_UT * 1000.0, TRUTH_Y_UT * 1000.0, TRUTH_Z_UT * 1000.0)
         # The peripheral's default hard-iron sigma is 1 uT per axis and its
         # noise 0.04 uT; neither is cancellable by SET/RESET, so bound at
