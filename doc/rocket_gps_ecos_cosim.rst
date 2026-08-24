@@ -791,9 +791,10 @@ PNG detached from its caption has no other way to tell you which it is.
    from 54 m/s² up to 125 m/s² as propellant burns off, **exactly zero through
    the 94 s coast**, stage 2 lighting at 131.8 s and climbing to 265 m/s² at
    burnout, then zero again. Free fall reads zero because an accelerometer
-   does not sense gravity. This figure is from the *default* run, the one whose
-   GPS is dark throughout: the SPI sample stream is entirely unaffected by what
-   the receiver is doing, which is rather the point of carrying an IMU.
+   does not sense gravity. This figure is from the *default* run, the
+   COCOM-limited one: the receiver is dark for 169 of these 200 s, including
+   all of stage 2, and the SPI sample stream is entirely indifferent to that —
+   which is rather the point of carrying an IMU.
 
 .. figure:: _static/rocket_gps_ecos/imu_body_rates.png
    :width: 100%
