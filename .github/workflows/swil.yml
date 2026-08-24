@@ -65,6 +65,11 @@ jobs:
       - name: Build
         run: cmake --build --preset=test-swil
 
+      # One target per simulated part, and the list has to grow with tests/swil. Running the suite by label
+      # rather than by name means a new SWIL test is picked up automatically -- swil.mag_logger duly failed
+      # here the first time, with HEMERION_SWIL_STRICT turning its missing peripheral into a failure rather
+      # than the skip that would have read as a pass.
+      #
       # These cannot come from the build above: sim/ is host-only and the root CMakeLists hard-errors on
       # HEMERION_BUILD_SIM under a cross toolchain, so test-swil never even adds sim/. Without this step
       # test_baro_logger.py finds no tools, pytest.skip()s, and ctest scores the skip as a pass — which is how this job
@@ -72,34 +77,21 @@ jobs:
       - name: Build the host-side bridge tools (native)
         run: |
           cmake --preset=test-native
-          cmake --build --preset=test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral
+          cmake --build --preset=test-native --target i2c_shm_tcp_bridge bmp390_shm_peripheral mmc5983ma_shm_peripheral
 
       # HEMERION_SWIL_STRICT turns "artefact not built" from a skip into a failure, so a future gap in the steps above
       # cannot quietly reproduce that vacuous pass.
       #
       # $(pwd), not ${{ github.workspace }}: in a container job that expression expands to the *host* path
       # (/home/runner/work/...), while the step runs against the bind mount at /__w/... .
+      # Both SWIL tests gate. The BMP390 loop was quarantined behind continue-on-error while baro_logger
+      # emitted no usart3 output at all, blamed at the time on the emulated I2C path. That diagnosis was
+      # wrong: the firmware was wedged in HAL_Delay because nothing in the tree called HAL_IncTick, so
+      # uwTick never advanced. The transfer had been reaching the bus the whole time. With the BSP fixed
+      # the loop passes in ~11 s, so there is nothing left to quarantine and -L swil runs the label again.
       - name: Run SWIL tests
         env:
           HEMERION_SWIL_STRICT: '1'
         run: |
           export HEMERION_SWIL_TOOLS_DIR="$(pwd)/build/test-native/sim/i2c_shm/tools"
-          ctest --preset=test-swil -R '^swil\.led_blink$' --output-on-failure
-
-      # Informational for now, in the same sense as the IWYU, Metrix++ and examples clang-tidy jobs. The
-      # BMP390 loop fails for a reason that predates the harness: baro_logger hangs before its first print,
-      # emitting *no* usart3 output at all, while led_blink prints happily on the same platform -- so the
-      # emulated I2C path, not the test, is what needs fixing. Running it anyway keeps the evidence coming
-      # (the step captures the Renode log and both helper logs) without wedging main on a known defect.
-      #
-      # This is deliberately not a skip: a skipped pytest is a passed ctest, which is exactly how this
-      # suite spent months green while testing nothing. The test runs, reports, and is read.
-      #
-      # Drop continue-on-error once the emulated I2C path works.
-      - name: Run the BMP390 SWIL loop (informational)
-        continue-on-error: true
-        env:
-          HEMERION_SWIL_STRICT: '1'
-        run: |
-          export HEMERION_SWIL_TOOLS_DIR="$(pwd)/build/test-native/sim/i2c_shm/tools"
-          ctest --preset=test-swil -R '^swil\.baro_logger$' --output-on-failure
+          ctest --preset=test-swil -L swil --output-on-failure
