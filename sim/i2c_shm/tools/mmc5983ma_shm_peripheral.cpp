@@ -54,6 +54,7 @@ namespace
 
 using hemerion::sensors::mag::mmc5983ma::kMmc5983maLsbPerMicrotesla;
 using hemerion::sensors::mag::mmc5983ma::fmu::Mmc5983maI2cSlave;
+using hemerion::sensors::mag::mmc5983ma::fmu::Mmc5983maMeasurementConfig;
 using hemerion::sensors::mag::mmc5983ma::fmu::Mmc5983maMeasurementModel;
 using hemerion::sim::i2c_shm::I2cPeripheralConfig;
 using hemerion::sim::i2c_shm::I2cPeripheralEndpoint;
@@ -77,6 +78,9 @@ int main(int argc, char** argv)
   double temperature_c = 25.0;
   std::uint64_t seed = 42;
   long duration_s = 0;  // 0 = run until signalled
+
+  Mmc5983maMeasurementConfig model_config;
+  double noise_ut = static_cast<double>(model_config.noise_ut);
 
   for (int i = 1; i < argc; ++i)
   {
@@ -124,6 +128,18 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
       }
     }
+    else if (arg == "--noise-ut" && (value = next()))
+    {
+      if (!number(noise_ut, "--noise-ut"))
+      {
+        return EXIT_FAILURE;
+      }
+      if (noise_ut < 0.0)
+      {
+        std::fprintf(stderr, "[mmc5983ma_peripheral] --noise-ut '%s' must not be negative\n", value);
+        return EXIT_FAILURE;
+      }
+    }
     else if (arg == "--seed" && (value = next()))
     {
       if (!parse_number(value, seed))
@@ -144,15 +160,32 @@ int main(int argc, char** argv)
     {
       std::fprintf(stderr,
                    "usage: mmc5983ma_shm_peripheral [--bus <name>] [--bx <uT>] [--by <uT>] [--bz <uT>]\n"
-                   "                                [--temp <C>] [--seed <n>] [--duration-s <s>]\n"
+                   "                                [--temp <C>] [--noise-ut <uT>] [--seed <n>]\n"
+                   "                                [--duration-s <s>]\n"
                    "  an MMC5983MA in a fixed truth field (default 22 / -6 / 41 uT) answering\n"
                    "  shared-memory I2C bus <name> (default hemerion_mmc5983ma_i2c); 0 s duration\n"
-                   "  (default) runs until SIGINT/SIGTERM (SIGKILL leaks the bus segment)\n");
+                   "  (default) runs until SIGINT/SIGTERM (SIGKILL leaks the bus segment).\n"
+                   "  --noise-ut 0 makes a SET/RESET pair recover the bridge offset exactly,\n"
+                   "  which is what a harness asserting on it to the LSB needs\n");
       return EXIT_FAILURE;
     }
   }
 
-  Mmc5983maMeasurementModel model({}, seed);
+  // Per-measurement white noise is the one knob a harness has to be able to
+  // turn off. A SET/RESET pair recovers the bridge offset as
+  // (M_set + M_reset)/2, in which the truth field and the hard iron cancel
+  // exactly but the two measurements' independent noise does not -- it
+  // survives as an error of sigma * kMmc5983maLsbPerMicrotesla / sqrt(2),
+  // which at the default 0.04 uT is ~4.6 LSB. So an assertion that the
+  // recovered offset matches this one to within a count is unsatisfiable with
+  // noise on, however many layers deliver it intact. At --noise-ut 0 the
+  // recovery is exact (llround is symmetric about zero, so the two rounded
+  // words sum to exactly twice the null-field output plus twice the offset),
+  // which is what makes such an assertion mean what it says. The hard iron
+  // and the offset itself are drawn before any measurement, so turning this
+  // off does not perturb them.
+  model_config.noise_ut = static_cast<float>(noise_ut);
+  Mmc5983maMeasurementModel model(model_config, seed);
   Mmc5983maI2cSlave slave;
   I2cPeripheralEndpoint<Mmc5983maI2cSlave> endpoint(slave, I2cPeripheralConfig{ bus_name, "" });
   if (!endpoint.attach())
@@ -174,10 +207,11 @@ int main(int argc, char** argv)
   // needs the truth to compare against, and because an offset this large is
   // startling if you have not read the datasheet's null-field tolerance.
   const auto& offset = model.bridge_offset();
-  std::printf("[mmc5983ma_peripheral] MMC5983MA at %.1f/%.1f/%.1f uT answering on bus '%s'\n",
+  std::printf("[mmc5983ma_peripheral] MMC5983MA at %.1f/%.1f/%.1f uT, noise %.3f uT, answering on bus '%s'\n",
               field_x_ut,
               field_y_ut,
               field_z_ut,
+              noise_ut,
               bus_name.c_str());
   std::printf("[mmc5983ma_peripheral] bridge offset (seed %llu): %ld/%ld/%ld LSB = %.2f/%.2f/%.2f uT\n",
               static_cast<unsigned long long>(seed),

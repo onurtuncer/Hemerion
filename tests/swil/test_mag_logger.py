@@ -365,6 +365,17 @@ def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
             "--bx", str(TRUTH_X_UT),
             "--by", str(TRUTH_Y_UT),
             "--bz", str(TRUTH_Z_UT),
+            # No per-measurement noise, because the offset assertion below is
+            # to the LSB. SET/RESET recovers the offset as (M_set+M_reset)/2,
+            # where the field and the hard iron cancel exactly but the two
+            # measurements' independent noise does not: it survives at
+            # 0.04 uT * 163.84 / sqrt(2) ~= 4.6 LSB, so a +/-1 LSB assertion
+            # holds for about a quarter of draws per axis and under 2% across
+            # all three. That is not a tolerance to widen -- it is a
+            # random error to remove, and with it removed the recovery is
+            # exact. sim/i2c_shm/test/test_i2c_shm_mmc5983ma.cpp asserts the
+            # same bound the same way, having zeroed the same knob.
+            "--noise-ut", "0",
         )
         bridge = launch(bridge_tool, "i2c_shm_tcp_bridge", "--bus", bus_name, "--port", "0", "--wait-s", "30")
         helpers = (part, bridge)
@@ -446,7 +457,10 @@ def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
         # whole run.
         recovered = captured(expect(OFFSET_PATTERN, treat_as_regex=True), OFFSET_PATTERN, uart_log)
         # One count of slack per axis: the pair averages two rounded 18-bit
-        # words and halves the sum with integer division.
+        # words and halves the sum with integer division. With --noise-ut 0
+        # the recovery is in fact exact, so the slack is margin, not budget --
+        # if this ever needs widening, the cause is a layer mangling the
+        # handshake, not arithmetic.
         for axis, (got, want) in enumerate(zip(recovered, truth_offset)):
             assert abs(got - want) <= 1, (
                 f"axis {'xyz'[axis]}: firmware recovered a bridge offset of {got} LSB but the part was born "
@@ -469,9 +483,12 @@ def test_mag_logger_cancels_the_simulated_parts_bridge_offset(renode_machine):
         # The second of those two lines, read back the same way as the offset.
         got_nt = captured(field_match, FIELD_PATTERN, uart_log)
         want_nt = (TRUTH_X_UT * 1000.0, TRUTH_Y_UT * 1000.0, TRUTH_Z_UT * 1000.0)
-        # The peripheral's default hard-iron sigma is 1 uT per axis and its
-        # noise 0.04 uT; neither is cancellable by SET/RESET, so bound at
-        # 5 sigma of both plus the print quantum.
+        # The peripheral's hard-iron sigma is 1 uT per axis, drawn once per run
+        # and *not* cancellable by SET/RESET -- unlike the bridge offset, that
+        # is a real field, so the firmware is right to report it. Bound at
+        # 5 sigma of it plus the print quantum. The 0.04 uT measurement noise
+        # that used to be in this budget is off (see --noise-ut above), so the
+        # term is kept only as slack rather than removed.
         bound_nt = 5.0 * (1000.0 + 40.0) + QUANTUM_NT
         for axis, (got, want) in enumerate(zip(got_nt, want_nt)):
             assert abs(got - want) <= bound_nt, (
