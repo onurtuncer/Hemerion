@@ -101,6 +101,36 @@ def function_at(elf_path: pathlib.Path, address: int) -> str:
         return f"(unresolved: {error})"
 
 
+def uart_file_backend(monitor, uart: str, log_path: pathlib.Path) -> bool:
+    """Mirror *uart* to *log_path*, flushed on every write where Renode can be
+    asked for that. Returns whether it can.
+
+    CreateFileBackend's writer is buffered unless told otherwise, and it is
+    closed when the emulation is torn down -- which is *after* every assertion
+    in these tests has run. So a test that reads the capture back mid-run sees
+    an empty file, and every failure message quoting it says "(no output)"
+    about a UART that has been talking the whole time. That is exactly how
+    test_mag_logger came to fail on an offset line its TerminalTester had
+    already matched live.
+
+    The optional second argument (immediateFlush) is what makes the file
+    readable while the machine is still running. Older Renodes take only the
+    path, so try the two-argument form and fall back rather than assuming; the
+    return value lets a caller prefer the tester's own matched line when the
+    file cannot be trusted mid-run.
+    """
+    try:
+        monitor.execute(f"{uart} CreateFileBackend @{log_path.as_posix()} true")
+        return True
+    except Exception:  # noqa: BLE001 -- an older Renode spells this with one argument
+        pass
+    try:
+        monitor.execute(f"{uart} CreateFileBackend @{log_path.as_posix()}")
+    except Exception:  # noqa: BLE001 -- diagnostics must never themselves fail a test
+        pass
+    return False
+
+
 def firmware_elf(app: str) -> pathlib.Path:
     """Path to a cross-compiled app's ELF.
 
