@@ -926,24 +926,23 @@ condition rather than hiding it is itself a property worth having.
 
 % ===========================================================================
 \section{Discussion}
+\label{sec:discussion}
 % ===========================================================================
 \textbf{Same code across three tiers.} The decoders validated above are the
 identical translation units that run inside Renode's instruction-accurate STM32
 simulation and on physical STM32H743 hardware; only the bus shim beneath the
 driver changes (UDP or shared memory here, \code{HAL\_SPI\_TransmitReceive} or
-\code{HAL\_I2C\_Mem\_Read} plus GPIO on the target). For the barometer this is
-measured rather than asserted: a software-in-the-loop test gates in continuous
-integration that runs the cross-compiled H743 firmware inside Renode, through
-Renode's emulated I$^2$C controller, a C\# bridge peripheral, a TCP hop and the
-shared-memory bus, against the same \code{Bmp390I2cSlave} the FMU embeds. The
-equivalent magnetometer loop is written and registered but has not yet executed
-end to end; every layer beneath it is separately verified, including the full
-blocking SET/RESET handshake across the real shared-memory transport, and the
-unexercised span is only the Renode/C\#/TCP legs the barometer loop already
-covers. Its load-bearing assertion is not the field values but that the bridge
-offset the firmware reports matches the one the peripheral independently reports
-having been born with---the one comparison that separates conditioned firmware
-from firmware that merely prints plausible numbers. SIL results therefore
+\code{HAL\_I2C\_Mem\_Read} plus GPIO on the target). For the two I$^2$C parts
+this is measured rather than asserted: two software-in-the-loop tests gate in
+continuous integration, each running the cross-compiled H743 firmware inside
+Renode, through Renode's emulated I$^2$C controller, a C\# bridge peripheral, a
+TCP hop and the shared-memory bus, against the same \code{Bmp390I2cSlave} and
+\code{Mmc5983maI2cSlave} the FMUs embed. The magnetometer loop exercises the
+full blocking SET/RESET handshake over that transport, and its load-bearing
+assertion is not the field values but that the bridge offset the firmware
+reports matches, to one LSB, the one the peripheral independently reports having
+been born with---the one comparison that separates conditioned firmware from
+firmware that merely prints plausible numbers. SIL results therefore
 transfer to HIL with a validity a value-level harness cannot claim, because the
 code that most often breaks on hardware is the code SIL usually omits.
 
@@ -955,6 +954,21 @@ strict loader (fmi4c resolves the complete 2.0 table up front and refuses a
 binary that omits any function, even those whose capability flags are false).
 Generating the description from the model is good conformance pressure any strict
 master would exert.
+
+Generation removes one class of drift but not another. An \code{.fmu} is a zip
+whose \emph{root} must hold \code{modelDescription.xml} with \code{binaries/}
+beside it, and that layout is produced by the build, not by the model: a
+perfectly conformant model can be sealed into an archive no importer will open.
+We hit exactly that---an archiving step wrote absolute member names, burying
+every member under the build machine's own path prefix and leaving the root
+empty---and nothing caught it but unzipping the file by hand. The build
+therefore now registers a packaging test per exported model per FMI version
+(fourteen in the current tree), each unzipping the archive and asserting the
+description at its root, a binary named for the \code{modelIdentifier} under
+\code{binaries/}, and a description declaring that same identifier; the last
+catches an archive assembled from a stale staging directory, which would load
+and instantiate the wrong model. Conformance is cheap to generate and cheap to
+lose in the packaging step after it.
 
 \textbf{Limitations.} The error models are per-axis Gaussian with a turn-on bias
 and quantization; they omit correlated in-run bias walk (Gauss-Markov), scale-
@@ -1013,6 +1027,23 @@ for both FMI 2.0 and 3.0 from one source, and every model constructor accepts an
 RNG seed---so a run's turn-on biases, hard iron and bridge offset are
 reproducible bit for bit, which is what makes a figure like
 Fig.~\ref{fig:magerror} checkable rather than merely illustrative.
+
+Continuous integration rebuilds every tier on each change and runs three
+suites: the host-side unit and integration tests over the conversion routines,
+frame parsers and simulated buses (30 cases); the packaging checks over the
+exported archives described in Section~\ref{sec:discussion} (14 cases, one per
+model per FMI version); and the Renode SWIL harness, which drives
+cross-compiled firmware under \code{pyrenode3} (3 cases). Line coverage of the
+natively compiled framework sources is $81.1\%$ ($93.2\%$ of functions, $51.1\%$
+of branches), measured with \code{gcovr} over the first of those suites.
+
+Two harness properties are worth stating because they bear on whether such
+numbers mean anything. A test whose artifact failed to build is reported as a
+failure, not a skip: \code{ctest} scores a skipped test as a pass, so a suite
+that silently builds nothing reports success while checking nothing. And a
+filter that matches no test is an error rather than an empty pass, for the same
+reason. Both were real failures in this repository before they were guarded, and
+neither is visible in a green badge.
 
 \section*{Acknowledgment}
 % Fill in funding / institutional acknowledgments before submission.
