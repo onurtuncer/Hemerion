@@ -1,0 +1,30 @@
+# Line-ending policy.
+#
+# Without this file, whether a contributor commits LF or CRLF depends on their
+# personal core.autocrlf setting. That is invisible until something scans the
+# bytes: cmake_lint now actually reads files, and fails a CRLF one with C0327.
+# The CRLF that once reached cmake/generate_fmu.cmake was missed for exactly
+# this reason -- the author had core.autocrlf=input, so it normalised on the
+# way in and CI never saw it.
+#
+# text=auto stores every file Git detects as text with LF in the repository,
+# and leaves the working-tree ending to each platform. Checkouts are unchanged
+# on Windows; only the committed bytes are made consistent.
+* text=auto
+
+# Scripts executed on Linux CI runners must keep LF regardless of platform: a
+# CRLF shebang makes the kernel look for an interpreter literally named
+# "/bin/bash\r", and the resulting error names neither the file nor the cause.
+*.sh              text eol=lf
+.run-clang-format text eol=lf
+.run-cmake-format text eol=lf
+
+# Renode scripts and platform descriptions are read by Renode on Linux.
+*.resc text eol=lf
+*.repl text eol=lf
+
+# Binary -- never substitute line endings, never diff as text.
+*.png binary
+*.pdf binary
+*.fmu binary
+*.zip binary
