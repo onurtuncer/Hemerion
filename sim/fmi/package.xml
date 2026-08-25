@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package name="hemerion_sim_fmi" version="0.1.0">
   <description>FMI 2.0 co-simulation master: steps module FMUs and the Aetherion plant FMU in lockstep</description>
-  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <maintainer email="onur.tuncer@itu.edu.tr">Onur Tuncer</maintainer>
   <license>GPL-3.0-only</license>
   <url type="repository">https://github.com/onurtuncer/Hemerion</url>
 

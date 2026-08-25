@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package name="hemerion_power" version="0.1.0">
   <description>BMS interface, regulator enable sequencing; FMU export</description>
-  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <maintainer email="onur.tuncer@itu.edu.tr">Onur Tuncer</maintainer>
   <license>GPL-3.0-only</license>
   <url type="repository">https://github.com/onurtuncer/Hemerion</url>
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package name="hemerion" version="0.9.0">
   <description>Embedded firmware framework for aerospace GNC and real-time embedded systems</description>
-  <maintainer email="onur.tuncer@milteksan.com">Onur Tuncer</maintainer>
+  <maintainer email="onur.tuncer@itu.edu.tr">Onur Tuncer</maintainer>
   <license>GPL-3.0-only</license>
   <url type="repository">https://github.com/onurtuncer/Hemerion</url>
   <url type="documentation">https://onurtuncer.github.io/Hemerion/</url>
