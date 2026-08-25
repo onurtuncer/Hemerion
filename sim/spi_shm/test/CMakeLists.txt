@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_spi_shm_link test_spi_shm_link.cpp)
-target_link_libraries(test_hemerion_spi_shm_link PRIVATE hemerion_spi_shm)
+target_link_libraries(test_hemerion_spi_shm_link PRIVATE hemerion_spi_shm hemerion_test_support)
 
 add_test(NAME spi_shm.link COMMAND test_hemerion_spi_shm_link)
 set_tests_properties(spi_shm.link PROPERTIES LABELS "unit")

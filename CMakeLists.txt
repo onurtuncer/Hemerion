@@ -126,6 +126,14 @@ if(HEMERION_BUILD_TESTS OR HEMERION_BUILD_FMU)
   enable_testing()
 endif()
 
+# Shared test scaffolding (tests/support). Defined here, ahead of sim/ and modules/, because their test/ subdirectories
+# link it -- a target must exist before target_link_libraries() in another directory names it. HEMERION_BUILD_FMU is
+# deliberately not a trigger: the archive-layout tests it registers are ctest fixtures run by CMake, not C++
+# executables, so nothing there links this.
+if(HEMERION_BUILD_TESTS)
+  add_subdirectory(tests/support)
+endif()
+
 set(HEMERION_BSP "" CACHE STRING "Active board support package directory under bsp/ (empty = none selected)")
 
 # ------------------------------------------------------------------------------

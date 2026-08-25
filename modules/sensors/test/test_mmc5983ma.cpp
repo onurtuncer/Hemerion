@@ -30,11 +30,8 @@
 #include <cstdlib>
 #include <initializer_list>
 
-#ifdef _WIN32
-#include <crtdbg.h>
-#endif
-
 #include "Hemerion/mag/mag_types.h"
+#include "hemerion/test/fail_fast.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_measurement_model.h"
 #include "Hemerion/mag/mmc5983ma/mmc5983ma_driver.h"
@@ -44,6 +41,8 @@ using hemerion::sensors::mag::MagSample;
 using hemerion::sensors::mag::mmc5983ma::decode_mmc5983ma_field;
 using hemerion::sensors::mag::mmc5983ma::encode_mmc5983ma_field;
 using hemerion::sensors::mag::mmc5983ma::kMmc5983maControl0Reset;
+using hemerion::sensors::mag::mmc5983ma::kMmc5983maControl3SelfTestNegative;
+using hemerion::sensors::mag::mmc5983ma::kMmc5983maControl3SelfTestPositive;
 using hemerion::sensors::mag::mmc5983ma::kMmc5983maI2cAddress;
 using hemerion::sensors::mag::mmc5983ma::kMmc5983maLsbPerMicrotesla;
 using hemerion::sensors::mag::mmc5983ma::Mmc5983maBandwidth;
@@ -502,6 +501,96 @@ void test_control_registers_read_back_zero()
   assert(part.slave().sampling_period_us() == 20000);
 }
 
+// The self-test coil is modelled magnetically, so a driver self-test written
+// against this part exercises something.
+//
+// St_enp/St_enm used to be stored and nothing more: the bits went into
+// Internal control 3, no measurement changed, and a driver that energized the
+// coil, measured, and compared saw no delta -- it would have had to assert
+// that nothing happened, or pass regardless. Either way the sequence that
+// matters on hardware went unexercised.
+//
+// The coil is a field at the bridges, which is what the last two blocks
+// check: the delta follows the sensing polarity, so it is a real applied
+// field rather than a number added to the output register. A driver self-test
+// can therefore fail here for the reasons it would fail on the part -- coil
+// never energized, wrong register, wrong bit, readout taken before the
+// measurement completed.
+//
+// The magnitude is a modelling choice (Mmc5983maMeasurementConfig::
+// self_test_field_ut), not silicon: this test asserts against the configured
+// field, never against a hard-coded threshold.
+void test_self_test_coil_shifts_every_axis()
+{
+  Mmc5983maMeasurementConfig config;
+  config.noise_ut = 0.0F;
+  config.hard_iron_sigma_ut = 0.0F;
+
+  SimulatedPart part(config, /*seed=*/37);
+  part.set_truth(kTruthXUt, kTruthYUt, kTruthZUt);
+  DirectBus bus(part);
+  Mmc5983maDriver driver(bus);
+  assert(driver.probe() == Mmc5983maError::kNone);
+
+  const auto control3 = static_cast<std::uint8_t>(Mmc5983maRegister::kInternalControl3);
+  const auto coil_ut = static_cast<double>(config.self_test_field_ut);
+  const double tolerance = 2.0 * kQuantumUt;
+
+  const auto sample_now = [&driver, &part]() {
+    part.latch_continuous();
+    MagSample sample;
+    assert(driver.read_sample(sample) == Mmc5983maReadResult::kSample);
+    return sample;
+  };
+
+  // Coil off: the ambient field, as every flight measurement sees it.
+  const MagSample off = sample_now();
+  assert(near(off.mag_x_ut, kTruthXUt, tolerance));
+  assert(near(off.mag_y_ut, kTruthYUt, tolerance));
+  assert(near(off.mag_z_ut, kTruthZUt, tolerance));
+
+  // St_enp: one coil, so every axis shifts the same way by the same amount.
+  assert(bus.write_register(control3, kMmc5983maControl3SelfTestPositive));
+  assert(part.slave().sensing_state().self_test_coil == +1);
+  const MagSample positive = sample_now();
+  assert(near(positive.mag_x_ut - off.mag_x_ut, coil_ut, tolerance));
+  assert(near(positive.mag_y_ut - off.mag_y_ut, coil_ut, tolerance));
+  assert(near(positive.mag_z_ut - off.mag_z_ut, coil_ut, tolerance));
+
+  // St_enm: the same magnitude, the other way.
+  assert(bus.write_register(control3, kMmc5983maControl3SelfTestNegative));
+  assert(part.slave().sensing_state().self_test_coil == -1);
+  const MagSample negative = sample_now();
+  assert(near(negative.mag_x_ut - off.mag_x_ut, -coil_ut, tolerance));
+  assert(near(negative.mag_y_ut - off.mag_y_ut, -coil_ut, tolerance));
+  assert(near(negative.mag_z_ut - off.mag_z_ut, -coil_ut, tolerance));
+
+  // Both bits drive one coil in opposite directions. The part does not define
+  // that state; the model reads it as no net current rather than picking a
+  // winner, so the measurement is the ambient field again.
+  assert(bus.write_register(control3, kMmc5983maControl3SelfTestPositive | kMmc5983maControl3SelfTestNegative));
+  assert(part.slave().sensing_state().self_test_coil == 0);
+  const MagSample both = sample_now();
+  assert(near(both.mag_x_ut, kTruthXUt, tolerance));
+  assert(near(both.mag_y_ut, kTruthYUt, tolerance));
+  assert(near(both.mag_z_ut, kTruthZUt, tolerance));
+
+  // A field, not a readout offset: under RESET magnetization the whole
+  // measurement negates, and the coil's contribution negates with it. A model
+  // that added the coil to the output register instead would shift the same
+  // way in both magnetizations, and this is the block that would catch it.
+  assert(bus.write_register(static_cast<std::uint8_t>(Mmc5983maRegister::kInternalControl0), kMmc5983maControl0Reset));
+  assert(part.slave().sensing_state().magnetization == -1);
+
+  assert(bus.write_register(control3, 0));
+  const MagSample reset_off = sample_now();
+  assert(bus.write_register(control3, kMmc5983maControl3SelfTestPositive));
+  const MagSample reset_positive = sample_now();
+  assert(near(reset_positive.mag_x_ut - reset_off.mag_x_ut, -coil_ut, tolerance));
+  assert(near(reset_positive.mag_y_ut - reset_off.mag_y_ut, -coil_ut, tolerance));
+  assert(near(reset_positive.mag_z_ut - reset_off.mag_z_ut, -coil_ut, tolerance));
+}
+
 // A rate the datasheet conditions on a bandwidth must be refused rather than
 // programmed into a part that cannot sustain it.
 void test_unreachable_rate_is_refused()
@@ -565,34 +654,11 @@ void test_noisy_sample_stays_bounded()
   assert(near(sample.mag_z_ut, kTruthZUt, bound));
 }
 
-// A failed assert() must kill the process, not park it.
-//
-// On Windows the CRT answers abort() with a modal "terminate in an unusual
-// way" dialog and _CrtDbgReport pops another; in a CI job with no desktop
-// those block until the job's own timeout, so a one-line assertion failure
-// reads as a hung runner instead of a failed test. This routes both to
-// stderr and makes abort() return an exit code immediately. No effect
-// anywhere else.
-//
-// The sibling tests in this directory have the same exposure and no guard;
-// this is worth lifting into shared test scaffolding rather than copying.
-void fail_fast_instead_of_blocking()
-{
-#ifdef _WIN32
-  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-  for (const int report : { _CRT_WARN, _CRT_ERROR, _CRT_ASSERT })
-  {
-    (void)_CrtSetReportMode(report, _CRTDBG_MODE_FILE);
-    (void)_CrtSetReportFile(report, _CRTDBG_FILE_STDERR);
-  }
-#endif
-}
-
 }  // namespace
 
 int main()
 {
-  fail_fast_instead_of_blocking();
+  hemerion::test::fail_fast_instead_of_blocking();
 
   test_field_encoding_round_trips();
   test_probe_identifies_and_configures();
@@ -606,6 +672,7 @@ int main()
   test_read_consumes_measurement_done();
   test_one_shot_and_temperature();
   test_control_registers_read_back_zero();
+  test_self_test_coil_shifts_every_axis();
   test_unreachable_rate_is_refused();
   test_soft_reset_then_reprobe();
   test_noisy_sample_stays_bounded();

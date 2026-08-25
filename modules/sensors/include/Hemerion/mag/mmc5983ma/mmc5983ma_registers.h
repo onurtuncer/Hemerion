@@ -389,6 +389,20 @@ struct Mmc5983maSensingState
   /// outputs the difference, so the result is positive-polarity and already
   /// free of bridge offset regardless of @ref magnetization.
   bool automatic_set_reset = false;
+
+  /// St_enp / St_enm (`Internal control 3`): the direction of the current in
+  /// the self-test coil. +1 for St_enp, -1 for St_enm, 0 when the coil is
+  /// off, which is every measurement a flight build takes.
+  ///
+  /// The coil applies a real field to the bridges, so it enters a
+  /// measurement exactly as the ambient field does: scaled by @ref
+  /// magnetization, and surviving the SET/RESET difference that removes the
+  /// bridge offset. That is what makes it a test of the sensing chain rather
+  /// than of the readout.
+  ///
+  /// Both bits set is not a state the part defines -- the two bits drive one
+  /// coil in opposite directions -- so the model reads it as no net current.
+  int self_test_coil = 0;
 };
 
 /// A per-axis offset in raw counts: what a SET/RESET pair measures, what the

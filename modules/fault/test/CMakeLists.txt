@@ -8,13 +8,13 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_fault_registry test_fault_registry.cpp)
-target_link_libraries(test_hemerion_fault_registry PRIVATE hemerion_fault)
+target_link_libraries(test_hemerion_fault_registry PRIVATE hemerion_fault hemerion_test_support)
 
 add_executable(test_hemerion_fault_watchdog test_watchdog.cpp)
-target_link_libraries(test_hemerion_fault_watchdog PRIVATE hemerion_fault)
+target_link_libraries(test_hemerion_fault_watchdog PRIVATE hemerion_fault hemerion_test_support)
 
 add_executable(test_hemerion_fault_health_monitor_loop test_health_monitor_loop.cpp)
-target_link_libraries(test_hemerion_fault_health_monitor_loop PRIVATE hemerion_fault)
+target_link_libraries(test_hemerion_fault_health_monitor_loop PRIVATE hemerion_fault hemerion_test_support)
 
 add_test(NAME fault.registry COMMAND test_hemerion_fault_registry)
 set_tests_properties(fault.registry PROPERTIES LABELS "unit")

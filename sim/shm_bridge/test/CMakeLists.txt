@@ -9,10 +9,10 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_shm_bridge_segment test_shm_segment.cpp)
-target_link_libraries(test_hemerion_shm_bridge_segment PRIVATE hemerion_shm_bridge)
+target_link_libraries(test_hemerion_shm_bridge_segment PRIVATE hemerion_shm_bridge hemerion_test_support)
 
 add_executable(test_hemerion_shm_bridge_bridge test_shm_bridge.cpp)
-target_link_libraries(test_hemerion_shm_bridge_bridge PRIVATE hemerion_shm_bridge)
+target_link_libraries(test_hemerion_shm_bridge_bridge PRIVATE hemerion_shm_bridge hemerion_test_support)
 
 add_test(NAME shm_bridge.segment COMMAND test_hemerion_shm_bridge_segment)
 set_tests_properties(shm_bridge.segment PROPERTIES LABELS "unit")
