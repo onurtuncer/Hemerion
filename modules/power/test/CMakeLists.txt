@@ -8,10 +8,10 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_power_battery_monitor test_battery_monitor.cpp)
-target_link_libraries(test_hemerion_power_battery_monitor PRIVATE hemerion_power)
+target_link_libraries(test_hemerion_power_battery_monitor PRIVATE hemerion_power hemerion_test_support)
 
 add_executable(test_hemerion_power_regulator_sequencer test_regulator_sequencer.cpp)
-target_link_libraries(test_hemerion_power_regulator_sequencer PRIVATE hemerion_power)
+target_link_libraries(test_hemerion_power_regulator_sequencer PRIVATE hemerion_power hemerion_test_support)
 
 add_test(NAME power.battery_monitor COMMAND test_hemerion_power_battery_monitor)
 set_tests_properties(power.battery_monitor PROPERTIES LABELS "unit")

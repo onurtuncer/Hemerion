@@ -8,13 +8,13 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_rtos_core_task_registry test_task_registry.cpp)
-target_link_libraries(test_hemerion_rtos_core_task_registry PRIVATE hemerion_rtos_core)
+target_link_libraries(test_hemerion_rtos_core_task_registry PRIVATE hemerion_rtos_core hemerion_test_support)
 
 add_executable(test_hemerion_rtos_core_queue_registry test_queue_registry.cpp)
-target_link_libraries(test_hemerion_rtos_core_queue_registry PRIVATE hemerion_rtos_core)
+target_link_libraries(test_hemerion_rtos_core_queue_registry PRIVATE hemerion_rtos_core hemerion_test_support)
 
 add_executable(test_hemerion_rtos_core_memory_pool test_memory_pool.cpp)
-target_link_libraries(test_hemerion_rtos_core_memory_pool PRIVATE hemerion_rtos_core)
+target_link_libraries(test_hemerion_rtos_core_memory_pool PRIVATE hemerion_rtos_core hemerion_test_support)
 
 add_test(NAME rtos_core.task_registry COMMAND test_hemerion_rtos_core_task_registry)
 set_tests_properties(rtos_core.task_registry PROPERTIES LABELS "unit")

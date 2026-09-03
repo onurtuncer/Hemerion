@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_i2c_shm_link test_i2c_shm_link.cpp)
-target_link_libraries(test_hemerion_i2c_shm_link PRIVATE hemerion_i2c_shm)
+target_link_libraries(test_hemerion_i2c_shm_link PRIVATE hemerion_i2c_shm hemerion_test_support)
 
 add_test(NAME i2c_shm.link COMMAND test_hemerion_i2c_shm_link)
 set_tests_properties(i2c_shm.link PROPERTIES LABELS "unit")
@@ -22,7 +22,7 @@ set_tests_properties(i2c_shm.link PROPERTIES LABELS "unit")
 add_executable(test_hemerion_i2c_shm_bmp390 test_i2c_shm_bmp390.cpp ${HEMERION_I2C_SHM_BMP390_SOURCES}
                                             "${HEMERION_I2C_SHM_SENSORS_DIR}/src/baro/bmp390/bmp390_driver.cpp")
 target_include_directories(test_hemerion_i2c_shm_bmp390 PRIVATE "${HEMERION_I2C_SHM_SENSORS_DIR}/include")
-target_link_libraries(test_hemerion_i2c_shm_bmp390 PRIVATE hemerion_i2c_shm)
+target_link_libraries(test_hemerion_i2c_shm_bmp390 PRIVATE hemerion_i2c_shm hemerion_test_support)
 
 add_test(NAME i2c_shm.bmp390 COMMAND test_hemerion_i2c_shm_bmp390)
 set_tests_properties(i2c_shm.bmp390 PROPERTIES LABELS "unit")
@@ -37,7 +37,7 @@ add_executable(
   "${HEMERION_I2C_SHM_SENSORS_DIR}/src/mag/mmc5983ma/mmc5983ma_driver.cpp"
   "${HEMERION_I2C_SHM_SENSORS_DIR}/src/mag/mag_conversion.cpp")
 target_include_directories(test_hemerion_i2c_shm_mmc5983ma PRIVATE "${HEMERION_I2C_SHM_SENSORS_DIR}/include")
-target_link_libraries(test_hemerion_i2c_shm_mmc5983ma PRIVATE hemerion_i2c_shm)
+target_link_libraries(test_hemerion_i2c_shm_mmc5983ma PRIVATE hemerion_i2c_shm hemerion_test_support)
 
 add_test(NAME i2c_shm.mmc5983ma COMMAND test_hemerion_i2c_shm_mmc5983ma)
 set_tests_properties(i2c_shm.mmc5983ma PROPERTIES LABELS "unit")

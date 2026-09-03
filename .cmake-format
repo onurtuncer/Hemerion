@@ -357,12 +357,19 @@ with section("lint"):
   #   twice, and the remaining sites (doc/, doc/tikz/) are pure aggregator
   #   add_custom_target()s with no command for a COMMENT to describe.
   # E1126 (invalid form descriminator): a false positive from the pinned
-  #   cmakelang 0.6.13, which predates file(ARCHIVE_EXTRACT) (CMake 3.18) and
-  #   file(REAL_PATH) (CMake 3.19) and so cannot parse either form. The three
-  #   sites -- CMakeLists.txt's toolchain-sentinel check and
-  #   cmake/verify_fmu_archive.cmake -- are correct CMake. Drop this entry
-  #   when cmakelang next releases and the pin in cmake_lint.yml moves with
-  #   it.
+  #   cmakelang 0.6.13, which predates file(REAL_PATH) (CMake 3.19) and so
+  #   cannot parse that form. Two sites remain, both the toolchain-sentinel
+  #   check in the top-level CMakeLists.txt, and both are correct CMake --
+  #   verified by re-enabling the code, which reports exactly those two.
+  #
+  #   This cannot be closed here. 0.6.13 is cmakelang's latest release, not
+  #   merely the version pinned in cmake_lint.yml, so there is no newer
+  #   parser to move to; the alternative is rewriting correct CMake to suit a
+  #   linter's gap, which is worse than the entry. Drop it when cmakelang
+  #   next releases and the pin moves with it.
+  #
+  #   The earlier note here also named file(ARCHIVE_EXTRACT) and a third site
+  #   in cmake/verify_fmu_archive.cmake; neither is in the tree any more.
   disabled_codes = ['C0113', 'E1126']
 
   # The variable-name patterns below are widened from cmakelang's defaults to

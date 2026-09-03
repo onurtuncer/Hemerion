@@ -78,6 +78,24 @@ struct Mmc5983maMeasurementConfig
   /// Die temperature white noise, 1-sigma [degrees C]. Small against the
   /// part's 0.8 C output step, which dominates.
   float temperature_noise_c = 0.2F;
+
+  /// Field the self-test coil applies to every axis while energized [uT],
+  /// signed by the coil direction in Mmc5983maSensingState::self_test_coil.
+  ///
+  /// This is a modelling choice, not a datasheet number. The datasheet
+  /// specifies a self-test *threshold* the measured delta must clear, not the
+  /// field the coil produces, so there is nothing here to transcribe. 100 uT
+  /// is picked to be unmistakable: roughly twice Earth's field, hundreds of
+  /// times the noise floor, and far inside the part's +/-800 uT span, so a
+  /// self-test delta cannot be confused with either the ambient field or a
+  /// bad sample, and cannot saturate the converter on its own.
+  ///
+  /// What this buys is a driver self-test that exercises the real sequence --
+  /// energize, measure, de-energize, compare -- against a model that answers.
+  /// It does not let a threshold be calibrated: a driver that hard-codes a
+  /// pass band around this number is testing the simulator. Take absolute
+  /// thresholds from hardware.
+  float self_test_field_ut = 100.0F;
 };
 
 /// @brief Maps truth body-frame field to the raw counts the simulated part
@@ -128,10 +146,21 @@ public:
     // whatever the standing magnetization happens to be.
     const double polarity = sensing.automatic_set_reset ? 1.0 : static_cast<double>(sensing.magnetization);
 
+    // The self-test coil is a real field at the bridges, not a readout
+    // trick: it takes the sensing polarity like any other field, and it
+    // therefore survives the SET/RESET difference that cancels the bridge
+    // offset. A driver that energizes the coil sees the delta whichever
+    // magnetization it happens to be in.
+    const double coil_ut =
+        static_cast<double>(sensing.self_test_coil) * static_cast<double>(config_.self_test_field_ut);
+
     Mmc5983maFieldCounts counts;
-    counts.x = axis(truth_x_ut, hard_iron_ut_[0], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.x);
-    counts.y = axis(truth_y_ut, hard_iron_ut_[1], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.y);
-    counts.z = axis(truth_z_ut, hard_iron_ut_[2], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.z);
+    counts.x =
+        axis(truth_x_ut + coil_ut, hard_iron_ut_[0], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.x);
+    counts.y =
+        axis(truth_y_ut + coil_ut, hard_iron_ut_[1], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.y);
+    counts.z =
+        axis(truth_z_ut + coil_ut, hard_iron_ut_[2], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.z);
     return counts;
   }
 

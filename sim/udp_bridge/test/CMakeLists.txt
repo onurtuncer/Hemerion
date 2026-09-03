@@ -9,10 +9,10 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_udp_bridge_socket test_udp_socket.cpp)
-target_link_libraries(test_hemerion_udp_bridge_socket PRIVATE hemerion_udp_bridge)
+target_link_libraries(test_hemerion_udp_bridge_socket PRIVATE hemerion_udp_bridge hemerion_test_support)
 
 add_executable(test_hemerion_udp_bridge_bridge test_udp_bridge.cpp)
-target_link_libraries(test_hemerion_udp_bridge_bridge PRIVATE hemerion_udp_bridge)
+target_link_libraries(test_hemerion_udp_bridge_bridge PRIVATE hemerion_udp_bridge hemerion_test_support)
 
 add_test(NAME udp_bridge.socket COMMAND test_hemerion_udp_bridge_socket)
 set_tests_properties(udp_bridge.socket PROPERTIES LABELS "unit")

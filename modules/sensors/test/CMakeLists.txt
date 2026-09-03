@@ -8,25 +8,25 @@
 # ------------------------------------------------------------------------------
 
 add_executable(test_hemerion_sensors_imu_conversion test_imu_conversion.cpp)
-target_link_libraries(test_hemerion_sensors_imu_conversion PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_imu_conversion PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.imu_conversion COMMAND test_hemerion_sensors_imu_conversion)
 set_tests_properties(sensors.imu_conversion PROPERTIES LABELS "unit")
 
 add_executable(test_hemerion_sensors_nmea_parser test_nmea_parser.cpp)
-target_link_libraries(test_hemerion_sensors_nmea_parser PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_nmea_parser PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.nmea_parser COMMAND test_hemerion_sensors_nmea_parser)
 set_tests_properties(sensors.nmea_parser PROPERTIES LABELS "unit")
 
 add_executable(test_hemerion_sensors_ubx_parser test_ubx_parser.cpp)
-target_link_libraries(test_hemerion_sensors_ubx_parser PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_ubx_parser PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.ubx_parser COMMAND test_hemerion_sensors_ubx_parser)
 set_tests_properties(sensors.ubx_parser PROPERTIES LABELS "unit")
 
 add_executable(test_hemerion_sensors_gps_driver test_gps_driver.cpp)
-target_link_libraries(test_hemerion_sensors_gps_driver PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_gps_driver PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.gps_driver COMMAND test_hemerion_sensors_gps_driver)
 set_tests_properties(sensors.gps_driver PROPERTIES LABELS "unit")
@@ -36,7 +36,7 @@ set_tests_properties(sensors.gps_driver PROPERTIES LABELS "unit")
 # gps/fmu/CMakeLists.txt and must not be linked into cross-compiled firmware.
 add_executable(test_hemerion_sensors_ubx_emitter test_ubx_emitter.cpp
                                                  "${CMAKE_CURRENT_SOURCE_DIR}/../src/gps/fmu/ubxEmitter.cpp")
-target_link_libraries(test_hemerion_sensors_ubx_emitter PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_ubx_emitter PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.ubx_emitter COMMAND test_hemerion_sensors_ubx_emitter)
 set_tests_properties(sensors.ubx_emitter PROPERTIES LABELS "unit")
@@ -46,7 +46,7 @@ set_tests_properties(sensors.ubx_emitter PROPERTIES LABELS "unit")
 # decodes from an out-of-envelope epoch.
 add_executable(test_hemerion_sensors_gps_dynamics test_gps_dynamics.cpp
                                                   "${CMAKE_CURRENT_SOURCE_DIR}/../src/gps/fmu/ubxEmitter.cpp")
-target_link_libraries(test_hemerion_sensors_gps_dynamics PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_gps_dynamics PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.gps_dynamics COMMAND test_hemerion_sensors_gps_dynamics)
 set_tests_properties(sensors.gps_dynamics PROPERTIES LABELS "unit")
@@ -56,7 +56,7 @@ set_tests_properties(sensors.gps_dynamics PROPERTIES LABELS "unit")
 # imu/fmu/CMakeLists.txt and must not be linked into cross-compiled firmware.
 add_executable(test_hemerion_sensors_imu_packet test_imu_packet.cpp
                                                 "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_packet_emitter.cpp")
-target_link_libraries(test_hemerion_sensors_imu_packet PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_imu_packet PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.imu_packet COMMAND test_hemerion_sensors_imu_packet)
 set_tests_properties(sensors.imu_packet PROPERTIES LABELS "unit")
@@ -68,7 +68,7 @@ set_tests_properties(sensors.imu_packet PROPERTIES LABELS "unit")
 add_executable(
   test_hemerion_sensors_imu_spi test_imu_spi.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_spi_slave.cpp"
                                 "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_packet_emitter.cpp")
-target_link_libraries(test_hemerion_sensors_imu_spi PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_imu_spi PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.imu_spi COMMAND test_hemerion_sensors_imu_spi)
 set_tests_properties(sensors.imu_spi PROPERTIES LABELS "unit")
@@ -79,21 +79,21 @@ set_tests_properties(sensors.imu_spi PROPERTIES LABELS "unit")
 # not be linked into cross-compiled firmware.
 add_executable(test_hemerion_sensors_baro_packet test_baro_packet.cpp
                                                  "${CMAKE_CURRENT_SOURCE_DIR}/../src/baro/fmu/baro_packet_emitter.cpp")
-target_link_libraries(test_hemerion_sensors_baro_packet PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_baro_packet PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.baro_packet COMMAND test_hemerion_sensors_baro_packet)
 set_tests_properties(sensors.baro_packet PROPERTIES LABELS "unit")
 
 add_executable(test_hemerion_sensors_radalt_packet
                test_radalt_packet.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/radalt/fmu/radalt_packet_emitter.cpp")
-target_link_libraries(test_hemerion_sensors_radalt_packet PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_radalt_packet PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.radalt_packet COMMAND test_hemerion_sensors_radalt_packet)
 set_tests_properties(sensors.radalt_packet PROPERTIES LABELS "unit")
 
 add_executable(test_hemerion_sensors_mag_packet test_mag_packet.cpp
                                                 "${CMAKE_CURRENT_SOURCE_DIR}/../src/mag/fmu/mag_packet_emitter.cpp")
-target_link_libraries(test_hemerion_sensors_mag_packet PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_mag_packet PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.mag_packet COMMAND test_hemerion_sensors_mag_packet)
 set_tests_properties(sensors.mag_packet PROPERTIES LABELS "unit")
@@ -103,7 +103,7 @@ set_tests_properties(sensors.mag_packet PROPERTIES LABELS "unit")
 # real, on-target Bmp390Driver + Bmp390Compensator out of hemerion_sensors, with no transport in the picture.
 add_executable(test_hemerion_sensors_bmp390 test_bmp390.cpp
                                             "${CMAKE_CURRENT_SOURCE_DIR}/../src/baro/bmp390/fmu/bmp390_i2c_slave.cpp")
-target_link_libraries(test_hemerion_sensors_bmp390 PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_bmp390 PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.bmp390 COMMAND test_hemerion_sensors_bmp390)
 set_tests_properties(sensors.bmp390 PROPERTIES LABELS "unit")
@@ -115,7 +115,7 @@ set_tests_properties(sensors.bmp390 PROPERTIES LABELS "unit")
 # the FMU's do_step() does -- see the test's header comment.
 add_executable(test_hemerion_sensors_mmc5983ma
                test_mmc5983ma.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.cpp")
-target_link_libraries(test_hemerion_sensors_mmc5983ma PRIVATE hemerion_sensors)
+target_link_libraries(test_hemerion_sensors_mmc5983ma PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.mmc5983ma COMMAND test_hemerion_sensors_mmc5983ma)
 set_tests_properties(sensors.mmc5983ma PROPERTIES LABELS "unit")

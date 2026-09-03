@@ -144,7 +144,17 @@ bool Mmc5983maI2cSlave::take_triggered_temperature()
 Mmc5983maSensingState Mmc5983maI2cSlave::sensing_state() const
 {
   const std::lock_guard<std::mutex> lock(mutex_);
-  return Mmc5983maSensingState{ magnetization_, automatic_set_reset_ };
+
+  // St_enp and St_enm drive one coil in opposite directions, so asking for
+  // both is not a defined state on the part; the model reads it as no net
+  // current rather than inventing a winner.
+  const bool positive = (control3_ & kMmc5983maControl3SelfTestPositive) != 0;
+  const bool negative = (control3_ & kMmc5983maControl3SelfTestNegative) != 0;
+  const int coil = static_cast<int>(positive) - static_cast<int>(negative);
+
+  return Mmc5983maSensingState{ .magnetization = magnetization_,
+                                .automatic_set_reset = automatic_set_reset_,
+                                .self_test_coil = coil };
 }
 
 bool Mmc5983maI2cSlave::interrupt_asserted() const
@@ -217,11 +227,13 @@ void Mmc5983maI2cSlave::write_register(std::uint8_t address, std::uint8_t value)
       measurements_since_set_ = 0;
       return;
     case reg_address(Mmc5983maRegister::kInternalControl3):
-      // Stored so writes do not fault, and so a driver can set 3-wire SPI
-      // without the model objecting. St_enp/St_enm are NOT modelled
-      // magnetically: the self-test coil's extra field does not appear in
-      // the measurements, so a driver self-test would pass vacuously here.
-      // Build it against hardware, not against this model.
+      // St_enp/St_enm are modelled magnetically: sensing_state() reports the
+      // coil direction and Mmc5983maMeasurementModel adds its field to every
+      // axis, so a driver self-test exercises the sensing chain here instead
+      // of passing vacuously. The magnitude is a modelling choice rather than
+      // a characterisation of silicon -- see Mmc5983maMeasurementConfig's
+      // self_test_field_ut. The rest of the register (3-wire SPI, and the
+      // bits this part does not define) is stored so writes do not fault.
       control3_ = value;
       return;
     default:
