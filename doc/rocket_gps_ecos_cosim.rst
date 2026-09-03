@@ -107,11 +107,24 @@ Signal wiring
 -------------
 
 ``rocket_gps_cosim`` builds the coupling with Ecos' C++ API
-(``simulation_structure``). The rocket reports geodetic position in
-**radians**; the GPS FMU takes **degrees**, so the two conversions ride on the
-Ecos connections as modifiers. Velocity is wired 1:1 into the GPS FMU's NED
-inputs, from which it derives speed-over-ground and course itself. Body rates
-wire 1:1 into the IMU FMU:
+(``simulation_structure``). Every connection is 1:1: the rocket reports
+geodetic position in **degrees**, which is what the GPS FMU takes, and NED
+velocity in m/s, from which the receiver derives speed-over-ground and course
+itself. Body rates wire straight into the IMU FMU:
+
+.. note::
+
+   This requires **Aetherion >= 0.13.0**. Older releases published geodetic
+   position as ``out.lat_rad``/``out.lon_rad``, forwarding the library's
+   internal radians to the FMI boundary unconverted -- so those outputs
+   disagreed with the ``lat0_deg``/``lon0_deg`` parameters that seed the same
+   quantity on the way in, and this page's table carried two ``rad -> deg``
+   connection modifiers to compensate. 0.13.0 renamed the ports and converts
+   inside the FMU, which is where the conversion belongs. The example's
+   ``CMakeLists.txt`` reads ``modelDescription.xml`` out of the located
+   ``TwoStageRocket.fmu`` and fails at configure time if the degree-valued
+   ports are absent, rather than letting Ecos report a missing variable
+   minutes into a build.
 
 .. list-table::
    :header-rows: 1
@@ -120,11 +133,11 @@ wire 1:1 into the IMU FMU:
    * - ``TwoStageRocket`` output
      - Ecos connection modifier
      - Sensor FMU input
-   * - ``out.lat_rad``
-     - rad → deg
+   * - ``out.lat_deg``
+     - —
      - ``gps::latitude_deg``
-   * - ``out.lon_rad``
-     - rad → deg
+   * - ``out.lon_deg``
+     - —
      - ``gps::longitude_deg``
    * - ``out.alt_m``
      - —
@@ -161,11 +174,8 @@ In code:
     ss.add_model("imu", options.imu_fmu.string());
     ss.add_model("baro", options.baro_fmu.string());
 
-    const std::function<double(const double&)> rad2deg = [](const double& rad) {
-      return rad * (180.0 / std::numbers::pi);
-    };
-    ss.make_connection<double>("rocket::out.lat_rad", "gps::latitude_deg", rad2deg);
-    ss.make_connection<double>("rocket::out.lon_rad", "gps::longitude_deg", rad2deg);
+    ss.make_connection<double>("rocket::out.lat_deg", "gps::latitude_deg");
+    ss.make_connection<double>("rocket::out.lon_deg", "gps::longitude_deg");
     ss.make_connection<double>("rocket::out.alt_m", "gps::altitude_m");
     ss.make_connection<double>("rocket::out.v_north_m_s", "gps::v_north_mps");
     ss.make_connection<double>("rocket::out.v_east_m_s", "gps::v_east_mps");
@@ -380,10 +390,15 @@ Building
 --------
 
 Requires a native toolchain, network access at configure time (Ecos and its
-FMU loader fmi4c are fetched and built from source), and an Aetherion install
-for ``TwoStageRocket.fmu`` (set ``AETHERION_ROOT`` if it is not in a default
-location; without it the example still builds and ``--rocket <path>`` selects
-the FMU at runtime):
+FMU loader fmi4c are fetched and built from source), and an **Aetherion
+>= 0.13.0** install for ``TwoStageRocket.fmu`` (set ``AETHERION_ROOT`` if it
+is not in a default location; without it the example still builds and
+``--rocket <path>`` selects the FMU at runtime). The version floor buys the
+degree-valued geodetic ports described under `Signal wiring`_. It is checked
+by reading ``modelDescription.xml`` out of the FMU that configure located, so
+an FMU supplied later with ``--rocket`` is *not* covered by it -- point that
+option at a pre-0.13.0 plant and the failure comes from Ecos at
+``ss.load()``, naming the port it cannot find:
 
 .. code-block:: console
 
@@ -963,13 +978,23 @@ the value it was, and both had produced entirely plausible-looking output.
 
 **The truth log was quantised at 6.4 m.** Ecos' ``csv_writer`` formats reals
 with a default-configured ostringstream — six decimal places. For metres that
-is sub-micron and fine; but the rocket reports geodetic position in *radians*,
-where the sixth decimal is 6.4 m on the ground. The decoded-fix error figure
-was therefore comparing 1.5 m-noise fixes against a reference rounded to four
-times that, and its horizontal RMS read 2.81 m instead of 2.12 m — the excess
-being exactly the :math:`6.37/\sqrt{12} = 1.84` m RMS of uniform rounding on
-the longitude axis, the latitude axis being unaffected because Scenario 17
+is sub-micron and fine; but geodetic position is an angle, and six decimals of
+an angle is a length on the ground. The rocket reported *radians* at the time,
+where the sixth decimal is 6.4 m. The decoded-fix error figure was therefore
+comparing 1.5 m-noise fixes against a reference rounded to four times that,
+and its horizontal RMS read 2.81 m instead of 2.12 m — the excess being
+exactly the :math:`6.37/\sqrt{12} = 1.84` m RMS of uniform rounding on the
+longitude axis, the latitude axis being unaffected because Scenario 17
 launches from the equator and its latitude rounds to zero cleanly.
+
+Aetherion 0.13.0 later moved those ports to degrees, where the same sixth
+decimal is 0.11 m and the rounding would contribute 3.2 cm RMS — 0.02% of the
+error figure rather than a third of it. So the defect that motivated the
+paragraph below is largely gone at the source, which is the more interesting
+half of the story: the two fixes are independent, and only one of them had to
+be right for the *number* to come out. What the log-side fix still buys is
+that the reference a measurement is judged against carries no avoidable noise
+of its own, at any unit the plant may report next.
 
 ``rocket_gps_cosim`` now writes the truth log itself, at
 ``max_digits10`` precision, through a small ``TruthLogger`` — it already read

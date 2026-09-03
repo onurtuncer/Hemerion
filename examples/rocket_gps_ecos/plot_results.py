@@ -257,12 +257,18 @@ def annotate_event(ax, x: float, label: str) -> None:
                 ha="left", va="top", fontsize=8, color=INK_2)
 
 
-def to_enu_km(lat_rad: float, lon_rad: float, alt_m: float,
+def to_enu_km(lat_deg: float, lon_deg: float, alt_m: float,
               origin: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Geodetic -> local east/north/up in km, on a sphere about the launch site."""
-    lat0, lon0, alt0 = origin
-    east = (lon_rad - lon0) * EARTH_RADIUS_M * math.cos(lat0)
-    north = (lat_rad - lat0) * EARTH_RADIUS_M
+    """Geodetic -> local east/north/up in km, on a sphere about the launch site.
+
+    Degrees in, which is what both sources of geodetic position now carry: the
+    truth log since Aetherion 0.13.0 started reporting out.lat_deg/out.lon_deg,
+    and the decoded fixes all along. That is the whole reason the two call
+    sites below can share this function without one of them converting first.
+    """
+    lat0_deg, lon0_deg, alt0 = origin
+    east = math.radians(lon_deg - lon0_deg) * EARTH_RADIUS_M * math.cos(math.radians(lat0_deg))
+    north = math.radians(lat_deg - lat0_deg) * EARTH_RADIUS_M
     return east / 1000.0, north / 1000.0, (alt_m - alt0) / 1000.0
 
 
@@ -302,9 +308,9 @@ def plot_trajectory_3d(truth, fixes, outages, out: Path, caption: str,
     thing to do with an empty dimension is to show that it is empty rather than
     quietly project it away.
     """
-    origin = (truth["lat_rad"][0], truth["lon_rad"][0], truth["alt_m"][0])
+    origin = (truth["lat_deg"][0], truth["lon_deg"][0], truth["alt_m"][0])
     east, north, up = zip(*[to_enu_km(la, lo, al, origin)
-                            for la, lo, al in zip(truth["lat_rad"], truth["lon_rad"], truth["alt_m"])])
+                            for la, lo, al in zip(truth["lat_deg"], truth["lon_deg"], truth["alt_m"])])
     times = truth["time"]
     t_lost = outages[0][0] if outages else None
 
@@ -313,7 +319,7 @@ def plot_trajectory_3d(truth, fixes, outages, out: Path, caption: str,
     fix_up: tuple[float, ...] = ()
     if len(fixes["sim_time_s"]) >= 2:
         fix_east, fix_north, fix_up = zip(
-            *[to_enu_km(math.radians(la), math.radians(lo), al, origin)
+            *[to_enu_km(la, lo, al, origin)
               for la, lo, al in zip(fixes["latitude_deg"], fixes["longitude_deg"], fixes["altitude_m"])])
 
     fig = plt.figure(figsize=(9.6, 5.0), dpi=150)
@@ -597,8 +603,8 @@ def plot_gps_error(truth, fixes, step: float, out: Path, caption: str) -> None:
         j = truth_by_time.get(round(t - step, 3))
         if j is None:
             continue
-        lat_t = math.degrees(truth["lat_rad"][j])
-        lon_t = math.degrees(truth["lon_rad"][j])
+        lat_t = truth["lat_deg"][j]
+        lon_t = truth["lon_deg"][j]
         dlat_m = (fixes["latitude_deg"][i] - lat_t) * METERS_PER_DEG_LAT
         dlon_m = (fixes["longitude_deg"][i] - lon_t) * METERS_PER_DEG_LAT * math.cos(math.radians(lat_t))
         times.append(t)

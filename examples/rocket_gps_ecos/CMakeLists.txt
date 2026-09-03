@@ -80,6 +80,79 @@ if(NOT HEMERION_TWO_STAGE_ROCKET_FMU)
   set(HEMERION_TWO_STAGE_ROCKET_FMU "")
 endif()
 
+# Aetherion 0.13.0 renamed TwoStageRocket's out.lat_rad/out.lon_rad to out.lat_deg/out.lon_deg and converted them on the
+# way out. Before that the FMU forwarded the library's internal radians to the FMI boundary unconverted, so those two
+# outputs disagreed with the lat0_deg/lon0_deg parameters that seed the very same quantity on the way in.
+# cosim_host_main.cpp binds the degree-valued ports by name and wires them straight into the GPS FMU's degree-valued
+# inputs, so an older plant is not a unit mismatch to compensate for here -- it is a variable that does not exist.
+#
+# The check reads the archive rather than calling find_package(Aetherion) for two reasons. The FMU is the whole of what
+# this example consumes, and a version number is only a proxy for it -- AETHERION_ROOT aimed at a stale build tree
+# beside a current install is exactly the case a proxy waves through. And Hemerion packages its own FMUs with the
+# vendored fmu4cpp under cmake/generate_fmu.cmake, so it has no other need of the Aetherion CMake package; asking for it
+# would drag in that package's own REQUIRED Eigen3 and CppAD lookups to read one string.
+#
+# So HEMERION_AETHERION_MIN_VERSION is the release this floor corresponds to, and the one place that number is written
+# down for the diagnostics and the docs to quote -- the test below is against the ports, not against it.
+set(HEMERION_AETHERION_MIN_VERSION 0.13.0)
+
+if(HEMERION_TWO_STAGE_ROCKET_FMU)
+  # Re-check when the FMU is replaced under an already-configured build tree -- what happens when Aetherion is rebuilt
+  # and reinstalled to the same prefix, where find_file()'s cached result would not change.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HEMERION_TWO_STAGE_ROCKET_FMU}")
+
+  # An FMU is a zip, and one small member of it answers the question. Cleared first so that an archive carrying no
+  # modelDescription.xml is reported as such rather than silently passing on the copy a previous configure extracted.
+  #
+  # `cmake -E tar` rather than file(ARCHIVE_EXTRACT) because the pinned cmake-format cannot parse the latter and reflows
+  # it to one token per line -- the same 0.6.13 gap that .cmake-format disables lint code E1126 over. It also sidesteps
+  # the PATH hazard the runtime side of this example documents, being CMake's own libarchive rather than whichever tar
+  # is first on PATH.
+  set(_rocket_unpack_dir "${CMAKE_CURRENT_BINARY_DIR}/TwoStageRocket.modelDescription")
+  file(REMOVE_RECURSE "${_rocket_unpack_dir}")
+  file(MAKE_DIRECTORY "${_rocket_unpack_dir}")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E tar xf "${HEMERION_TWO_STAGE_ROCKET_FMU}" -- modelDescription.xml
+    WORKING_DIRECTORY "${_rocket_unpack_dir}"
+    RESULT_VARIABLE _rocket_unpack_result
+    OUTPUT_QUIET ERROR_QUIET)
+
+  set(_rocket_description "${_rocket_unpack_dir}/modelDescription.xml")
+  if(_rocket_unpack_result OR NOT EXISTS "${_rocket_description}")
+    message(FATAL_ERROR "cannot read modelDescription.xml out of ${HEMERION_TWO_STAGE_ROCKET_FMU} -- not an FMU?")
+  endif()
+
+  # Plain substring searches, not regexes, and without the surrounding name="..." -- a variable name occurs exactly once
+  # in modelDescription.xml, in the one element that declares it, because the FMI dependency graph refers to variables
+  # by index rather than by name. There is nothing else in the file for these to collide with.
+  #
+  # string(FIND) rather than if(... MATCHES ...) for the same reason as `cmake -E tar` above: cmake-format 0.6.13
+  # mis-parses if(NOT <var> <binary-op> <value>) and splays it over four lines. if(<index> LESS 0) is one operator with
+  # no leading NOT, which it handles -- and a substring test is what this wanted in the first place.
+  file(READ "${_rocket_description}" _rocket_ports)
+  string(FIND "${_rocket_ports}" "out.lat_deg" _rocket_lat_deg_at)
+  string(FIND "${_rocket_ports}" "out.lat_rad" _rocket_lat_rad_at)
+  if(_rocket_lat_deg_at LESS 0)
+    if(_rocket_lat_rad_at LESS 0)
+      set(_rocket_diagnosis "publishes neither out.lat_deg nor out.lat_rad")
+    else()
+      set(_rocket_diagnosis "publishes the pre-0.13.0 out.lat_rad/out.lon_rad, in radians")
+    endif()
+    message(
+      FATAL_ERROR
+        "${HEMERION_TWO_STAGE_ROCKET_FMU} ${_rocket_diagnosis}, but rocket_gps_cosim binds out.lat_deg and "
+        "out.lon_deg. Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
+        "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
+  endif()
+
+  unset(_rocket_unpack_dir)
+  unset(_rocket_unpack_result)
+  unset(_rocket_description)
+  unset(_rocket_ports)
+  unset(_rocket_lat_deg_at)
+  unset(_rocket_lat_rad_at)
+endif()
+
 add_executable(rocket_gps_cosim cosim_host_main.cpp)
 target_link_libraries(rocket_gps_cosim PRIVATE libecos)
 target_compile_features(rocket_gps_cosim PRIVATE cxx_std_23)

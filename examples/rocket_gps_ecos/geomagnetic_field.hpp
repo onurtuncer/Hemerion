@@ -8,7 +8,7 @@
 /// @brief The truth magnetic field the magnetometer FMU is driven with: a
 /// centered tilted dipole, plus the NED-to-body rotation.
 ///
-/// The rocket plant reports where it is (`out.lat_rad`, `out.lon_rad`,
+/// The rocket plant reports where it is (`out.lat_deg`, `out.lon_deg`,
 /// `out.alt_m`) and how it is pointing (`out.yaw_rad`, `out.pitch_rad`,
 /// `out.roll_rad`) but says nothing about the magnetic field it is flying
 /// through -- there is no `out.b_*` to connect. So the host computes it, the
@@ -52,6 +52,16 @@
 /// radius as `a + altitude`). The ellipsoidal correction is a few tenths of a
 /// percent; the dipole approximation above dwarfs it by two orders of
 /// magnitude, so carrying WGS-84 here would be false precision.
+///
+/// **Units follow the plant's ports rather than one house convention.**
+/// `field_ned` takes degrees because `out.lat_deg` and `out.lon_deg` are
+/// degrees (Aetherion >= 0.13.0); `to_body` takes radians because
+/// `out.yaw_rad` and its two siblings still are. Two entry points on one
+/// class disagreeing about angle units is normally a trap, and it is the
+/// exact trap that put radians on a port named for them upstream -- what
+/// makes it safe here is that every parameter is suffixed with its unit and
+/// every suffix matches the port feeding it, so a call site reads as a
+/// transcription of the FMI names with no conversion to audit.
 
 #pragma once
 
@@ -97,10 +107,13 @@ public:
 
   /// @brief The field at a geodetic position, in local NED.
   ///
-  /// @param latitude_rad  Geodetic latitude, used as geocentric (see file comment).
-  /// @param longitude_rad Longitude, east positive.
+  /// Degrees, matching the plant's `out.lat_deg`/`out.lon_deg`; see the file
+  /// comment on why this differs from `to_body`.
+  ///
+  /// @param latitude_deg  Geodetic latitude, used as geocentric (see file comment).
+  /// @param longitude_deg Longitude, east positive.
   /// @param altitude_m    Height above the reference sphere.
-  [[nodiscard]] static FieldNed field_ned(double latitude_rad, double longitude_rad, double altitude_m)
+  [[nodiscard]] static FieldNed field_ned(double latitude_deg, double longitude_deg, double altitude_m)
   {
     const double radius_m = kReferenceRadiusM + altitude_m;
     // Guard the singularity at the Earth's centre rather than trusting the
@@ -108,6 +121,8 @@ public:
     // quietly riding into the sensor stream.
     const double scale = (radius_m > 1.0) ? kEquatorialFieldUt * std::pow(kReferenceRadiusM / radius_m, 3.0) : 0.0;
 
+    const double latitude_rad = latitude_deg * kDegToRad;
+    const double longitude_rad = longitude_deg * kDegToRad;
     const double cos_lat = std::cos(latitude_rad);
     const double sin_lat = std::sin(latitude_rad);
     const double cos_lon = std::cos(longitude_rad);
@@ -166,13 +181,17 @@ public:
   }
 
 private:
+  /// Radians per degree. Both places this class converts an angle -- the
+  /// caller-supplied position and the pole coordinates below -- go through it.
+  static constexpr double kDegToRad = std::numbers::pi / 180.0;
+
   /// Unit dipole moment in the Earth-fixed frame. The geomagnetic *north*
   /// pole is where field lines enter the Earth, so the moment points away
   /// from it -- toward the southern hemisphere.
   [[nodiscard]] static std::tuple<double, double, double> moment()
   {
-    const double pole_lat_rad = kPoleLatitudeDeg * (std::numbers::pi / 180.0);
-    const double pole_lon_rad = kPoleLongitudeDeg * (std::numbers::pi / 180.0);
+    const double pole_lat_rad = kPoleLatitudeDeg * kDegToRad;
+    const double pole_lon_rad = kPoleLongitudeDeg * kDegToRad;
     const double cos_lat = std::cos(pole_lat_rad);
     return { -cos_lat * std::cos(pole_lon_rad), -cos_lat * std::sin(pole_lon_rad), -std::sin(pole_lat_rad) };
   }

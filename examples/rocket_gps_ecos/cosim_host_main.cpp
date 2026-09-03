@@ -28,14 +28,18 @@
 ///                                                     the same stacks that run on the
 ///                                                     STM32H743)
 ///
-/// The rocket reports geodetic latitude/longitude in radians and NED velocity
-/// in m/s; the GPS FMU takes degrees and NED velocity directly, so the two
-/// rad->deg conversions are attached as Ecos connection modifiers and every
-/// other connection is 1:1. The IMU FMU takes true body-frame specific force,
-/// which the rocket does not expose directly; the host computes
-/// f = (thrust + F_aero) / m from the rocket's outputs after every step and
-/// writes it to the IMU's inputs through Ecos properties (same one-step
-/// transport delay as an Ecos connection). Body rates p/q/r connect 1:1.
+/// The rocket reports geodetic latitude/longitude in degrees and NED velocity
+/// in m/s, which is what the GPS FMU takes, so every truth->receiver
+/// connection is 1:1. (Before 0.13.0, Aetherion published those two ports as
+/// `out.lat_rad`/`out.lon_rad` in radians and this host converted them with
+/// Ecos connection modifiers; the example now requires >= 0.13.0 and binds
+/// the degree-valued ports directly -- see CMakeLists.txt.)
+///
+/// The IMU FMU takes true body-frame specific force, which the rocket does
+/// not expose directly; the host computes f = (thrust + F_aero) / m from the
+/// rocket's outputs after every step and writes it to the IMU's inputs
+/// through Ecos properties (same one-step transport delay as an Ecos
+/// connection). Body rates p/q/r connect 1:1.
 ///
 /// None of the sensor FMUs has FMI outputs -- their effect is the sensor bus
 /// each part really uses: a UDP stand-in for the GPS receiver's UART, a
@@ -83,7 +87,6 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -382,13 +385,20 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
 ///
 /// ``csv_writer`` formats every real with a default-configured ostringstream:
 /// six decimal places. For metres that is sub-micron and perfectly fine, but
-/// the rocket reports geodetic position in **radians**, where the sixth
-/// decimal is 6.4 m on the ground. Comparing the flight computer's decoded
-/// fixes against a reference rounded that coarsely measures the log's
-/// quantisation rather than the receiver's noise -- and it dominates it, since
-/// GpsNoiseModel injects 1.5 m per axis. (Before this, the horizontal error
-/// figure sat at 2.8 m RMS: exactly sqrt(1.5^2 + (1.5^2 + (6.37/sqrt(12))^2))
-/// once the rounding is accounted for.)
+/// geodetic position is an angle, and six decimals of an angle is a length on
+/// the ground -- which one depends on the unit. In **radians** the sixth
+/// decimal was 6.4 m, and it swamped the 1.5 m per axis GpsNoiseModel
+/// injects: the decoded-fix error figure was a picture of the log's own
+/// rounding, sitting at 2.8 m RMS, exactly
+/// sqrt(1.5^2 + (1.5^2 + (6.37/sqrt(12))^2)).
+///
+/// In **degrees** (Aetherion >= 0.13.0) the same sixth decimal is 0.11 m, so
+/// the quantisation is 3.2 cm RMS and inflates the horizontal error figure by
+/// 0.02%. This class is therefore no longer load-bearing for those numbers,
+/// and is kept because the reason for it never rested on the size of the
+/// error: the plant's state should reach the file intact, and a reference a
+/// measurement is judged against should not carry avoidable noise of its
+/// own.
 ///
 /// The host already reads these properties every step for the specific-force
 /// computation, so writing the row itself costs nothing and puts the format
@@ -513,12 +523,14 @@ int main(int argc, char** argv)
     ss.add_model("baro", options.baro_fmu.string());
     ss.add_model("mag", options.mag_fmu.string());
 
-    // The rocket reports geodetic position in radians; the GPS FMU takes degrees.
-    const std::function<double(const double&)> rad2deg = [](const double& rad) {
-      return rad * (180.0 / std::numbers::pi);
-    };
-    ss.make_connection<double>("rocket::out.lat_rad", "gps::latitude_deg", rad2deg);
-    ss.make_connection<double>("rocket::out.lon_rad", "gps::longitude_deg", rad2deg);
+    // Geodetic position needs no modifier: Aetherion >= 0.13.0 publishes
+    // out.lat_deg/out.lon_deg in the degrees the GPS FMU's inputs are named
+    // for. Both ends carry the unit in the port name, which is the only reason
+    // a bare connection here can be read as correct rather than merely
+    // plausible -- and an Aetherion older than that fails at ss.load() naming
+    // the port it cannot find, rather than silently feeding radians.
+    ss.make_connection<double>("rocket::out.lat_deg", "gps::latitude_deg");
+    ss.make_connection<double>("rocket::out.lon_deg", "gps::longitude_deg");
     ss.make_connection<double>("rocket::out.alt_m", "gps::altitude_m");
     ss.make_connection<double>("rocket::out.v_north_m_s", "gps::v_north_mps");
     ss.make_connection<double>("rocket::out.v_east_m_s", "gps::v_east_mps");
@@ -579,15 +591,15 @@ int main(int argc, char** argv)
 
     sim->init("launchSite");
 
-    // Logged by TruthLogger rather than Ecos' csv_writer -- see the class
-    // comment: six decimal places of a *radian* is 6.4 m of ground position,
-    // which would swamp the 1.5 m the GPS noise model injects and make the
-    // decoded-fix error figure a picture of the log's own rounding.
+    // Logged by TruthLogger rather than Ecos' csv_writer, which rounds every
+    // real -- geodetic angles included -- to six decimal places. See the class
+    // comment for what that costs in degrees, and what it used to cost when
+    // these two ports were radians.
     TruthLogger truth_log(options.csv_path,
                           *sim,
                           { "rocket::out.alt_m",
-                            "rocket::out.lat_rad",
-                            "rocket::out.lon_rad",
+                            "rocket::out.lat_deg",
+                            "rocket::out.lon_deg",
                             "rocket::out.v_north_m_s",
                             "rocket::out.v_east_m_s",
                             "rocket::out.v_down_m_s",
@@ -639,8 +651,8 @@ int main(int argc, char** argv)
     // sees one. GeomagneticDipole owns the model; geomagnetic_field.hpp is
     // explicit about it being a centered dipole rather than the WMM, and about
     // what that costs at this particular launch site.
-    auto* latitude = sim->get_real_property("rocket::out.lat_rad");
-    auto* longitude = sim->get_real_property("rocket::out.lon_rad");
+    auto* latitude = sim->get_real_property("rocket::out.lat_deg");
+    auto* longitude = sim->get_real_property("rocket::out.lon_deg");
     auto* yaw = sim->get_real_property("rocket::out.yaw_rad");
     auto* pitch = sim->get_real_property("rocket::out.pitch_rad");
     auto* roll = sim->get_real_property("rocket::out.roll_rad");

@@ -434,7 +434,7 @@ Windows machines need.
 
 | Project | Description |
 |---|---|
-| [Aetherion](https://github.com/onurtuncer/Aetherion) | C++23 host-side GNC simulation framework — the plant-side sibling of Hemerion |
+| [Aetherion](https://github.com/onurtuncer/Aetherion) | C++23 host-side GNC simulation framework — the plant-side sibling of Hemerion. **≥ 0.13.0** for the co-simulation example, whose plant FMU must report geodetic position in degrees |
 | CellForge | Offline robot programming platform (separate repository) |
 
 ---
