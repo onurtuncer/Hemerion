@@ -40,24 +40,56 @@ function Test-ToolWorking {
     return -not ($raw -match "was not found")
 }
 
-function Test-AetherionInstalled {
+# Version floor for examples/rocket_gps_ecos. Before 0.13.0 Aetherion's plant FMUs
+# published geodetic position as out.lat_rad/out.lon_rad, carrying the library's
+# internal radians straight to the FMI boundary; 0.13.0 renamed those ports to
+# out.lat_deg/out.lon_deg and converts inside the FMU. The co-simulation host binds
+# the new names, so an older install is a missing variable rather than a unit to
+# compensate for -- examples/rocket_gps_ecos/CMakeLists.txt enforces the same floor
+# at configure time, by reading modelDescription.xml out of the FMU it locates.
+$AetherionMinVersion = [version]"0.13.0"
+
+function Get-AetherionVersion {
+    # $null when nothing is installed; a [version] when one can be read from the
+    # installed CMake package; the string "unknown" when an install is there but
+    # carries no version (a hand-copied header/library tree, say).
     $hints = @($env:AETHERION_ROOT, "$env:ProgramFiles\Aetherion", "${env:ProgramFiles(x86)}\Aetherion") | Where-Object { $_ }
     foreach ($hint in $hints) {
         if (-not (Test-Path $hint)) { continue }
-        if (Get-ChildItem -Path $hint -Recurse -Filter "AetherionConfig.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1) { return $true }
-        if (Test-Path (Join-Path $hint "include\Aetherion\Aetherion.h")) { return $true }
+        $versionFile = Get-ChildItem -Path $hint -Recurse -Filter "AetherionConfigVersion.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($versionFile) {
+            $found = Select-String -Path $versionFile.FullName -Pattern 'set\(PACKAGE_VERSION\s+"([0-9]+(?:\.[0-9]+)*)"' | Select-Object -First 1
+            if ($found) { return [version]$found.Matches[0].Groups[1].Value }
+            return "unknown"
+        }
+        if (Get-ChildItem -Path $hint -Recurse -Filter "AetherionConfig.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1) { return "unknown" }
+        if (Test-Path (Join-Path $hint "include\Aetherion\Aetherion.h")) { return "unknown" }
     }
-    return $false
+    return $null
 }
 
 function Install-Aetherion {
-    if (Test-AetherionInstalled) {
-        Write-Host "Aetherion -- already installed, skipping [fmu co-simulation]" -ForegroundColor Green
+    $installed = Get-AetherionVersion
+
+    if ($installed -is [version] -and $installed -ge $AetherionMinVersion) {
+        Write-Host "Aetherion $installed -- already installed, skipping [fmu co-simulation]" -ForegroundColor Green
         return
     }
 
-    Write-Host "Aetherion -- not found [fmu co-simulation]" -ForegroundColor Yellow
-    if (-not (Confirm-Install "Aetherion (FMU co-simulation library, latest GitHub release)")) {
+    if ($installed -is [version]) {
+        Write-Host "Aetherion $installed -- older than the $AetherionMinVersion examples/rocket_gps_ecos needs [fmu co-simulation]" -ForegroundColor Yellow
+        Write-Host "  Its plant FMUs report geodetic position in radians, on ports the co-simulation host no longer binds." -ForegroundColor Yellow
+        $description = "Aetherion (upgrade $installed -> latest GitHub release)"
+    } elseif ($installed) {
+        Write-Host "Aetherion -- installed, but with no version to read [fmu co-simulation]" -ForegroundColor Yellow
+        Write-Host "  Cannot tell whether it is >= $AetherionMinVersion, which examples/rocket_gps_ecos requires." -ForegroundColor Yellow
+        $description = "Aetherion (reinstall the latest GitHub release to be sure)"
+    } else {
+        Write-Host "Aetherion -- not found [fmu co-simulation]" -ForegroundColor Yellow
+        $description = "Aetherion (FMU co-simulation library, latest GitHub release)"
+    }
+
+    if (-not (Confirm-Install $description)) {
         Write-Host "Skipped Aetherion." -ForegroundColor Yellow
         return
     }
@@ -72,6 +104,17 @@ function Install-Aetherion {
     $asset = $release.assets | Where-Object { $_.name -eq "Aetherion.msi" } | Select-Object -First 1
     if (-not $asset) {
         Write-Host "No Aetherion.msi asset found on the latest Aetherion release ($($release.tag_name)). Skipping." -ForegroundColor Red
+        return
+    }
+
+    # A tag that does not parse is not treated as a failure -- only a tag that parses and
+    # is demonstrably too old, which would otherwise install and then fail at configure time.
+    $releaseVersion = $null
+    if ($release.tag_name -match '([0-9]+(?:\.[0-9]+)+)') {
+        try { $releaseVersion = [version]$Matches[1] } catch { $releaseVersion = $null }
+    }
+    if ($releaseVersion -and $releaseVersion -lt $AetherionMinVersion) {
+        Write-Host "The latest Aetherion release ($($release.tag_name)) is older than the required $AetherionMinVersion. Skipping." -ForegroundColor Red
         return
     }
 

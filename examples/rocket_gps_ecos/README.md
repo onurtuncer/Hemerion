@@ -83,9 +83,9 @@ exercised the packet parsers and nothing else.
   Ecos C++ API (`simulation_structure`, `fixed_step_algorithm`, `csv_writer`) to load all four FMUs, wire
   truth to the sensor inputs, and log the truth trajectory.
 
-The unit and interface mismatches between the FMUs are handled where they belong, in the orchestration layer:
-the rocket reports lat/lon in **radians**, the GPS FMU takes **degrees**, so the two conversions ride on the
-Ecos connections as modifiers; velocity is wired 1:1 through the GPS FMU's NED-velocity inputs
+Every truth-to-receiver signal is wired 1:1, because the two FMUs agree on units: the rocket reports lat/lon
+in **degrees**, which is what the GPS FMU takes (this needs **Aetherion >= 0.13.0** — see *Building* below);
+velocity goes straight through the GPS FMU's NED-velocity inputs
 (`v_north_mps`/`v_east_mps`/`v_down_mps`), from which it derives speed-over-ground and course itself. Body
 rates wire 1:1 to the IMU FMU's `p/q/r_rad_s` inputs. Specific force — what an accelerometer actually
 measures — has no direct rocket output and involves three of them (`f = (thrust + F_aero) / mass`, an Ecos
@@ -165,8 +165,17 @@ sets it explicitly (`--stg2-ignition`, default 131.8 s), along with Scenario 17'
 ## Building
 
 Requires: native toolchain (see the repo README), network access at configure time (Ecos and its FMU loader
-fmi4c are fetched from source), and an Aetherion install for `TwoStageRocket.fmu` (set `AETHERION_ROOT` if it
-is not in a default location — the example still builds without it; you then pass `--rocket` at runtime).
+fmi4c are fetched from source), and an **Aetherion >= 0.13.0** install for `TwoStageRocket.fmu` (set
+`AETHERION_ROOT` if it is not in a default location — the example still builds without it; you then pass
+`--rocket` at runtime).
+
+The version floor is the plant's geodetic output ports. Before 0.13.0 they were `out.lat_rad`/`out.lon_rad`
+and carried the library's internal radians straight to the FMI boundary, disagreeing with the
+`lat0_deg`/`lon0_deg` parameters that seed the same quantity on the way in; 0.13.0 renamed them to
+`out.lat_deg`/`out.lon_deg` and converts inside the FMU. `rocket_gps_cosim` binds those names, so an older
+plant is a missing variable rather than a unit to compensate for — and configure says so, by reading
+`modelDescription.xml` out of the FMU it locates instead of trusting a version number that `AETHERION_ROOT`
+could easily aim at a stale build tree.
 
 ```
 cmake --preset examples-native
