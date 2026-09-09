@@ -12,7 +12,7 @@ End-to-end sensor-in-the-loop scenario built from six independently developed pi
 │                      │   p/q/r (connections), ┌──────────────────────┐  SPI transfers    │  convert_raw_to_si      │
 │                      │   specific force       │ hemerion_imu_fmu.fmu │<──────────────────┤                         │
 │                      ├───────────────────────>│ (MEMS IMU sim: noise │   over shared     │  Bmp390Driver +         │
-│                      │   (host-computed)      │  + registers + FIFO) ├─── memory ───────>│  Bmp390Compensator      │
+│                      │   (all connections)    │  + registers + FIFO) ├─── memory ───────>│  Bmp390Compensator      │
 │                      │                        └──────────────────────┘  bursts of counts │                         │
 │                      │   altitude             ┌──────────────────────┐  I2C transactions │  Mmc5983maDriver +      │
 │                      ├───────────────────────>│ hemerion_bmp390_fmu  │<──────────────────┤  convert_raw_to_si      │
@@ -87,11 +87,12 @@ Every truth-to-receiver signal is wired 1:1, because the two FMUs agree on units
 in **degrees**, which is what the GPS FMU takes (this needs **Aetherion >= 0.13.0** — see *Building* below);
 velocity goes straight through the GPS FMU's NED-velocity inputs
 (`v_north_mps`/`v_east_mps`/`v_down_mps`), from which it derives speed-over-ground and course itself. Body
-rates wire 1:1 to the IMU FMU's `p/q/r_rad_s` inputs. Specific force — what an accelerometer actually
-measures — has no direct rocket output and involves three of them (`f = (thrust + F_aero) / mass`, an Ecos
-connection modifier sees only one source variable), so the host computes it after every step and writes the
-IMU's `f_x/f_y/f_z_mps2` inputs through Ecos properties, with the same one-step transport delay a connection
-would have.
+rates wire 1:1 to the IMU FMU's `p/q/r_rad_s` inputs, and so does specific force — what an accelerometer
+actually measures — since **Aetherion 0.14.0** publishes it as `out.specificForce_{x,y,z}_m_s2`:
+`(F_aero + F_thrust) / m` at the CG, in body axes, with gravitation structurally excluded. Before that the
+plant exposed the ingredients but not the sum, and the host divided them itself after every step — which
+meant this bench asserting that thrust acts along body **+X**. That is the plant's installation geometry to
+know, not the test harness's, and it is now stated where it is known.
 
 ## The receiver loses its fix, on purpose
 
@@ -169,13 +170,16 @@ fmi4c are fetched from source), and an **Aetherion >= 0.13.0** install for `TwoS
 `AETHERION_ROOT` if it is not in a default location — the example still builds without it; you then pass
 `--rocket` at runtime).
 
-The version floor is the plant's geodetic output ports. Before 0.13.0 they were `out.lat_rad`/`out.lon_rad`
-and carried the library's internal radians straight to the FMI boundary, disagreeing with the
-`lat0_deg`/`lon0_deg` parameters that seed the same quantity on the way in; 0.13.0 renamed them to
-`out.lat_deg`/`out.lon_deg` and converts inside the FMU. `rocket_gps_cosim` binds those names, so an older
-plant is a missing variable rather than a unit to compensate for — and configure says so, by reading
-`modelDescription.xml` out of the FMU it locates instead of trusting a version number that `AETHERION_ROOT`
-could easily aim at a stale build tree.
+The version floor is a pair of port requirements that landed in two different releases. Before 0.13.0 the
+geodetic outputs were `out.lat_rad`/`out.lon_rad` and carried the library's internal radians straight to the
+FMI boundary, disagreeing with the `lat0_deg`/`lon0_deg` parameters that seed the same quantity on the way
+in; 0.13.0 renamed them to `out.lat_deg`/`out.lon_deg` and converts inside the FMU. 0.14.0 then added
+`out.specificForce_{x,y,z}_m_s2`, which the IMU FMU's inputs bind directly.
+
+`rocket_gps_cosim` binds all of those names, so an older plant is a missing variable rather than a unit to
+compensate for — and configure says so, by reading `modelDescription.xml` out of the FMU it locates instead
+of trusting a version number that `AETHERION_ROOT` could easily aim at a stale build tree. The two ports are
+tested separately, so a 0.13.x plant is diagnosed as missing specific force rather than as merely "too old".
 
 ```
 cmake --preset examples-native
@@ -275,8 +279,8 @@ error: cannot unpack C:/dev/Hemerion/build/examples-native/fmus/fmi2/hemerion_gp
 Outputs land in `results/`:
 
 * `rocket_truth.csv` — Ecos `csv_writer` log of the rocket's outputs (altitude, position, NED velocity, body
-  rates, Mach, dynamic pressure, thrust, mass, staging flag) plus the host-computed specific force the IMU FMU
-  received, at every communication point.
+  rates, Mach, dynamic pressure, thrust, mass, staging flag) plus the specific force the IMU FMU received, at
+  every communication point.
 * `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not. Epochs that carried a
   solution get position, speed/course, receiver-reported accuracies and satellite count; epochs the dynamics
   envelope invalidated get **empty** position fields, keeping only the index, time and `fix_type`. A real

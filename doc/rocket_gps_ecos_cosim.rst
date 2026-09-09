@@ -73,7 +73,7 @@ one sensor-in-the-loop scenario, orchestrated by the
    │                      │  p/q/r (connections), ┌──────────────────────┐   SPI transfers │  convert_raw_to_si     │
    │                      │  specific force       │ hemerion_imu_fmu.fmu │<────────────────┤                        │
    │                      ├──────────────────────>│ MEMS IMU simulator:  │  over shared    │  Bmp390Driver +        │
-   │                      │  (host-computed)      │ bias + noise + regs  │──────  memory ─>│  Bmp390Compensator     │
+   │                      │  (all connections)    │ bias + noise + regs  │──────  memory ─>│  Bmp390Compensator     │
    │                      │                       │ + 16 KiB sample FIFO │  bursts of      │                        │
    │                      │  altitude             └──────────────────────┘  raw counts     │  Mmc5983maDriver +     │
    │                      ├──────────────────────>┌──────────────────────┐ I2C transactions│  convert_raw_to_si     │
@@ -189,21 +189,23 @@ In code:
     sim->init("launchSite");
 
 **Specific force** — what an accelerometer actually measures, the sum of the
-non-gravitational forces over mass — has no direct rocket output, and it
-involves three of them: :math:`\mathbf{f} = (F_{thrust}\hat{x} +
-\mathbf{F}_{aero}) / m`. An Ecos connection modifier sees only its single
-source variable, so the host computes ``f`` from ``out.thrust_N``,
-``out.aero_F{x,y,z}_N`` and ``out.mass_kg`` after every step and writes the
-IMU FMU's ``f_x/f_y/f_z_mps2`` inputs through Ecos properties — the same
-one-communication-step transport delay a connection would have:
+non-gravitational forces over mass — connects 1:1 as well, since Aetherion
+0.14.0 publishes it directly as :math:`\mathbf{f} = (\mathbf{F}_{aero} +
+\mathbf{F}_{thrust}) / m`, resolved at the CG in body axes with gravitation
+structurally excluded:
 
 .. code-block:: cpp
 
-    sim->step();
-    const double m = mass->get_value();
-    imu_fx->set_value((thrust->get_value() + aero_fx->get_value()) / m);
-    imu_fy->set_value(aero_fy->get_value() / m);
-    imu_fz->set_value(aero_fz->get_value() / m);
+    ss.make_connection<double>("rocket::out.specificForce_x_m_s2", "imu::f_x_mps2");
+    ss.make_connection<double>("rocket::out.specificForce_y_m_s2", "imu::f_y_mps2");
+    ss.make_connection<double>("rocket::out.specificForce_z_m_s2", "imu::f_z_mps2");
+
+Before 0.14.0 the plant exposed the ingredients but not the sum, and this host
+divided ``out.thrust_N`` and ``out.aero_F{x,y,z}_N`` by ``out.mass_kg`` itself
+after every step — which meant the bench asserting that thrust acts along body
+:math:`+\hat{x}`. That is the plant's installation geometry to know, and it is
+now stated where it is known. The example's configure step tests for the port
+rather than for a version string, so a 0.13.x plant is diagnosed precisely.
 
 None of the sensor FMUs has **FMI output variables**: their outputs are byte
 streams, exactly like a real receiver's UART, a real IMU's data registers or
@@ -346,9 +348,9 @@ Three consequences worth knowing when reading a run:
   retries the magnetometer probe on ``kMeasurementTimeout`` rather than
   failing, and reports the difference between "not being stepped" and "wrong
   part". A real board never needs that retry.
-* **The truth field is host-computed**, like the IMU's specific force and for
-  the same reason: it depends on where the vehicle is *and* how it is
-  pointing, and an Ecos connection modifier sees one source variable.
+* **The truth field is host-computed** — the only truth signal in this example
+  that still is. It depends on where the vehicle is *and* how it is pointing,
+  four plant outputs, and an Ecos connection modifier sees one source variable.
   ``geomagnetic_field.hpp`` maps ``lat``/``lon``/``alt`` through a centered
   tilted dipole and rotates the result into body axes with the plant's
   ``yaw``/``pitch``/``roll``. It is a dipole, not the WMM — the header is

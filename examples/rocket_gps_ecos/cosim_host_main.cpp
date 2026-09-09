@@ -35,11 +35,13 @@
 /// Ecos connection modifiers; the example now requires >= 0.13.0 and binds
 /// the degree-valued ports directly -- see CMakeLists.txt.)
 ///
-/// The IMU FMU takes true body-frame specific force, which the rocket does
-/// not expose directly; the host computes f = (thrust + F_aero) / m from the
-/// rocket's outputs after every step and writes it to the IMU's inputs
-/// through Ecos properties (same one-step transport delay as an Ecos
-/// connection). Body rates p/q/r connect 1:1.
+/// The IMU FMU takes true body-frame specific force, which the rocket
+/// publishes as `out.specificForce_*` -- (F_aero + F_thrust)/m at the CG,
+/// gravitation excluded -- so that connects 1:1 as well, as do body rates
+/// p/q/r. (Before 0.14.0 the plant exposed the ingredients but not the sum,
+/// and this host divided them itself after every step; doing so meant
+/// asserting host-side that thrust acts along body +X, which is the plant's
+/// business, not the bench's.)
 ///
 /// None of the sensor FMUs has FMI outputs -- their effect is the sensor bus
 /// each part really uses: a UDP stand-in for the GPS receiver's UART, a
@@ -536,13 +538,20 @@ int main(int argc, char** argv)
     ss.make_connection<double>("rocket::out.v_east_m_s", "gps::v_east_mps");
     ss.make_connection<double>("rocket::out.v_down_m_s", "gps::v_down_mps");
 
-    // Body angular rates feed the IMU's gyroscope triad 1:1. Specific force
-    // has no direct rocket output -- it is computed from thrust/aero/mass in
-    // the stepping loop below, because an Ecos connection modifier sees only
-    // its single source variable.
+    // Body angular rates feed the IMU's gyroscope triad 1:1, and since
+    // Aetherion 0.14.0 so does specific force. out.specificForce_* is
+    // (F_aero + F_thrust)/m at the CG in body axes, with gravitation
+    // structurally excluded -- exactly what the IMU FMU's inputs are named
+    // for. Before that this example summed thrust and aero itself and divided
+    // by mass in the stepping loop, which meant asserting host-side that
+    // thrust acts along body +X. The plant knows its own installation
+    // geometry; the bench does not, and no longer has to guess.
     ss.make_connection<double>("rocket::out.p_rad_s", "imu::p_rad_s");
     ss.make_connection<double>("rocket::out.q_rad_s", "imu::q_rad_s");
     ss.make_connection<double>("rocket::out.r_rad_s", "imu::r_rad_s");
+    ss.make_connection<double>("rocket::out.specificForce_x_m_s2", "imu::f_x_mps2");
+    ss.make_connection<double>("rocket::out.specificForce_y_m_s2", "imu::f_y_mps2");
+    ss.make_connection<double>("rocket::out.specificForce_z_m_s2", "imu::f_z_mps2");
 
     // The BMP390's whole truth interface is altitude: its measurement model
     // owns the atmosphere (ISA) and the part's error model, and everything
@@ -610,9 +619,9 @@ int main(int argc, char** argv)
                             "rocket::out.qbar_Pa",
                             "rocket::out.thrust_N",
                             "rocket::out.mass_kg",
-                            // What the IMU FMU actually receives: the host-computed
-                            // body-frame specific force (one step behind rocket truth,
-                            // like every other connection).
+                            // What the IMU FMU actually receives: the plant's body-frame
+                            // specific force, one step behind rocket truth like every
+                            // other connection.
                             "imu::f_x_mps2",
                             "imu::f_y_mps2",
                             "imu::f_z_mps2",
@@ -630,27 +639,15 @@ int main(int argc, char** argv)
     auto* mass = sim->get_real_property("rocket::out.mass_kg");
     auto* staged = sim->get_bool_property("rocket::out.staged");
 
-    // Specific-force plumbing: what an ideal accelerometer reads is the sum
-    // of the non-gravitational forces over mass, f = (F_thrust + F_aero)/m,
-    // in body axes (thrust acts along body +X on this vehicle). The rocket
-    // exposes the ingredients but not f itself, and an Ecos connection
-    // modifier cannot combine three source variables, so the host computes f
-    // after every step and writes the IMU inputs directly -- giving the same
-    // one-communication-step transport delay a connection would.
-    auto* thrust = sim->get_real_property("rocket::out.thrust_N");
-    auto* aero_fx = sim->get_real_property("rocket::out.aero_Fx_N");
-    auto* aero_fy = sim->get_real_property("rocket::out.aero_Fy_N");
-    auto* aero_fz = sim->get_real_property("rocket::out.aero_Fz_N");
-    auto* imu_fx = sim->get_real_property("imu::f_x_mps2");
-    auto* imu_fy = sim->get_real_property("imu::f_y_mps2");
-    auto* imu_fz = sim->get_real_property("imu::f_z_mps2");
-
-    // Magnetic-field plumbing, the same shape and for the same reason: the
-    // field a magnetometer sees depends on where the vehicle is *and* how it
-    // is pointing -- four rocket outputs -- and an Ecos connection modifier
-    // sees one. GeomagneticDipole owns the model; geomagnetic_field.hpp is
-    // explicit about it being a centered dipole rather than the WMM, and about
-    // what that costs at this particular launch site.
+    // Magnetic-field plumbing: the field a magnetometer sees depends on where
+    // the vehicle is *and* how it is pointing -- four rocket outputs -- and an
+    // Ecos connection modifier sees only its single source variable. So the
+    // host computes the field after every step and writes the magnetometer's
+    // inputs directly, giving the same one-communication-step transport delay
+    // a connection would. GeomagneticDipole owns the model;
+    // geomagnetic_field.hpp is explicit about it being a centered dipole
+    // rather than the WMM, and about what that costs at this particular launch
+    // site.
     auto* latitude = sim->get_real_property("rocket::out.lat_deg");
     auto* longitude = sim->get_real_property("rocket::out.lon_deg");
     auto* yaw = sim->get_real_property("rocket::out.yaw_rad");
@@ -693,18 +690,9 @@ int main(int argc, char** argv)
     {
       sim->step();
 
-      const double mass_kg = mass->get_value();
-      if (mass_kg > 0.0)
-      {
-        imu_fx->set_value((thrust->get_value() + aero_fx->get_value()) / mass_kg);
-        imu_fy->set_value(aero_fy->get_value() / mass_kg);
-        imu_fz->set_value(aero_fz->get_value() / mass_kg);
-      }
-
       // Where the vehicle is and how it is pointing, turned into the body-frame
-      // field the part is immersed in. Written after the step like the specific
-      // force above, so it carries the same one-communication-step transport
-      // delay every Ecos connection does.
+      // field the part is immersed in. Written after the step, so it carries the
+      // same one-communication-step transport delay every Ecos connection does.
       const FieldNed field_ned =
           GeomagneticDipole::field_ned(latitude->get_value(), longitude->get_value(), altitude->get_value());
       const FieldBody field_body =

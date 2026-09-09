@@ -92,9 +92,15 @@ endif()
 # vendored fmu4cpp under cmake/generate_fmu.cmake, so it has no other need of the Aetherion CMake package; asking for it
 # would drag in that package's own REQUIRED Eigen3 and CppAD lookups to read one string.
 #
+# Aetherion 0.14.0 then added out.specificForce_{x,y,z}_m_s2 -- (F_aero + F_thrust)/m at the CG, in body axes, with
+# gravitation structurally excluded. That is what an accelerometer measures and what the IMU FMU's inputs take, so
+# cosim_host_main.cpp binds those three ports directly. Before 0.14.0 the plant published the ingredients (out.thrust_N,
+# out.mass_kg, out.aero_F*_N) but not the sum, and this host divided them itself -- which meant the bench, not the
+# plant, asserting that thrust acts along body +X.
+#
 # So HEMERION_AETHERION_MIN_VERSION is the release this floor corresponds to, and the one place that number is written
-# down for the diagnostics and the docs to quote -- the test below is against the ports, not against it.
-set(HEMERION_AETHERION_MIN_VERSION 0.13.0)
+# down for the diagnostics and the docs to quote -- the tests below are against the ports, not against it.
+set(HEMERION_AETHERION_MIN_VERSION 0.14.0)
 
 if(HEMERION_TWO_STAGE_ROCKET_FMU)
   # Re-check when the FMU is replaced under an already-configured build tree -- what happens when Aetherion is rebuilt
@@ -142,6 +148,18 @@ if(HEMERION_TWO_STAGE_ROCKET_FMU)
       FATAL_ERROR
         "${HEMERION_TWO_STAGE_ROCKET_FMU} ${_rocket_diagnosis}, but rocket_gps_cosim binds out.lat_deg and "
         "out.lon_deg. Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
+        "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
+  endif()
+
+  # Second port test, same file and same reasoning as the geodetic one above. A 0.13.x plant passes that test and fails
+  # this one, which is the whole point of testing ports rather than a version string: the two requirements landed in
+  # different releases and the diagnosis should say which one is missing.
+  string(FIND "${_rocket_ports}" "out.specificForce_x_m_s2" _rocket_specific_force_at)
+  if(_rocket_specific_force_at LESS 0)
+    message(
+      FATAL_ERROR
+        "${HEMERION_TWO_STAGE_ROCKET_FMU} publishes no out.specificForce_x_m_s2, but rocket_gps_cosim binds the "
+        "three out.specificForce_* ports into the IMU FMU. Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
         "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
   endif()
 
