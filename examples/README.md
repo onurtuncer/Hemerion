@@ -14,6 +14,7 @@ cmake --build build/examples-native
 | Example | What it demonstrates |
 |---|---|
 | [`f16_trim_ecos/`](f16_trim_ecos/) | Ecos FMI co-simulation of NASA TM-2015-218675 check-cases 11 and 12 (F-16 subsonic and supersonic trim flyouts over Kitty Hawk, `--case`): Aetherion's `F16Plant.fmu` truth feeding **all five** Hemerion sensor FMUs — GPS, IMU, BMP390, MMC5983MA and the radar altimeter. Case 11 is the only scenario where every environment-dependent stack is in band for the whole flight — the cross-sensor consistency reference; case 12 (Mach 2 at 30 013 ft) takes the GPS, radar altimeter and barometer out of their envelopes over the same wiring |
+| [`f16_autopilot_ecos/`](f16_autopilot_ecos/) | Ecos FMI co-simulation of NASA TM-2015-218675 check-cases 13.1–13.4 (F-16 closed-loop autopilot maneuvers, `--case`): Aetherion's `F16Plant.fmu` and `F16Autopilot.fmu` in a 100 Hz loop, the five sensor FMUs riding the same truth, consumed by `f16_trim_ecos`'s flight computer reused unchanged. The maneuvers excite the states a trim flyout leaves unobservable — the sensor-fusion reference runs |
 | [`rocket_gps_ecos/`](rocket_gps_ecos/) | Ecos FMI co-simulation: Aetherion's `TwoStageRocket.fmu` truth feeding Hemerion's GPS and IMU hardware-simulator FMUs — a COCOM-limited u-blox receiver emitting UBX-NAV-PVT over UDP, and a MEMS IMU answering a shared-memory SPI bus — both driven by the same sensor stacks that run on the STM32H743 flight computer |
 
 Each example has its own README and a matching page in the Sphinx documentation (`doc/`).
