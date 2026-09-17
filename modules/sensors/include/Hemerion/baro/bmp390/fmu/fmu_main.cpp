@@ -8,18 +8,32 @@
 /// @brief BMP390 barometer hardware simulator, exported as an FMI
 /// Co-Simulation FMU.
 ///
-/// This FMU has no FMI output variables -- its effect is an **I2C side
-/// channel**. Each step maps the current truth altitude through the ICAO
-/// Standard Atmosphere and the part's error model to raw 24-bit conversion
-/// words (Bmp390MeasurementModel, which numerically inverts the real Bosch
-/// compensation), and latches them into the simulated part's data registers
-/// (Bmp390I2cSlave). A controller -- a host flight computer process, or
-/// emulated firmware under Renode once an I2C bridge exists -- then reads
-/// the part the way real firmware does: probe CHIP_ID, soft-reset, read the
-/// calibration NVM, program OSR/ODR/INT_CTRL/PWR_CTRL, poll STATUS, burst
-/// the shadowed data block. The words it recovers compensate back to the
-/// noisy truth through the unmodified on-target Bmp390Driver +
+/// This FMU carries no sensor data on FMI output variables -- its effect is
+/// an **I2C side channel**. Each step maps the current truth altitude through
+/// the ICAO Standard Atmosphere and the part's error model to raw 24-bit
+/// conversion words (Bmp390MeasurementModel, which numerically inverts the
+/// real Bosch compensation), and latches them into the simulated part's data
+/// registers (Bmp390I2cSlave). A controller -- a host flight computer
+/// process, or emulated firmware under Renode once an I2C bridge exists --
+/// then reads the part the way real firmware does: probe CHIP_ID, soft-reset,
+/// read the calibration NVM, program OSR/ODR/INT_CTRL/PWR_CTRL, poll STATUS,
+/// burst the shadowed data block. The words it recovers compensate back to
+/// the noisy truth through the unmodified on-target Bmp390Driver +
 /// Bmp390Compensator, exactly as bytes from physical silicon would.
+///
+/// What the FMI outputs *do* carry is a diagnostic the silicon cannot offer:
+/// `conversions` counts every conversion latched since initialisation, and
+/// `conversions_out_of_rating` counts those produced with the ambient
+/// pressure or die temperature outside the part's rated envelope
+/// (300--1250 hPa, -40..+85 C). A real BMP390 taken out of rating keeps
+/// converting plausible-looking words with no accuracy guarantee, and so
+/// does this one -- nothing on the I2C side changes -- but the bench can now
+/// say it happened. NASA check-case 12 (examples/f16_trim_ecos, Mach 2 at
+/// 30 013 ft) motivated the pair: most of that flight sits below the rated
+/// pressure floor with the die at -46 C, and every conversion still reads
+/// plausibly. Each envelope crossing is also debug-logged once, with the
+/// offending value -- edges, not levels, so a 200 s excursion is two log
+/// lines rather than ten thousand.
 ///
 /// Three things have to be true for that, and each belongs somewhere
 /// different -- this file is only the third:
@@ -66,6 +80,7 @@
 #include <fmu4cpp/fmu_except.hpp>
 
 #include <cstdint>
+#include <cstdio>
 
 namespace hemerion::sensors::baro::bmp390::fmu
 {
@@ -74,6 +89,8 @@ namespace
 {
 
 using fmu4cpp::causality_t;
+using fmu4cpp::initial_t;
+using fmu4cpp::variability_t;
 
 /// Where this part sits: the bus it creates, and the environment variable a
 /// launch script can retarget it with.
@@ -94,6 +111,22 @@ public:
     register_real("h_m", &altitude_m_)
         .setCausality(causality_t::INPUT)
         .setDescription("True geometric altitude above mean sea level [m]");
+
+    // Diagnostics, not sensor data -- the sample stream stays on the I2C
+    // bus. DISCRETE because an FMI 2.0 Integer must not claim continuity;
+    // CALCULATED because the counts exist only once stepping does.
+    register_integer("conversions", &conversions_)
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("Conversions latched since initialisation");
+    register_integer("conversions_out_of_rating", &conversions_out_of_rating_)
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("Conversions produced with ambient pressure or die temperature outside the part's rated "
+                        "envelope (300-1250 hPa, -40..+85 degC); the words themselves stay plausible, as on the "
+                        "real part");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -122,6 +155,10 @@ public:
   {
     altitude_m_ = 0.0;
     time_into_period_s_ = 0.0;
+    conversions_ = 0;
+    conversions_out_of_rating_ = 0;
+    pressure_was_out_ = false;
+    temperature_was_out_ = false;
     slave_.reset();
     endpoint_.detach();
   }
@@ -178,6 +215,46 @@ private:
     const Bmp390MeasurementModel::Conversion conversion = measurement_model_.measure(altitude_m_);
     slave_.latch_conversion(
         conversion.uncomp_press, conversion.uncomp_temp, static_cast<std::uint64_t>(sample_time_s * 1e6));
+
+    ++conversions_;
+    if (!conversion.pressure_in_rating || !conversion.temperature_in_rating)
+    {
+      ++conversions_out_of_rating_;
+    }
+    log_rating_edges(conversion);
+  }
+
+  /// Logs each rated-envelope crossing once -- edges, not levels, so a
+  /// 200 s excursion is two lines rather than ten thousand. The values
+  /// quoted are the *compensated* readings of the words just latched (what
+  /// the driver will recover), so the log agrees with the bus to
+  /// quantization error.
+  void log_rating_edges(const Bmp390MeasurementModel::Conversion& conversion)
+  {
+    char message[160];
+    if (conversion.pressure_in_rating == pressure_was_out_)  // i.e. the state flipped
+    {
+      pressure_was_out_ = !conversion.pressure_in_rating;
+      const double t_lin = measurement_model_.compensator().compensate_temperature(conversion.uncomp_temp);
+      const double pressure_hpa = measurement_model_.compensator().compensate_pressure(conversion.uncomp_press, t_lin) / 100.0;
+      std::snprintf(message,
+                    sizeof(message),
+                    "[hemerion_bmp390_fmu] ambient pressure %.1f hPa is %s the part's rated 300-1250 hPa envelope",
+                    pressure_hpa,
+                    pressure_was_out_ ? "outside" : "back inside");
+      debugLog(pressure_was_out_ ? fmiWarning : fmiOK, message);
+    }
+    if (conversion.temperature_in_rating == temperature_was_out_)
+    {
+      temperature_was_out_ = !conversion.temperature_in_rating;
+      const double temperature_c = measurement_model_.compensator().compensate_temperature(conversion.uncomp_temp);
+      std::snprintf(message,
+                    sizeof(message),
+                    "[hemerion_bmp390_fmu] die temperature %.1f degC is %s the part's rated -40..+85 degC envelope",
+                    temperature_c,
+                    temperature_was_out_ ? "outside" : "back inside");
+      debugLog(temperature_was_out_ ? fmiWarning : fmiOK, message);
+    }
   }
 
   Bmp390MeasurementModel measurement_model_;
@@ -185,6 +262,10 @@ private:
   sim::i2c_shm::I2cPeripheralEndpoint<Bmp390I2cSlave> endpoint_{ slave_, kI2cBus };
   double altitude_m_ = 0.0;
   double time_into_period_s_ = 0.0;
+  int conversions_ = 0;
+  int conversions_out_of_rating_ = 0;
+  bool pressure_was_out_ = false;
+  bool temperature_was_out_ = false;
 };
 
 }  // namespace hemerion::sensors::baro::bmp390::fmu
@@ -200,7 +281,7 @@ fmu4cpp::model_info fmu4cpp::get_model_info()
   info.author = "Onur Tuncer, Istanbul Technical University";
   info.description = "Register-accurate Bosch BMP390 barometer hardware simulator on a simulated I2C bus "
                      "for SWIL/HIL co-simulation";
-  // h_m carries no FMI structured-naming hierarchy.
+  // None of the variable names carries an FMI structured-naming hierarchy.
   info.variableNamingConvention = "flat";
   return info;
 }

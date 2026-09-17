@@ -207,9 +207,13 @@ after every step — which meant the bench asserting that thrust acts along body
 now stated where it is known. The example's configure step tests for the port
 rather than for a version string, so a 0.13.x plant is diagnosed precisely.
 
-None of the sensor FMUs has **FMI output variables**: their outputs are byte
-streams, exactly like a real receiver's UART, a real IMU's data registers or
-a real barometer's shadowed data block.
+None of the sensor FMUs carries **sensor data on FMI output variables**:
+their outputs are byte streams, exactly like a real receiver's UART, a real
+IMU's data registers or a real barometer's shadowed data block. (The BMP390
+FMU's ``conversions`` / ``conversions_out_of_rating`` outputs are the one
+exception, and they are diagnostics, not data — counters saying whether the
+part was operated inside its rated envelope, a side channel real silicon
+does not have.)
 That keeps the firmware parsers exercised at the byte level — sync characters,
 little-endian scaled integers, checksums and all — rather than handing the
 flight software convenient floating-point values it would never see on the

@@ -209,6 +209,35 @@ void test_noisy_sample_stays_bounded()
   assert(near(sample.temperature_c, BaroNoiseModel::isa_temperature_c(altitude_m), temperature_bound));
 }
 
+// The rated-envelope flags are a side channel: they mark the *stimulus*, and
+// the words latched beside them are untouched -- test_noiseless_sample_round_trips
+// already proves conversions beyond the rating (11 000 m, 15 000 m) still
+// compensate back to the ISA truth. Noiseless, so the ISA alone fixes which
+// side of each bound an altitude falls on: the -40 degC floor crosses at
+// 8462 m, the 300 hPa floor at 9166 m, leaving a band where only the
+// temperature is out.
+void test_rating_flags_mark_the_envelope()
+{
+  Bmp390MeasurementConfig config;
+  config.pressure_noise_pa = 0.0F;
+  config.temperature_noise_c = 0.0F;
+  config.pressure_bias_sigma_pa = 0.0F;
+  config.temperature_bias_sigma_c = 0.0F;
+  Bmp390MeasurementModel model(config, /*seed=*/42);
+
+  const auto in_band = model.measure(1500.0);
+  assert(in_band.pressure_in_rating);
+  assert(in_band.temperature_in_rating);
+
+  const auto cold_only = model.measure(9000.0);  // -43.5 degC, 307.5 hPa
+  assert(cold_only.pressure_in_rating);
+  assert(!cold_only.temperature_in_rating);
+
+  const auto both_out = model.measure(10000.0);  // -50.0 degC, 264.4 hPa
+  assert(!both_out.pressure_in_rating);
+  assert(!both_out.temperature_in_rating);
+}
+
 // Soft reset must drop the configuration back to power-on (sleep, no
 // conversions) while the calibration NVM survives -- which probe() then
 // proves by bringing the part all the way back up.
@@ -259,6 +288,7 @@ int main()
   test_noiseless_sample_round_trips();
   test_read_consumes_data_ready();
   test_noisy_sample_stays_bounded();
+  test_rating_flags_mark_the_envelope();
   test_soft_reset_then_reprobe();
   test_forced_mode_single_conversion();
 
