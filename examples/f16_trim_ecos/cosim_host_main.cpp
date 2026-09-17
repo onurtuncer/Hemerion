@@ -8,14 +8,18 @@
 /// @brief Ecos co-simulation host coupling Aetherion's F16Plant.fmu to all
 /// five of Hemerion's hardware-simulator FMUs.
 ///
-/// The scenario is NASA TM-2015-218675 **Atmospheric Check-Case 11**: an F-16
-/// trimmed for subsonic straight-and-level flight over Kitty Hawk, NC at
-/// 10 013 ft and 565.685 ft/s true airspeed (335 KTAS) on a 45 deg heading,
-/// flown open-loop for 200 s. `F16Plant.fmu` runs its own trim solver during
-/// initialisation and seeds the control deflections from the result, so
-/// nothing here closes a loop -- the aircraft simply flies out of trim
-/// conditions, and the slow drift that follows (yaw 45 -> 44.16 deg, +50 ft
-/// over the window in the published data) is the check-case's content.
+/// The scenarios are NASA TM-2015-218675's two open-loop **trim flyouts**,
+/// selected with --case. Check-case 11 (the default): an F-16 trimmed for
+/// subsonic straight-and-level flight over Kitty Hawk, NC at 10 013 ft and
+/// 565.685 ft/s true airspeed (335 KTAS) on a 45 deg heading. Check-case 12:
+/// the same aircraft from the same point on the same heading, trimmed at
+/// 30 013 ft and Mach 2.01. Both fly open-loop for 200 s. `F16Plant.fmu` runs
+/// its own trim solver during initialisation and seeds the control deflections
+/// from the result, so nothing here closes a loop -- the aircraft simply flies
+/// out of trim conditions, and the slow drift that follows (case 11: yaw
+/// 45 -> 44.16 deg, +50 ft over the window in the published data; case 12: a
+/// larger phugoid, +140 m in the drifting participant's solution) is the
+/// check-case's content.
 ///
 /// Topology (see examples/f16_trim_ecos/README.md):
 ///
@@ -38,18 +42,29 @@
 ///                                                               v
 ///                                                      f16_flight_computer
 ///
-/// **Why this check-case, and not another F-16 one.** It is the only scenario
-/// in the set where all four environment-dependent sensor stacks are valid at
-/// the same time. The receiver holds a fix for the whole run (172 m/s and
-/// 3.05 km clear every limit it has); 10 013 ft is squarely inside the
-/// barometer's useful band; 36 deg N gives the magnetometer a healthy
-/// horizontal field component to find a heading in; and 3052 m AGL is inside
-/// the radar altimeter's 6000 m tracking range. Scenario 17 -- the two-stage
-/// rocket in examples/rocket_gps_ecos -- can do none of that: it loses the
-/// fix at 31 s, leaves the atmosphere, and is out of radalt range within
-/// seconds of the pad. That makes this run the cross-sensor consistency
-/// reference: baro altitude against GPS altitude against radar height,
-/// magnetic heading against GPS course, all on one trajectory.
+/// **Why these two check-cases.** Case 11 is the only scenario in the set
+/// where all four environment-dependent sensor stacks are valid at the same
+/// time. The receiver holds a fix for the whole run (172 m/s and 3.05 km
+/// clear every limit it has); 10 013 ft is squarely inside the barometer's
+/// useful band; 36 deg N gives the magnetometer a healthy horizontal field
+/// component to find a heading in; and 3052 m AGL is inside the radar
+/// altimeter's 6000 m tracking range. Scenario 17 -- the two-stage rocket in
+/// examples/rocket_gps_ecos -- can do none of that: it loses the fix at 31 s,
+/// leaves the atmosphere, and is out of radalt range within seconds of the
+/// pad. That makes the case-11 run the cross-sensor consistency reference:
+/// baro altitude against GPS altitude against radar height, magnetic heading
+/// against GPS course, all on one trajectory.
+///
+/// Case 12 is the same wiring with two different numbers -- an altitude and
+/// an airspeed -- and nearly the opposite sensor story: at 610 m/s the
+/// receiver is past dynModel 8's 500 m/s platform limit from the very first
+/// epoch and never reports a fix; at 9148 m the radar altimeter is past its
+/// 6000 m tracking range and every return says so; and the barometer spends
+/// most of the flight below the BMP390's 300 hPa rated pressure floor with
+/// its die below the -40 C rating. Only the magnetometer stays in band. The
+/// point is that all of this arrives through exactly the code paths case 11
+/// exercises when everything works -- no wiring changes, just a flight the
+/// parts were not specified for.
 ///
 /// The plant reports geodetic latitude/longitude in degrees and NED velocity
 /// in m/s, which is what the GPS FMU takes, so every truth->receiver
@@ -79,10 +94,15 @@
 /// The GPS FMU's dynamics envelope is configured here rather than left at its
 /// defaults, and unlike Scenario 17 the *realistic* setting is the
 /// interesting one: an F-16 in trim pulls about 1 g, so u-blox dynModel 8
-/// (airborne, <4 g) is the setting a firmware engineer would actually write,
-/// and the receiver keeps its fix for all 200 s. The rocket example exists to
-/// show that envelope biting; this one exists to show a whole flight inside
-/// it. See --dyn-model / --no-cocom.
+/// (airborne, <4 g) is the setting a firmware engineer would actually write.
+/// On case 11 the receiver keeps its fix for all 200 s -- a whole flight
+/// inside the envelope the rocket example exists to show biting. On case 12
+/// the same setting takes the fix away entirely, and COCOM is *not* why:
+/// COCOM needs 18 000 m AND 515 m/s, and 9.2 km is half its altitude
+/// threshold. Rerun with --dyn-model -1 and the fix comes back at 610 m/s,
+/// which makes case 12 the one flight in the NESC set that tells COCOM's AND
+/// apart from an OR -- the rocket crosses both thresholds within seconds of
+/// each other and cannot. See --dyn-model / --no-cocom.
 ///
 /// Plant truth is logged so the flight computer's decoded fixes, IMU samples,
 /// pressures, fields and radar heights can be compared against it.
@@ -718,9 +738,11 @@ int main(int argc, char** argv)
     // Written explicitly even though these match the GPS FMU's own defaults:
     // whether the receiver keeps a fix through this flight is the scenario's
     // most consequential setting, and it should be readable here rather than
-    // inherited silently from modelDescription.xml. Here the answer is "yes,
-    // throughout" -- which is exactly why this run can serve as the reference
-    // the other sensors are judged against.
+    // inherited silently from modelDescription.xml. On case 11 the answer is
+    // "yes, throughout" -- which is exactly why that run can serve as the
+    // reference the other sensors are judged against. On case 12 it is
+    // "never": same three settings, so the difference is the flight, not the
+    // configuration.
     trim_point["gps::dynamic_platform"] = options.dynamic_platform;
     trim_point["gps::cocom_limits_enabled"] = options.cocom_limits;
     trim_point["gps::reacquisition_time_s"] = options.reacquisition_time_s;
@@ -878,19 +900,30 @@ int main(int argc, char** argv)
       }
     }
 
+    // The BMP390 FMU's rating diagnostic, read while the instance is still
+    // live. The part converts outside its rated envelope without complaint
+    // -- these counters are how the bench knows it happened. Zero is a
+    // result too: on case 11 it says the whole flight sat inside the
+    // envelope, which is what makes that run the cross-sensor reference.
+    const int baro_conversions = sim->get_int_property("baro::conversions")->get_value();
+    const int baro_out_of_rating = sim->get_int_property("baro::conversions_out_of_rating")->get_value();
+
     sim->terminate();
 
     const long imu_frames_per_step = std::lround(options.step_s * options.imu_rate_hz);
     const long radalt_returns_per_step = std::lround(options.step_s * options.radalt_rate_hz);
     // One NAV-PVT frame per step regardless of fix validity -- a receiver
     // outside its envelope keeps talking, it just stops claiming a solution.
-    // On this flight it never stops claiming one, which is the point.
+    // On case 11 it never stops claiming one; on case 12 it never starts.
+    // Either way the frame count is the step count, which is the point.
     std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
               << " UBX-NAV-PVT frames emitted, " << sim->iterations() * std::max(1L, imu_frames_per_step)
               << " IMU samples buffered for the SPI controller and "
               << sim->iterations() * std::max(1L, radalt_returns_per_step) << " radar returns sent\n"
               << "[cosim] the BMP390 and the MMC5983MA each answered at whatever rate the flight computer programmed "
                  "them to\n"
+              << "[cosim] the BMP390 latched " << baro_conversions << " conversions, " << baro_out_of_rating
+              << " outside its rated envelope (300-1250 hPa, -40..+85 degC)\n"
               // A trim flyout has no events, so what is worth reporting is how
               // far it drifted from the condition it was trimmed at. The
               // published solutions do drift, by tens of metres and fractions

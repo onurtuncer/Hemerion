@@ -6,21 +6,30 @@
 
 /// @file f16_flight_computer.cpp
 /// @brief Host stand-in for the STM32 flight computer's sensor ingest paths,
-/// for the F-16 trim-flyout scenario (NASA TM-2015-218675 check-case 11).
+/// for the F-16 trim-flyout scenarios (NASA TM-2015-218675 check-cases 11
+/// and 12).
 ///
 /// Runs the exact sensor stacks the STM32H743 target runs, over host
-/// transports. This scenario drives **all five** of them at once, which is the
-/// reason it exists: it is the only check-case where every
+/// transports, driving **all five** of them at once. Which check-case is
+/// flying is the co-simulation host's business (`f16_trim_cosim --case`);
+/// this program decodes whatever arrives, unchanged between the two -- which
+/// is itself the result. Case 11 is the one check-case where every
 /// environment-dependent part stays in band for the whole flight, so the
 /// stacks can be checked against each other rather than one at a time.
+/// Case 12 (Mach 2.01 at 30 013 ft) puts three of the four outside their
+/// envelopes at once -- no GPS fix, no radar return, a barometer below its
+/// rated pressure floor -- and the same decode paths carry that story too.
 ///
 /// * **GPS** -- the GPS FMU's UBX-NAV-PVT stream arrives over UDP and goes
 ///   through the unmodified GpsDriver/UbxParser. On hardware those bytes come
 ///   off a UART RX line instead. The receiver's dynamics envelope is in force
-///   here too, but unlike the rocket scenario nothing ever trips it: an F-16
-///   holding trim pulls about 1 g at 172 m/s and 3 km, so every epoch of the
-///   run carries a fix. The outage bookkeeping below is kept anyway, because
-///   "no epochs were lost" is only a result if losing them was possible.
+///   here too. On case 11 nothing ever trips it: an F-16 holding trim pulls
+///   about 1 g at 172 m/s and 3 km, so every epoch of the run carries a fix,
+///   and the outage bookkeeping below runs as insurance -- "no epochs were
+///   lost" is only a result if losing them was possible. On case 12 that
+///   bookkeeping is the result: 610 m/s is past dynModel 8's 500 m/s platform
+///   limit from the first epoch, so every NAV-PVT arrives with gnssFixOK
+///   clear and the no-fix window spans the whole flight.
 /// * **IMU** -- the IMU is an SPI part, so the flight computer drives it with
 ///   the unmodified on-target ImuSpiDriver: sample the data-ready line, read
 ///   STATUS/FIFO_COUNT, burst the FIFO port, feed every byte to
@@ -686,6 +695,9 @@ int main(int argc, char** argv)
   // `valid` is a column rather than a filter: a radar altimeter that has lost
   // track is still reporting, and on a scenario that flies well inside the
   // part's range the absence of dropouts is a result worth being able to see.
+  // On case 12 the column is the whole record: 9148 m is past the 6000 m
+  // tracking range, so every row is a no-return, and a filter would leave an
+  // empty file where "the part kept reporting" is the finding.
   radalt_csv << "sample_index,sim_time_s,range_m,valid\n";
 
   {
@@ -1158,11 +1170,15 @@ int main(int argc, char** argv)
             << options.imu_csv_path.string() << ", baro samples to " << options.baro_csv_path.string()
             << ", magnetometer samples to " << options.mag_csv_path.string() << ", radar returns to "
             << options.radalt_csv_path.string() << "\n";
-  // All five stacks must have produced something. This scenario was chosen
-  // precisely because every one of them is in band for the whole flight, so a
-  // silent stack here is a failure rather than a property of the trajectory --
-  // which is not true of the rocket scenario, where the radar altimeter is out
-  // of range within seconds and the receiver goes dark at 31 s.
+  // All five stacks must have produced something -- counting decoded traffic,
+  // not judging it. That criterion holds for both trim flyouts: on case 11
+  // every part is in band, and on case 12 the out-of-envelope parts keep
+  // talking anyway (NAV-PVT with gnssFixOK clear, radar frames flagged
+  // no-return, BMP390 conversions below the rated floor), so a silent stack
+  // is a broken transport on either flight, never a property of the
+  // trajectory. Whether what was said is any *good* is the scenario's
+  // content, and verify_trajectory.py / the CSVs judge that, not this exit
+  // code.
   return (fix_count > 0 && imu_sample_count > 0 && baro_sample_count > 0 && mag_sample_count > 0 &&
           radalt_sample_count > 0) ?
              EXIT_SUCCESS :
