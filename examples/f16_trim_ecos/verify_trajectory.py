@@ -3,23 +3,25 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
-"""Check an f16_trim_cosim run against NASA TM-2015-218675 check-case 11.
+"""Check an f16_trim_cosim run against NASA TM-2015-218675 check-case 11 or 12.
 
 Two bars, deliberately kept apart, because they have very different resolution.
 
 **Against the NESC references** (--reference, repeatable). These are the
-published participant solutions, and on this check-case they disagree with each
-other badly: at t = 200 s Atmos_11_sim_02 has drifted +50.8 ft and -0.84 deg of
-heading while sim_04 and sim_05 hold altitude to a tenth of a foot and drift
-+0.53 deg the *other way*. An open-loop trim flyout is a lightly damped system
-integrated for 200 s, so participants' small differences in trim solution,
-gravity model and integrator show up directly -- which is exactly what the
-check-case is for, and also why a pass here is weak evidence. This script
-reports the envelope width alongside the verdict so the number is never read as
-tighter than it is.
+published participant solutions, and on these check-cases they disagree with
+each other badly. On case 11, at t = 180 s, Atmos_11_sim_02 has climbed 44.7 ft
+and turned -0.66 deg while sim_04 and sim_05 hold altitude to a tenth of a foot
+and turn +0.53 deg the *other way*; on case 12 sim_02 climbs 140 m through its
+phugoid while the other two hold altitude to 0.3 m. An open-loop trim flyout is
+a lightly damped system integrated for 200 s, so participants' small differences
+in trim solution, gravity model and integrator show up directly -- which is
+exactly what the check-case is for, and also why a pass here is weak evidence.
+This script reports the envelope width alongside the verdict so the number is
+never read as tighter than it is.
 
 **Against an Aetherion run** (--aetherion, optional). Aetherion's own standalone
-F16SteadyFlight run of the same case, in SI units and radians. Same physics,
+run of the same case (F16SteadyFlight for 11, F16SupersonicTrim for 12), in SI
+units and radians. Same physics,
 same library, different driver -- so this comparison has real resolution and a
 correspondingly tight tolerance. It answers "does the co-simulation reproduce
 the plant?", which is the question this example is actually responsible for;
@@ -165,7 +167,7 @@ def compare_to_envelope(truth: Track, references: list[Track], sample_times: lis
     print(f"\nagainst {len(references)} NESC reference(s): " + ", ".join(r.name for r in references))
 
     # The participant solutions do not all cover the same window --
-    # Atmos_11_sim_04 and sim_05 stop at 180 s where sim_02 runs to 200 s. An
+    # on both trim cases sim_04 and sim_05 stop at 180 s where sim_02 runs to 200 s. An
     # earlier version of this script dropped any sample time that not every
     # reference reached, which silently left the last 20 s of the flight
     # unchecked while still printing OK. Each sample is therefore compared
@@ -187,63 +189,89 @@ def compare_to_envelope(truth: Track, references: list[Track], sample_times: lis
     # it is the resolution of everything that follows.
     worst_spread_m = 0.0
     worst_spread_t = 0.0
+    worst_alt_spread_m = 0.0
     worst_yaw_spread = 0.0
+    drift_signs: set[int] = set()
+    initial_yaw = {r.name: r.at(0.0)[3] for r in references if r.at(0.0) is not None}
     for t in sample_times:
-        points = [p for p in (r.at(t) for r in references) if p is not None]
+        named = [(r.name, r.at(t)) for r in references]
+        points = [point for _, point in named if point is not None]
         for i, first in enumerate(points):
             for second in points[i + 1 :]:
                 d = ground_distance_m(first[0], first[1], second[0], second[1])
                 if d > worst_spread_m:
                     worst_spread_m, worst_spread_t = d, t
+                worst_alt_spread_m = max(worst_alt_spread_m, abs(first[2] - second[2]))
                 worst_yaw_spread = max(worst_yaw_spread, abs(first[3] - second[3]))
+        for name, point in named:
+            if point is not None and name in initial_yaw and abs(point[3] - initial_yaw[name]) > 0.01:
+                drift_signs.add(1 if point[3] > initial_yaw[name] else -1)
+    # Computed, not asserted: on check-case 11 the participants drift in opposite directions, on
+    # check-case 12 they all turn the same way, and the sentence has to be true of the data loaded.
+    sign_note = ("they do not even agree on the sign of the heading drift" if len(drift_signs) > 1
+                 else "though they do agree on its sign")
     print(f"  the references disagree with each other by up to {worst_spread_m:.0f} m of ground track "
-          f"(at t = {worst_spread_t:.0f} s) and {worst_yaw_spread:.2f} deg of heading -- they do not even "
-          f"agree on the sign of the heading drift")
+          f"(at t = {worst_spread_t:.0f} s), {worst_alt_spread_m:.0f} m of altitude and "
+          f"{worst_yaw_spread:.2f} deg of heading -- {sign_note}")
     print("  -- an open-loop trim flyout integrated for 200 s separates participants, so this check is a "
           "sanity bound, not a precision test")
 
+    # One rule for all three quantities: the participants' *worst* disagreement anywhere in the window, plus
+    # a floor, applied at every sample. An earlier version took the altitude and heading slack from whichever
+    # references happened to reach each sample time, so wherever the others had stopped integrating the band
+    # collapsed to a single participant plus the floor. On check-case 12 that failed a +57 m excess at
+    # t = 190 s while passing a +78 m one at t = 80 s. How long the participants chose to integrate is not a
+    # property of the run being checked.
+    allowed_m = worst_spread_m + 500.0
+    alt_slack_m = worst_alt_spread_m + 30.0
+    yaw_slack_deg = worst_yaw_spread + 0.5
+
     failures = 0
-    worst_alt_excess_m = 0.0
-    worst_yaw_excess_deg = 0.0
+    # (amount beyond the participants, time, which way and past whom)
+    worst_alt_excess = (0.0, 0.0, "")
+    worst_yaw_excess = (0.0, 0.0, "")
     for t in sample_times:
         ours = truth.at(t)
-        points = [p for p in (r.at(t) for r in references) if p is not None]
-        if ours is None or not points:
+        named = [(r.name, r.at(t)) for r in references]
+        named = [(name, point) for name, point in named if point is not None]
+        if ours is None or not named:
             continue
-        # Inside the envelope means: no further from the *nearest* reference
-        # than the references are from each other, plus a floor. Anything
-        # tighter would fail on a spread this wide for reasons that say nothing
-        # about our run.
-        nearest = min(ground_distance_m(ours[0], ours[1], p[0], p[1]) for p in points)
-        allowed = worst_spread_m + 500.0
-        alt_lo = min(p[2] for p in points)
-        alt_hi = max(p[2] for p in points)
-        alt_slack = (alt_hi - alt_lo) + 30.0
-        yaw_lo = min(p[3] for p in points)
-        yaw_hi = max(p[3] for p in points)
-        yaw_slack = (yaw_hi - yaw_lo) + 0.5
-        if nearest > allowed:
+        nearest = min(ground_distance_m(ours[0], ours[1], point[0], point[1]) for _, point in named)
+        highest = max(named, key=lambda item: item[1][2])
+        lowest = min(named, key=lambda item: item[1][2])
+        largest_yaw = max(named, key=lambda item: item[1][3])
+        smallest_yaw = min(named, key=lambda item: item[1][3])
+        if nearest > allowed_m:
             print(f"  FAIL t={t:6.1f} s  ground track {nearest / 1000.0:.3f} km from the nearest reference "
-                  f"(allowed {allowed / 1000.0:.3f})")
+                  f"(allowed {allowed_m / 1000.0:.3f})")
             failures += 1
         # How far outside the participants' own spread we sit, before the
         # slack is applied. Tracked whether or not it fails, because "passed
         # with 13 m of margin left" and "passed comfortably" are different
         # facts and only one of them is true here.
-        worst_alt_excess_m = max(worst_alt_excess_m, ours[2] - alt_hi, alt_lo - ours[2])
-        worst_yaw_excess_deg = max(worst_yaw_excess_deg, ours[3] - yaw_hi, yaw_lo - ours[3])
-        if not (alt_lo - alt_slack <= ours[2] <= alt_hi + alt_slack):
+        for amount, where in ((ours[2] - highest[1][2], f"above the highest participant ({highest[0]})"),
+                              (lowest[1][2] - ours[2], f"below the lowest participant ({lowest[0]})")):
+            if amount > worst_alt_excess[0]:
+                worst_alt_excess = (amount, t, where)
+        for amount, where in ((ours[3] - largest_yaw[1][3], f"more than the largest ({largest_yaw[0]})"),
+                              (smallest_yaw[1][3] - ours[3], f"less than the smallest ({smallest_yaw[0]})")):
+            if amount > worst_yaw_excess[0]:
+                worst_yaw_excess = (amount, t, where)
+        if not (lowest[1][2] - alt_slack_m <= ours[2] <= highest[1][2] + alt_slack_m):
             print(f"  FAIL t={t:6.1f} s  altitude {ours[2]:.1f} m outside "
-                  f"[{alt_lo - alt_slack:.1f}, {alt_hi + alt_slack:.1f}] m")
+                  f"[{lowest[1][2] - alt_slack_m:.1f}, {highest[1][2] + alt_slack_m:.1f}] m")
             failures += 1
-        if not (yaw_lo - yaw_slack <= ours[3] <= yaw_hi + yaw_slack):
+        if not (smallest_yaw[1][3] - yaw_slack_deg <= ours[3] <= largest_yaw[1][3] + yaw_slack_deg):
             print(f"  FAIL t={t:6.1f} s  heading {ours[3]:.3f} deg outside "
-                  f"[{yaw_lo - yaw_slack:.3f}, {yaw_hi + yaw_slack:.3f}] deg")
+                  f"[{smallest_yaw[1][3] - yaw_slack_deg:.3f}, {largest_yaw[1][3] + yaw_slack_deg:.3f}] deg")
             failures += 1
-    if worst_alt_excess_m > 0.0 or worst_yaw_excess_deg > 0.0:
-        print(f"  note: our run sits up to {max(0.0, worst_alt_excess_m):.1f} m in altitude and "
-              f"{max(0.0, worst_yaw_excess_deg):.2f} deg in heading *beyond* the participants' own spread, "
-              f"drifting further than any of them in the same direction as Atmos_11_sim_02")
+    notes = []
+    if worst_alt_excess[0] > 0.0:
+        notes.append(f"{worst_alt_excess[0]:.1f} m {worst_alt_excess[2]} at t = {worst_alt_excess[1]:.0f} s")
+    if worst_yaw_excess[0] > 0.0:
+        notes.append(f"heading {worst_yaw_excess[0]:.2f} deg {worst_yaw_excess[2]} at t = {worst_yaw_excess[1]:.0f} s")
+    if notes:
+        print("  note: outside the participants' own spread by up to " + "; ".join(notes))
     return failures
 
 
@@ -305,16 +333,16 @@ def main() -> int:
     parser.add_argument("--truth", type=Path, default=Path("results/f16_truth.csv"),
                         help="f16_trim_cosim's truth log")
     parser.add_argument("--reference", type=Path, action="append", default=None,
-                        help="a published NESC Atmos_11 CSV; repeat for each participant solution")
+                        help="a published NESC Atmos_11 or Atmos_12 CSV; repeat for each participant solution")
     parser.add_argument("--aetherion", type=Path, default=None,
-                        help="an Aetherion standalone F16SteadyFlight CSV (SI, radians)")
+                        help="an Aetherion standalone run of the same case -- F16SteadyFlight or F16SupersonicTrim (SI, radians)")
     # Tight on purpose. Against Aetherion >= 0.14.1 the two drivers of the same plant agree to a few mm and
     # ~1e-7 deg; the looser defaults these replaced (50 m / 5 m / 0.01 deg) passed the sea-level-gravity trim
     # bug that 0.14.1 fixed (5.97 m / 2.16 m / 5.5e-4 deg) on two of the three checks. Each default below
     # still fails that bug by an order of magnitude or more.
     parser.add_argument("--position-tol-m", type=float, default=1.0,
                         help="ground-track tolerance against --aetherion (default 1 m over 34 km flown -- wide enough "
-                             "for the 0.49 m by which Aetherion's F16SteadyFlight rounds the published initial "
+                             "for the 0.49 m by which Aetherion's standalone examples round the published initial "
                              "position, which shows up as a constant 'initial position offset')")
     parser.add_argument("--alt-tol-m", type=float, default=0.05,
                         help="altitude tolerance against --aetherion (default 0.05 m; measured agreement is ~3 mm)")

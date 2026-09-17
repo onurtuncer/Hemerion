@@ -158,46 +158,84 @@ struct Options
   std::filesystem::path mag_fmu = HEMERION_MMC5983MA_FMU_PATH;
   std::filesystem::path radalt_fmu = HEMERION_RADALT_FMU_PATH;
   std::filesystem::path csv_path = "results/f16_truth.csv";
-  // NASA TM-2015-218675 check-case 11 runs to 200 s, which is the window the reference trajectories in
-  // Aetherion's data/Atmos_11_TrimCheckSubsonicF16/ are tabulated over.
+  // Which NASA TM-2015-218675 check-case to fly. Both trim flyouts run to 200 s, the window their reference
+  // trajectories in Aetherion's data/Atmos_1{1,2}_*/ are tabulated over. --case only sets defaults: see
+  // kTrimCases below for what differs, and parse_args() for why an explicit --alt0 still wins.
+  std::string check_case = "11";
   double stop_s = 200.0;
-  // Check-case 11's trim condition, written out here rather than inherited from the FMU's parameter defaults.
-  // Those defaults *are* this check-case, but they carry the geodetic position rounded to four decimals
+  // The trim condition, written out here rather than inherited from the FMU's parameter defaults. Those
+  // defaults *are* check-case 11, but they carry the geodetic position rounded to four decimals
   // (36.0192 / -75.6744) where the published initial condition has six. At this latitude the difference is
   // roughly 4 m of northing -- larger than the 1.5 m per axis GpsNoiseModel injects, so it would show up in
   // the very error figure this example exists to produce. A scenario's initial conditions should also be
-  // readable in the scenario rather than looked up in modelDescription.xml.
+  // readable in the scenario rather than looked up in modelDescription.xml. Both check-cases start from the
+  // same point on the same heading; only altitude and airspeed differ.
   double lat0_deg = 36.019167;  // Kitty Hawk, NC
   double lon0_deg = -75.674444;
   double alt0_ft = 10013.0;
-  double vt0_fps = 565.685;      // 335.15 KTAS
-  double heading0_deg = 45.0;    // north-east
-  double roll0_deg = -0.172;     // the trim solution's small residual bank, as published
+  double vt0_fps = 565.685;    // 335.15 KTAS
+  double heading0_deg = 45.0;  // north-east
+  // Aetherion's value for both cases. The published trim states read -0.1718 (case 11) and -0.1706 (case 12);
+  // the difference tilts the heading by ~0.002 and ~0.005 deg over 200 s, invisible against a participant
+  // spread measured in tenths of a degree, and staying on Aetherion's value is what lets this run agree with
+  // Aetherion's own standalone examples to millimetres.
+  double roll0_deg = -0.172;
   double step_s = 0.1;           // communication step == GPS output period (10 Hz)
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double radalt_rate_hz = 25.0;  // radar altimeter pulse rate
   double realtime_factor = 0.0;  // 0 = run as fast as possible
-  // Receiver dynamics envelope. Both mechanisms are left in force here, which
-  // is the opposite of what the rocket example does and for the opposite
-  // reason: on this flight the realistic configuration is also the
-  // uneventful one, and that is the point worth making.
+  // Receiver dynamics envelope. Both mechanisms are left in force, and the
+  // setting is deliberately the same for both check-cases: it is a property
+  // of the receiver bolted to the aircraft, not of the flight, and changing it
+  // per case would hide the most interesting thing case 12 shows.
   //
   // dynModel 8 is "airborne, <4 g" -- the setting a firmware engineer would
-  // actually write into a receiver bolted to a fighter. An F-16 holding trim
-  // pulls about 1 g, so the envelope never trips and the receiver keeps a fix
-  // for all 2001 epochs. COCOM (18000 m AND 515 m/s) is equally quiet: at
-  // 3.05 km and 172 m/s the flight is an order of magnitude inside both
-  // thresholds. Scenario 17 exists to show those limits biting; this run
-  // exists to show a whole flight sitting inside them, which is what makes it
-  // usable as the cross-sensor reference.
+  // actually write into a receiver on a fighter. Its platform envelope stops
+  // navigation above 500 m/s.
+  //
+  // Case 11 (172 m/s, 3.05 km) sits far inside every limit: the receiver keeps
+  // a fix for all 2001 epochs, which is what makes that run the cross-sensor
+  // reference.
+  //
+  // Case 12 (610 m/s, 9.15 km) is past the platform's 500 m/s from t = 0, so
+  // the receiver never reports a fix -- a Mach 2 aircraft with an airborne-
+  // configured u-blox is flying without GPS. COCOM is *not* the reason: it
+  // needs 18000 m AND 515 m/s, and 9.15 km is half the altitude threshold.
+  // Rerun with --dyn-model -1 to take the platform envelope away and the fix
+  // comes back, which is the one flight in the NESC set that tells COCOM's
+  // AND apart from an OR -- the rocket crosses both thresholds within seconds
+  // of each other and cannot.
   int dynamic_platform = 8;
   bool cocom_limits = true;
   double reacquisition_time_s = 2.0;
 };
 
+/// @brief The open-loop trim flyouts this example flies.
+///
+/// Both are "trim the aircraft at a point, then let it go for 200 s" from the
+/// same place on the same heading, so the whole difference between them is an
+/// altitude and an airspeed. Everything that makes case 12 interesting -- no
+/// GPS fix, no radar return, a barometer at the edge of its datasheet range --
+/// follows from those two numbers rather than from any wiring change, which is
+/// why it is a row here and not a second example.
+struct TrimCase
+{
+  std::string_view id;
+  std::string_view summary;
+  double alt0_ft;
+  double vt0_fps;
+};
+
+constexpr std::array<TrimCase, 2> kTrimCases = { {
+    { "11", "subsonic trim flyout, 10 013 ft, Mach 0.52", 10013.0, 565.685 },
+    // The published initial condition is 1414.200033 ft/s north and east; the airspeed is their
+    // resultant (1999.9999 ft/s, Mach 2.01), computed the same way Aetherion's F16SupersonicTrim does.
+    { "12", "supersonic trim flyout, 30 013 ft, Mach 2.01", 30013.0, 1414.200033 * std::numbers::sqrt2 },
+} };
+
 void print_usage()
 {
-  std::cout << "usage: f16_trim_cosim [--f16 <F16Plant.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
+  std::cout << "usage: f16_trim_cosim [--case 11|12] [--f16 <F16Plant.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
                "                      [--imu <hemerion_imu_fmu.fmu>] [--baro <hemerion_bmp390_fmu.fmu>]\n"
                "                      [--mag <hemerion_mmc5983ma_fmu.fmu>] [--radalt <hemerion_radalt_fmu.fmu>]\n"
                "                      [--imu-rate <hz>] [--radalt-rate <hz>]\n"
@@ -206,6 +244,9 @@ void print_usage()
                "                      [--heading0 <deg>] [--roll0 <deg>]\n"
                "                      [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
                "\n"
+               "  --case      NASA TM-2015-218675 check-case: 11 = subsonic trim flyout at 10 013 ft (default),\n"
+               "              12 = supersonic trim flyout at 30 013 ft. Sets the defaults below; explicit\n"
+               "              options still override them wherever they appear on the command line\n"
                "  --f16       path to Aetherion's F16Plant.fmu (default: configure-time location)\n"
                "  --gps       path to the packaged hemerion_gps_fmu.fmu (default: build-tree artifact)\n"
                "  --imu       path to the packaged hemerion_imu_fmu.fmu (default: build-tree artifact)\n"
@@ -224,8 +265,8 @@ void print_usage()
                "              so navigation output stops above 18000 m AND 515 m/s -- neither is approached here)\n"
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
                "  --lat0 --lon0  trim position [deg] (default 36.019167 / -75.674444, Kitty Hawk NC)\n"
-               "  --alt0      trim altitude [ft] (default 10013)\n"
-               "  --vt0       trim true airspeed [ft/s] (default 565.685 = 335.15 KTAS)\n"
+               "  --alt0      trim altitude [ft] (default 10013, or 30013 for --case 12)\n"
+               "  --vt0       trim true airspeed [ft/s] (default 565.685 = 335.15 KTAS, or 2000 for --case 12)\n"
                "  --heading0 --roll0  trim attitude [deg] (default 45 / -0.172)\n"
                "  --stop      simulation stop time [s] (default 200 = the reference trajectory's window)\n"
                "  --step      communication step size [s]; also the GPS fix period (default 0.1)\n"
@@ -243,7 +284,9 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 20> kValueOptions = { {
+constexpr std::array<ValueOption, 21> kValueOptions = { {
+    // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
+    { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
     { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
@@ -268,6 +311,26 @@ constexpr std::array<ValueOption, 20> kValueOptions = { {
 
 bool parse_args(int argc, char** argv, Options& options)
 {
+  // A check-case is a set of defaults, so it is applied before anything else on
+  // the command line regardless of where --case appears. Applying it in order
+  // would make `--alt0 25000 --case 12` silently discard the --alt0.
+  for (int i = 1; i + 1 < argc; ++i)
+  {
+    if (std::string_view(argv[i]) != "--case")
+    {
+      continue;
+    }
+    const auto trim_case = std::ranges::find(kTrimCases, std::string_view(argv[i + 1]), &TrimCase::id);
+    if (trim_case == kTrimCases.end())
+    {
+      std::cerr << "unknown check-case: " << argv[i + 1] << " (this example flies the trim flyouts, 11 and 12; "
+                << "the autopilot cases 13.x are examples/f16_autopilot_ecos)\n";
+      return false;
+    }
+    options.alt0_ft = trim_case->alt0_ft;
+    options.vt0_fps = trim_case->vt0_fps;
+  }
+
   for (int i = 1; i < argc; ++i)
   {
     const std::string arg = argv[i];
@@ -410,7 +473,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
     std::cerr << "warning: cannot write " << config_path.string() << "; figures will be unlabelled\n";
     return;
   }
-  out << "dynamic_platform=" << options.dynamic_platform << "\n"
+  out << "check_case=" << options.check_case << "\n"
+      << "dynamic_platform=" << options.dynamic_platform << "\n"
       << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
       << "lat0_deg=" << options.lat0_deg << "\n"
@@ -609,9 +673,10 @@ int main(int argc, char** argv)
     // Hawk that is right to within a few metres of coastal elevation; over
     // terrain it would not be, and the connection is left bare rather than
     // routed through a nominal offset so that the approximation is one
-    // readable line instead of a buried constant. 10 013 ft is 3052 m, well
-    // inside the part's 6000 m tracking range -- which is what lets this
-    // scenario exercise the radar altimeter at all.
+    // readable line instead of a buried constant. Case 11's 10 013 ft is
+    // 3052 m, well inside the part's 6000 m tracking range. Case 12's
+    // 30 013 ft is 9148 m, well outside it, and the part reports loss of track
+    // for the whole flight -- a sensor that is working and has nothing to say.
     ss.make_connection<double>("f16::out.alt_m", "radalt::h_agl_m");
 
     // The magnetometer's die temperature: ambient air, near enough for a part
@@ -622,19 +687,19 @@ int main(int argc, char** argv)
     const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
     ss.make_connection<double>("f16::out.T_K", "mag::temperature_c", kelvin2celsius);
 
-    // NASA TM-2015-218675 check-case 11's trim condition: Kitty Hawk, NC at
-    // 10 013 ft, 565.685 ft/s true airspeed, heading 45 deg, with the trim
-    // solution's -0.172 deg residual bank. These are the conditions the
-    // published reference trajectories (Aetherion's
-    // data/Atmos_11_TrimCheckSubsonicF16/Atmos_11_sim_0{2,4,5}.csv) are
-    // tabulated from, so departing from them means the run can no longer be
-    // checked against anything.
+    // The check-case's trim condition: Kitty Hawk, NC, heading 45 deg, a
+    // -0.172 deg residual bank, and the case's altitude and airspeed (see
+    // kTrimCases). These are the conditions the published reference
+    // trajectories (Aetherion's data/Atmos_11_TrimCheckSubsonicF16/ and
+    // data/Atmos_12_TrimCheckSupersonicF16/) are tabulated from, so departing
+    // from them means the run can no longer be checked against anything.
     //
     // There is no pitch parameter: pitch at trim *is* the angle of attack the
     // FMU's own trim solver finds, and forcing it from outside would either
-    // duplicate that solve or contradict it. The published initial pitch of
-    // 2.643 deg is therefore an output to check, not an input to set -- which
-    // makes it one of the more informative numbers in the whole run.
+    // duplicate that solve or contradict it. The published initial pitch
+    // (2.643 deg for case 11, -0.737 deg nose-down for case 12) is therefore
+    // an output to check, not an input to set -- which makes it one of the
+    // more informative numbers in the whole run.
     //
     // solver.max_step_s is left at its default (0 = one implicit Radau step
     // per communication step); the integrator is L-stable, and capping
@@ -755,8 +820,14 @@ int main(int argc, char** argv)
               << options.imu_rate_hz << " Hz IMU, " << options.radalt_rate_hz
               << " Hz radalt; BMP390 and MMC5983MA at the rates the flight computer programs), stop " << options.stop_s
               << " s\n"
-              << "[cosim] plant: trimmed at " << options.lat0_deg << " deg N / " << options.lon0_deg << " deg E, "
-              << options.alt0_ft << " ft, " << options.vt0_fps << " ft/s, heading " << options.heading0_deg << " deg\n"
+              << "[cosim] check-case " << options.check_case << ": "
+              << std::ranges::find(kTrimCases, std::string_view(options.check_case), &TrimCase::id)->summary
+              << "\n"
+              // Six decimals, as published: the stream default of six *significant* digits prints 36.019167 as
+              // 36.0192, which is exactly the rounded FMU default the Options comment explains this example avoids.
+              << "[cosim] plant: trimmed at " << std::fixed << std::setprecision(6) << options.lat0_deg << " deg N / "
+              << options.lon0_deg << " deg E, " << std::defaultfloat << options.alt0_ft << " ft, " << options.vt0_fps
+              << " ft/s, heading " << options.heading0_deg << " deg\n"
               << "[cosim] receiver: ";
     // Name the platform model only when there is one. Reporting "dynModel -1"
     // on the default run announces a mechanism that is not running, which
@@ -822,13 +893,17 @@ int main(int argc, char** argv)
                  "them to\n"
               // A trim flyout has no events, so what is worth reporting is how
               // far it drifted from the condition it was trimmed at. The
-              // published check-case drifts about +15 m and loses 0.84 deg of
-              // heading over the window; a run that holds altitude to the
+              // published solutions do drift, by tens of metres and fractions
+              // of a degree over the window; a run that holds altitude to the
               // centimetre has not reproduced the check-case, it has replaced
               // it with a different problem.
-              << "[cosim] trim drift: altitude " << max_alt_excursion_m << " m max excursion, true airspeed "
-              << max_speed_excursion_mps << " m/s, heading "
-              << options.heading0_deg - yaw->get_value() * 180.0 / std::numbers::pi << " deg at cut-off\n"
+              << "[cosim] trim drift: altitude " << max_alt_excursion_m
+              << " m max excursion, true airspeed "
+              // Final minus initial, so the sign reads as the turn: an aircraft that drifts from 45 to 45.47 deg
+              // reports +0.47. The first version subtracted the other way round and printed that as -0.47.
+              << max_speed_excursion_mps << " m/s, heading change " << std::showpos
+              << yaw->get_value() * 180.0 / std::numbers::pi - options.heading0_deg << std::noshowpos
+              << " deg at cut-off\n"
               << "[cosim] plant truth written to " << options.csv_path.string() << "\n";
   }
   catch (const std::exception& ex)
