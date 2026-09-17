@@ -92,39 +92,73 @@ that data set are worth knowing:
   At equal times the spread is ~181 m of ground track.
 
 **Against an Aetherion run** — this one has resolution, and it is the question this example is actually
-responsible for: does the co-simulation reproduce the plant? Current figures over 34 km flown:
+responsible for: does the co-simulation reproduce the plant? Against Aetherion ≥ 0.14.1's standalone
+`F16SteadyFlight`, over 34 km flown:
 
 ```
-worst ground-track difference 5.97 m (t = 200 s)
-worst altitude difference     2.16 m (t = 200 s)
-worst heading difference      5.52e-04 deg (t = 200 s)
+initial position offset       0.491 m (identical initial conditions give 0.000)
+worst ground-track difference 0.494 m (t = 180 s)
+worst altitude difference     0.003 m (t = 40 s)
+worst heading difference      1.88e-07 deg (t = 40 s)
 ```
+
+The 0.491 m is not a divergence: it is present at t = 0 and moves by 3 mm over the whole run. The standalone
+hardcodes Kitty Hawk as `36.01917 / -75.67444`, five decimals, where the published condition this example
+uses has six — and that rounding predicts −0.3336 m north and −0.3597 m east, exactly the measured offset.
+Run `./f16_trim_cosim --lat0 36.01917 --lon0 -75.67444` and the two drivers agree to **3 mm of ground track,
+3 mm of altitude and 2×10⁻⁷ deg of heading**. That is why the verifier prints the initial offset on its own
+line: an initial-condition difference and a divergence look identical in a "worst difference" figure.
+
+The default tolerances (1 m / 0.05 m / 10⁻⁵ deg) are set to catch the bug described below, which each one
+fails by an order of magnitude or more; the looser defaults they replaced let it through on two of three checks.
 
 Neither check looks only at altitude. On straight-and-level flight altitude is nearly constant, so an
 altitude-only comparison passes for a vehicle that flew a circle at the right height.
 
-### Known: this run drifts more than any published participant
+### Fixed in Aetherion 0.14.1: two drivers trimmed against different gravity
 
-Up to ~16 m in altitude and 0.44° in heading beyond the participants' own spread, in `sim_02`'s direction.
-That is **not** the co-simulation's doing — it is a difference between Aetherion's FMU and Aetherion's own
-standalone example, and it starts at t = 0:
+Before 0.14.1 this example and Aetherion's standalone example disagreed by 5.97 m of ground track, 2.16 m of
+altitude and 5.5×10⁻⁴ deg of heading at t = 200 s, and the difference was already there at t = 0 in the trim
+solution. `F16Plant.fmu` built the weight it trims against from **J2 gravity at the trim position**; the
+standalone examples used the sea-level constant 9.80665 m/s². At Kitty Hawk J2 gives 9.81108 m/s², **0.045%
+above** g₀, and the heavier trim came out at 1.85×10⁻³ deg more alpha. An open-loop trim flyout is a lightly
+damped phugoid (~70 s period, ~7 m amplitude here), so a trim difference that small grows into metres.
+
+It was never integration error: a 10× finer communication step (`--step 0.01`) changed those figures not at
+all, and Aetherion's own step-size study is flat from 0.01 to 0.1 s. 0.14.1 moved every F-16 standalone
+example onto the FMU's J2 weight through a shared `Aetherion/FlightDynamics/Trim/TrimWeight.h`. The FMU's own
+trim did not change — its initial pitch is identical to 4×10⁻¹¹ deg between 0.14.0 and 0.14.1 — which is why
+this example's version floor stays at 0.14.0: nothing it consumes moved. Comparing against a standalone run
+**older than 0.14.1** reproduces the old disagreement, and the verifier fails it on all three checks.
+
+### Open: this run drifts more than any published participant
+
+Up to ~16 m in altitude and 0.44° in heading beyond the participants' own spread, in `sim_02`'s direction — and
+still after 0.14.1, because that release made Aetherion self-consistent, not consistent with the check-case.
+Both Aetherion paths now trim to the same point, and it is not the published one:
 
 | source | initial pitch (= trim angle of attack) |
 |---|---|
-| `F16Plant.fmu` | 2.656087° |
-| Aetherion `F16SteadyFlight` | 2.654236° |
+| `F16Plant.fmu` and `F16SteadyFlight`, 0.14.1 | 2.656087° |
 | NESC published initial condition | **2.643331°** |
 
-The FMU computes the weight it trims against from **J2 gravity at the trim position**; the standalone example
-uses a constant 9.80665 m/s². At 36° N that is a 0.073% difference in weight, and the resulting 1.85×10⁻³ deg
-of alpha is 0.07% — the same figure. An open-loop trim flyout is a lightly damped phugoid (~70 s period, ~7 m
-amplitude here), so a trim difference that small grows into metres over 200 s.
+It is no longer a weight question: Aetherion's trim weight is 20 509.3 lbf against NASA's 20 509.4 lbf.
 
-It is not integration error on either side: a 10× finer communication step (`--step 0.01`) changes those
-figures *not at all*, and Aetherion's own step-size study is flat from 0.01 to 0.1 s. Note also that **neither**
-Aetherion path reproduces the NESC trim point — both sit ~0.012° away, an order of magnitude further than they
-are from each other. Resolving this needs an Aetherion-side change; it cannot be configured from here, because
-the FMU derives its trim gravity internally from `lat0`/`lon0`/`alt0` and exposes no override.
+**Leading suspect, not yet a finding.** `TrimSolver` balances lift against weight with no Earth-rotation or
+curvature terms, while the integrator flies the aircraft over a rotating round Earth. For level flight at this
+point those terms relieve a measurable share of the lift the wing must make:
+
+| term | lift relief |
+|---|---|
+| centrifugal (Earth rotation) | 0.2265% of g |
+| Eötvös, 2Ω·v_E·cos(lat) | 0.1466% |
+| path curvature, v²/R | 0.0475% |
+| **total** | **0.4206%** |
+
+Using the alpha-per-weight sensitivity measured from Aetherion's own two trims (1.85×10⁻³ deg per 0.0452%),
+that predicts −0.0172° against the actual −0.0128° gap: the right sign and order, consistent with this run
+*climbing* where the best-behaved participants hold altitude — but 135% of the gap, and no subset of the terms
+closes it cleanly either. So it is a place to look on the Aetherion side, not an explanation.
 
 ## Building
 

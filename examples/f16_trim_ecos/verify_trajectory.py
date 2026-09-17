@@ -252,6 +252,8 @@ def compare_to_aetherion(truth: Track, aetherion: Track, sample_times: list[floa
     """Report our track against an Aetherion standalone run. Returns failures."""
     print(f"\nagainst Aetherion's own run of the same case: {aetherion.name}")
     failures = 0
+    compared = 0
+    initial_pos = None
     worst_pos = worst_alt = worst_yaw = 0.0
     worst_pos_t = worst_alt_t = worst_yaw_t = 0.0
     for t in sample_times:
@@ -259,7 +261,10 @@ def compare_to_aetherion(truth: Track, aetherion: Track, sample_times: list[floa
         theirs = aetherion.at(t)
         if ours is None or theirs is None:
             continue
+        compared += 1
         d_pos = ground_distance_m(ours[0], ours[1], theirs[0], theirs[1])
+        if initial_pos is None:
+            initial_pos = d_pos
         d_alt = abs(ours[2] - theirs[2])
         d_yaw = abs(ours[3] - theirs[3])
         if d_pos > worst_pos:
@@ -268,14 +273,25 @@ def compare_to_aetherion(truth: Track, aetherion: Track, sample_times: list[floa
             worst_alt, worst_alt_t = d_alt, t
         if d_yaw > worst_yaw:
             worst_yaw, worst_yaw_t = d_yaw, t
-    print(f"  worst ground-track difference {worst_pos:.2f} m (t = {worst_pos_t:.0f} s)")
-    print(f"  worst altitude difference     {worst_alt:.2f} m (t = {worst_alt_t:.0f} s)")
+    # Nothing compared is not agreement. A file with the wrong columns or no
+    # overlapping window would otherwise fall straight through to "OK".
+    if compared == 0:
+        print("  FAIL: no sample time is covered by both runs -- nothing was compared")
+        return 1
+    print(f"  compared at {compared} sample times")
+    # Millimetres, not centimetres: from identical initial conditions the two
+    # drivers agree to a few mm, and two decimals would print that as 0.00 --
+    # and would equally hide a constant offset that is an initial-condition
+    # difference rather than a divergence.
+    print(f"  initial position offset       {initial_pos:.3f} m (identical initial conditions give 0.000)")
+    print(f"  worst ground-track difference {worst_pos:.3f} m (t = {worst_pos_t:.0f} s)")
+    print(f"  worst altitude difference     {worst_alt:.3f} m (t = {worst_alt_t:.0f} s)")
     print(f"  worst heading difference      {worst_yaw:.2e} deg (t = {worst_yaw_t:.0f} s)")
     if worst_pos > position_tol_m:
-        print(f"  FAIL ground track: {worst_pos:.2f} m > {position_tol_m:.2f} m")
+        print(f"  FAIL ground track: {worst_pos:.3f} m > {position_tol_m:.3f} m")
         failures += 1
     if worst_alt > alt_tol_m:
-        print(f"  FAIL altitude: {worst_alt:.2f} m > {alt_tol_m:.2f} m")
+        print(f"  FAIL altitude: {worst_alt:.3f} m > {alt_tol_m:.3f} m")
         failures += 1
     if worst_yaw > yaw_tol_deg:
         print(f"  FAIL heading: {worst_yaw:.3e} deg > {yaw_tol_deg:.3e} deg")
@@ -292,13 +308,18 @@ def main() -> int:
                         help="a published NESC Atmos_11 CSV; repeat for each participant solution")
     parser.add_argument("--aetherion", type=Path, default=None,
                         help="an Aetherion standalone F16SteadyFlight CSV (SI, radians)")
-    parser.add_argument("--position-tol-m", type=float, default=50.0,
-                        help="ground-track tolerance against --aetherion (default 50 m over 34 km flown)")
-    parser.add_argument("--alt-tol-m", type=float, default=5.0,
-                        help="altitude tolerance against --aetherion (default 5 m; the phugoid amplitude is ~7 m, "
-                             "so a small phase difference between two drivers of the same plant lands here)")
-    parser.add_argument("--yaw-tol-deg", type=float, default=0.01,
-                        help="heading tolerance against --aetherion (default 0.01 deg)")
+    # Tight on purpose. Against Aetherion >= 0.14.1 the two drivers of the same plant agree to a few mm and
+    # ~1e-7 deg; the looser defaults these replaced (50 m / 5 m / 0.01 deg) passed the sea-level-gravity trim
+    # bug that 0.14.1 fixed (5.97 m / 2.16 m / 5.5e-4 deg) on two of the three checks. Each default below
+    # still fails that bug by an order of magnitude or more.
+    parser.add_argument("--position-tol-m", type=float, default=1.0,
+                        help="ground-track tolerance against --aetherion (default 1 m over 34 km flown -- wide enough "
+                             "for the 0.49 m by which Aetherion's F16SteadyFlight rounds the published initial "
+                             "position, which shows up as a constant 'initial position offset')")
+    parser.add_argument("--alt-tol-m", type=float, default=0.05,
+                        help="altitude tolerance against --aetherion (default 0.05 m; measured agreement is ~3 mm)")
+    parser.add_argument("--yaw-tol-deg", type=float, default=1e-5,
+                        help="heading tolerance against --aetherion (default 1e-5 deg; measured ~2e-7)")
     args = parser.parse_args()
 
     if not args.reference and not args.aetherion:
