@@ -32,12 +32,28 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
     part model only saturates at the ADC rails; it models neither rating.
   - Plant drifts +218 m peak / +0.47 deg (sim_02: +140 m; sim_04/05 hold altitude to 0.3 m).
 
-  Remaining: README case-12 section with the figures above and the verification commands; the file
-  header of `cosim_host_main.cpp` still describes only case 11; `f16_flight_computer.cpp` comments
-  assume every stack is in band (its exit criterion already counts samples regardless of validity,
-  which is right for case 12); the `examples/README.md` row mentions only case 11; and the Sphinx
-  page for `f16_trim_ecos` does not exist yet. Decide whether the BMP390 FMU should flag operation
-  outside its pressure/temperature rating.
+  Docs closed out: the example README carries the case-12 section with the figures above and the
+  verification/regeneration commands, both file headers and the in-band comments cover both cases,
+  the `examples/README.md` row names both, and the Sphinx page exists (`doc/f16_trim_ecos_cosim.rst`,
+  in the toctree; parse-checked only — no Doxygen on this machine, so the full Sphinx build is CI's).
+
+  The BMP390 rating question is decided and done: the FMU now counts out-of-rating conversions on two
+  diagnostic FMI outputs (`conversions` / `conversions_out_of_rating`), debug-logs each envelope
+  crossing once with the offending value, and changes nothing on the I2C side — the words stay
+  plausible, as on real silicon. `f16_trim_cosim` prints the counters in its summary. Verified: unit
+  test on the rating flags, FMI-level instantiate/read smoke via fmpy, full ctest green — and
+  **re-run end to end against the installed Aetherion 0.14.1** (`C:/Program Files/Aetherion`, FMU
+  ports confirmed). The paced 200 s `--case 12 --rtf 1` run reproduced the whole record: 0 of 2001
+  fixes, 6003 of 6003 radar no-returns, min pressure 291.1 hPa / die −46.1 °C (recorded 290.9 /
+  −45.9 — per-run turn-on bias), mag in band, drift +217.7 m / +0.470°, NESC verifier passes with the
+  known beyond-the-spread note; `--dyn-model -1 --stop 30` again gives 300 of 300 fixes at 609.8 m/s.
+  The new counter reads **9999 of 9999 out of rating** — 100 %, not the flight computer's ~90 %
+  below-the-pressure-floor fraction (541 of 581 reads this run), because the counter also honours the
+  −40 °C temperature rating, which the whole flight violates. Two footnotes: FMU `debugLog` lines
+  (the edge logs included) never reach Ecos' console — Ecos instantiates FMUs with FMI logging off,
+  a pre-existing property, the counters carry the result; and the `--aetherion` standalone bar was
+  not re-measured — the install ships no example executables and the local Aetherion checkout is
+  v0.11.3-era, so regenerating `f16_s12` still needs a ≥ 0.14.1 build tree.
 
 * **Regenerating the Aetherion standalone references** (needed for `verify_trajectory.py
   --aetherion`, must be a build that includes 0.14.1's `TrimWeight.h`), from the Aetherion root:
@@ -45,24 +61,70 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   --writeInterval 1 --inputFileName unused --outputFileName f16_s11.csv` (and `F16SupersonicTrim`
   for case 12). `--inputFileName` is required by the CLI but ignored.
 
-* **Next: `examples/f16_autopilot_ecos`, cases 13.1–13.4.** `F16Plant` + `F16Autopilot` + the five
-  sensor FMUs; plant `out.*` → autopilot `fb.*`, autopilot `ctrl.*` → plant `ctrl.*`. The FMU has no
-  step scheduling, so the host owns the command schedule on `cmd.altCmd_ft`, `cmd.keasCmd_kt`,
-  `cmd.baseChiCmd_deg`, `cmd.latOffset_ft`: 13.1 +100 ft at 5 s; 13.2 KEAS → 277 kt at 5 s; 13.3
-  course 45 → 60 deg at 15 s; 13.4 2000 ft right of course at 20 s. Initial KEAS command = trim KEAS
-  from the plant's density and airspeed.
+* **`examples/f16_autopilot_ecos`, cases 13.1–13.4 — built and verified (2026-09-17).** All four
+  cases run, verify against the NESC references, and pass the new commanded-response assertions:
+  13.1 settles at 10 113.5 ft (participants end within 0.6 ft of 10 113); 13.2 reaches 277.0 kt with
+  the same 10 006.7 ft altitude dip `sim_02` shows; 13.3 ends at 60.04° and its 240 s of integrated
+  ground track lands 1.5 ft from `sim_05`'s lateral deviation (32 071.6 vs 32 070.1 ft); 13.4 reads
+  1981.5 ft at t = 60 s (participants 1934–1992) and 2000.1 ft at cut-off. The paced
+  flight-computer smoke confirms the two-rate sensors: exactly 10 Hz GPS, exactly 25 Hz radalt,
+  ≈100 Hz IMU, both I2C parts polling, all fixes valid. The investigation record below is what the
+  design implements; it stays here because it documents *why* the example looks the way it does.
 
-  **Investigate before building:** the autopilot FMU evaluates once per Ecos communication step with a
-  one-step transport delay — at the 0.1 s step that is a 10 Hz sampled loop with 0.1 s delay, which is
-  probably not what Aetherion's standalone `F16HeadingChange` does, so it would not reproduce the same
-  numbers. But the GPS FMU emits one NAV-PVT per step, so simply using a 0.01 s step means 100 Hz GPS.
-  Check how the standalone evaluates its controller, whether Ecos supports per-model step decimation,
-  and whether the GPS FMU can decimate.
+  `F16Plant` + `F16Autopilot` + the five sensor FMUs; plant `out.*` → autopilot `fb.*` (11
+  connections: alt, vt, rho, alpha, beta, roll/pitch/yaw, p/q/r — every source verified present on
+  the 0.14.1 plant), autopilot `ctrl.*` → plant `ctrl.*` (4; the plant has all four inputs). The
+  autopilot FMU exposes exactly 20 variables and **no parameters** — `circlePoleSW` is baked off, so
+  cases 15/16 stay blocked.
+
+  **The three questions, answered (2026-09-17, against the 0.14.1 install + the Ecos source the
+  examples pin):**
+  - *The standalone* (`F16AltitudeChangeSimulator.h`, reused by all four 13.x examples) is, in its
+    own words, "a zero-order hold (ZOH) discrete controller at the integration step rate, matching
+    the NASA reference implementation": per step it extracts feedback from the *current* state,
+    evaluates the DML LQR, applies the surfaces, then integrates that same step — **no transport
+    delay**. Recommended `--timeStep 0.02` (50 Hz); the header warns **dt = 0.1 diverges** ("LQR
+    plant is stiff"). `DAVEMLControlModel::evaluate()` is `const` — the LQR is **stateless** (no
+    integrators), so the controller has no dt-dependence of its own; cadence and delay are the only
+    knobs.
+  - *Ecos decimation exists*: `ss.add_model(name, path, stepSizeHint)`; `fixed_step_algorithm` steps
+    that instance every N-th base step (N = ceil(hint/base)) with dt = N·base, applying its
+    sets/gets only when it steps. But the co-simulation is **Jacobi**: all instances step, *then*
+    connections transfer (`simulation.cpp`), so the one-communication-step transport delay is
+    structural — the plant flies [t, t+h] on controls computed from state at t−h, and the
+    `parallel` flag does not change it. A one-step delay at h costs about the loop phase of ZOH at
+    2h, so **base step 0.01 s puts the co-sim at the standalone's recommended 0.02 cadence**; that
+    is the design point (plant + autopilot + IMU + both I2C parts at base rate).
+  - *The GPS FMU needs no change*: it emits exactly one NAV-PVT per `do_step`, dt-agnostic, stamped
+    at `currentTime()+dt` — `stepSizeHint 0.1` on the 0.01 base gives a correctly-stamped 10 Hz
+    stream. **The radalt is the one that bites**: it emits `max(1, lround(dt·rate))` frames, so at
+    dt = 0.01 and 25 Hz it clamps to 1/step = 100 Hz — give it `stepSizeHint 0.04`. IMU at base is
+    exactly 1 frame/step (100 Hz); BMP390/MMC5983MA convert at programmed ODR, dt-independent.
+
+  **Command schedules, from the standalone sources** (`src/Examples/F16{Altitude,Airspeed,Heading,
+  LateralSideStep}Change*.cpp` — all four start from the case-11 trim; initial KEAS = (vt/0.5144444)
+  · sqrt(rho_trim/1.225) from the plant's own density and airspeed):
+  - 13.1: `altCmd` 10 013 → **10 113 ft at t = 5 s**; keas/chi hold.
+  - 13.2: `keasCmd` trim → **277.0 kt at t = 5 s**; alt/chi hold.
+  - 13.3: `chiCmd` 45 → **60 deg at t = 15 s**; alt/keas hold.
+  - 13.4: **latOffset step 2000 ft right at t = 20 s** — and `cmd.latOffset_ft` is *feedback*, not a
+    constant: the standalone computes the aircraft's lateral deviation from the original courseline
+    every step (flat-earth about the initial position, R = 6 371 000 m, course 45°) and feeds
+    `lat_dev − (t ≥ 20 ? 2000 : 0)`. The host must do the same, post-step like the magnetometer
+    field write in `f16_trim_ecos`. Cases 13.1–13.3 write `latOffset = 0` constant.
+
+  **Start-up hazard found**: the plant's `ctrl.*` inputs start at 0, the plant does **not** publish
+  its trim deflections, and Ecos's init rounds transfer the autopilot's init-time outputs into the
+  plant before the first step — computed from whatever `fb` values the autopilot held during init.
+  Mitigation: put the trim condition on the autopilot's `fb.*`/`cmd.*` inputs in the `trimPoint`
+  parameter set, so its init output is the LQR's own answer at trim (≈ trim deflections, the same
+  property the standalone relies on). Check the first second against the references when building.
 
   Reference windows are unequal again, reversed: 13.1/13.2 `sim_02`/`sim_04` end at 20 s while
-  `sim_05` runs to 60 s; 13.3/13.4 end at 30/60 s while `sim_05` runs to 239.9 s. The verifier will
-  also need the commanded quantity (altitude step, KEAS, course, lateral offset), not only
-  lat/lon/alt/heading.
+  `sim_05` runs to 60 s; 13.3/13.4 end at 30/60 s while `sim_05` runs to 239.9 s (run to the longest
+  window per case). The verifier will also need the commanded quantity (altitude step, KEAS, course,
+  lateral offset), not only lat/lon/alt/heading — the references carry no command columns, so the
+  commanded value comes from the scenario definition, as above.
 
 * **Blocked on Aetherion: cases 15 and 16.** `F16Autopilot.fmu` (0.14.1) still hardcodes the
   circumnavigator inputs off (`circlePoleSW = 0`, built from `F16_control.dml`, not `F16_gnc.dml`).
@@ -74,7 +136,8 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   size). Case 12 is a second data point for testing it — Eötvös and curvature grow with v and v² — but
   needs the alpha-per-weight sensitivity at Mach 2 first. Not yet written up for Aetherion.
 
-* **Then:** open a PR for this branch; the EKF itself.
+* **Then:** the EKF itself, judged on case 11, degraded-mode on case 12, exercised by 13.3/13.4.
+  (The PR for this branch is open.)
 
 ---
 
