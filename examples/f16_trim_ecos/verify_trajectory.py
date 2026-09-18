@@ -1,0 +1,382 @@
+# ------------------------------------------------------------------------------
+# Project: Hemerion Copyright (c) 2026, Onur Tuncer, PhD, Istanbul Technical University
+#
+# SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
+# ------------------------------------------------------------------------------
+"""Check an f16_trim_cosim run against NASA TM-2015-218675 check-case 11 or 12.
+
+Two bars, deliberately kept apart, because they have very different resolution.
+
+**Against the NESC references** (--reference, repeatable). These are the
+published participant solutions, and on these check-cases they disagree with
+each other badly. On case 11, at t = 180 s, Atmos_11_sim_02 has climbed 44.7 ft
+and turned -0.66 deg while sim_04 and sim_05 hold altitude to a tenth of a foot
+and turn +0.53 deg the *other way*; on case 12 sim_02 climbs 140 m through its
+phugoid while the other two hold altitude to 0.3 m. An open-loop trim flyout is
+a lightly damped system integrated for 200 s, so participants' small differences
+in trim solution, gravity model and integrator show up directly -- which is
+exactly what the check-case is for, and also why a pass here is weak evidence.
+This script reports the envelope width alongside the verdict so the number is
+never read as tighter than it is.
+
+**Against an Aetherion run** (--aetherion, optional). Aetherion's own standalone
+run of the same case (F16SteadyFlight for 11, F16SupersonicTrim for 12), in SI
+units and radians. Same physics,
+same library, different driver -- so this comparison has real resolution and a
+correspondingly tight tolerance. It answers "does the co-simulation reproduce
+the plant?", which is the question this example is actually responsible for;
+the reference check answers "does the plant reproduce the check-case?", which is
+Aetherion's.
+
+Neither check looks only at altitude. On straight-and-level flight altitude is
+nearly constant, so an altitude-only comparison passes for a vehicle that flew a
+circle at the right height. Ground track and heading carry the information.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import math
+import sys
+from pathlib import Path
+
+# WGS-84 mean radius, adequate for turning a small angular difference into a
+# ground distance for reporting purposes.
+EARTH_RADIUS_M = 6371008.8
+FT_PER_M = 1.0 / 0.3048
+
+
+class Track:
+    """A trajectory sampled on its own time grid: time, lat/lon [deg], alt [m], yaw [deg]."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.time: list[float] = []
+        self.lat: list[float] = []
+        self.lon: list[float] = []
+        self.alt: list[float] = []
+        self.yaw: list[float] = []
+
+    def __len__(self) -> int:
+        return len(self.time)
+
+    def at(self, t: float) -> tuple[float, float, float, float] | None:
+        """Nearest sample to `t`, or None if the track does not reach it.
+
+        Nearest rather than interpolated: every producer here is on a 0.1 s or
+        finer grid over the same 200 s window, so the nearest sample is within
+        half a step, and interpolating would quietly paper over a track that
+        stopped early.
+        """
+        if not self.time:
+            return None
+        best = min(range(len(self.time)), key=lambda i: abs(self.time[i] - t))
+        if abs(self.time[best] - t) > 0.5:
+            return None
+        return self.lat[best], self.lon[best], self.alt[best], self.yaw[best]
+
+
+def _column(header: list[str], *candidates: str) -> str:
+    """Locate a column by any of several spellings, ignoring whitespace and case."""
+    normalised = {name.strip().lower(): name for name in header}
+    for candidate in candidates:
+        if candidate in normalised:
+            return normalised[candidate]
+    raise SystemExit(f"error: none of {candidates} found among columns {sorted(normalised)}")
+
+
+def read_truth(path: Path) -> Track:
+    """Read f16_trim_cosim's own truth log (SI, radians for attitude)."""
+    track = Track(path.name)
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise SystemExit(f"error: {path} is empty")
+    header = list(rows[0].keys())
+    c_t = _column(header, "time")
+    c_lat = _column(header, "f16::out.lat_deg[real]")
+    c_lon = _column(header, "f16::out.lon_deg[real]")
+    c_alt = _column(header, "f16::out.alt_m[real]")
+    c_yaw = _column(header, "f16::out.yaw_rad[real]")
+    for row in rows:
+        track.time.append(float(row[c_t]))
+        track.lat.append(float(row[c_lat]))
+        track.lon.append(float(row[c_lon]))
+        track.alt.append(float(row[c_alt]))
+        track.yaw.append(math.degrees(float(row[c_yaw])))
+    return track
+
+
+def read_reference(path: Path) -> Track:
+    """Read a published NESC check-case CSV (feet, degrees)."""
+    track = Track(path.name)
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise SystemExit(f"error: {path} is empty")
+    header = list(rows[0].keys())
+    c_t = _column(header, "time")
+    c_lat = _column(header, "latitude_deg")
+    c_lon = _column(header, "longitude_deg")
+    c_alt = _column(header, "altitudemsl_ft")
+    c_yaw = _column(header, "eulerangle_deg_yaw")
+    for row in rows:
+        track.time.append(float(row[c_t]))
+        track.lat.append(float(row[c_lat]))
+        track.lon.append(float(row[c_lon]))
+        track.alt.append(float(row[c_alt]) * 0.3048)
+        track.yaw.append(float(row[c_yaw]))
+    return track
+
+
+def read_aetherion(path: Path) -> Track:
+    """Read an Aetherion standalone run (SI, radians)."""
+    track = Track(path.name)
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise SystemExit(f"error: {path} is empty")
+    header = list(rows[0].keys())
+    c_t = _column(header, "time")
+    c_lat = _column(header, "latitude_rad")
+    c_lon = _column(header, "longitude_rad")
+    c_alt = _column(header, "altitudemsl_m")
+    c_yaw = _column(header, "eulerangle_rad_yaw")
+    for row in rows:
+        track.time.append(float(row[c_t]))
+        track.lat.append(math.degrees(float(row[c_lat])))
+        track.lon.append(math.degrees(float(row[c_lon])))
+        track.alt.append(float(row[c_alt]))
+        track.yaw.append(math.degrees(float(row[c_yaw])))
+    return track
+
+
+def ground_distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    """Great-circle distance between two geodetic points, small-angle safe."""
+    phi_a, phi_b = math.radians(lat_a), math.radians(lat_b)
+    d_phi = phi_b - phi_a
+    d_lam = math.radians(lon_b - lon_a)
+    # haversine: stable for the sub-kilometre separations this script deals in
+    h = math.sin(d_phi / 2.0) ** 2 + math.cos(phi_a) * math.cos(phi_b) * math.sin(d_lam / 2.0) ** 2
+    return 2.0 * EARTH_RADIUS_M * math.asin(min(1.0, math.sqrt(h)))
+
+
+def compare_to_envelope(truth: Track, references: list[Track], sample_times: list[float]) -> int:
+    """Report our track against the min/max envelope of the references. Returns failures."""
+    print(f"\nagainst {len(references)} NESC reference(s): " + ", ".join(r.name for r in references))
+
+    # The participant solutions do not all cover the same window --
+    # on both trim cases sim_04 and sim_05 stop at 180 s where sim_02 runs to 200 s. An
+    # earlier version of this script dropped any sample time that not every
+    # reference reached, which silently left the last 20 s of the flight
+    # unchecked while still printing OK. Each sample is therefore compared
+    # against whatever references actually reach it, and the coverage is
+    # reported so a thinning envelope is visible rather than invisible.
+    coverage: dict[int, list[float]] = {}
+    for t in sample_times:
+        available = [r for r in references if r.at(t) is not None]
+        coverage.setdefault(len(available), []).append(t)
+    for count in sorted(coverage, reverse=True):
+        times = coverage[count]
+        span = f"t = {min(times):.0f}..{max(times):.0f} s"
+        if count == 0:
+            print(f"  NO reference covers {span} -- those samples are unchecked")
+        else:
+            print(f"  {count} of {len(references)} reference(s) cover {span}")
+
+    # How far the references are from each other. Printed before any verdict:
+    # it is the resolution of everything that follows.
+    worst_spread_m = 0.0
+    worst_spread_t = 0.0
+    worst_alt_spread_m = 0.0
+    worst_yaw_spread = 0.0
+    drift_signs: set[int] = set()
+    initial_yaw = {r.name: r.at(0.0)[3] for r in references if r.at(0.0) is not None}
+    for t in sample_times:
+        named = [(r.name, r.at(t)) for r in references]
+        points = [point for _, point in named if point is not None]
+        for i, first in enumerate(points):
+            for second in points[i + 1 :]:
+                d = ground_distance_m(first[0], first[1], second[0], second[1])
+                if d > worst_spread_m:
+                    worst_spread_m, worst_spread_t = d, t
+                worst_alt_spread_m = max(worst_alt_spread_m, abs(first[2] - second[2]))
+                worst_yaw_spread = max(worst_yaw_spread, abs(first[3] - second[3]))
+        for name, point in named:
+            if point is not None and name in initial_yaw and abs(point[3] - initial_yaw[name]) > 0.01:
+                drift_signs.add(1 if point[3] > initial_yaw[name] else -1)
+    # Computed, not asserted: on check-case 11 the participants drift in opposite directions, on
+    # check-case 12 they all turn the same way, and the sentence has to be true of the data loaded.
+    sign_note = ("they do not even agree on the sign of the heading drift" if len(drift_signs) > 1
+                 else "though they do agree on its sign")
+    print(f"  the references disagree with each other by up to {worst_spread_m:.0f} m of ground track "
+          f"(at t = {worst_spread_t:.0f} s), {worst_alt_spread_m:.0f} m of altitude and "
+          f"{worst_yaw_spread:.2f} deg of heading -- {sign_note}")
+    print("  -- an open-loop trim flyout integrated for 200 s separates participants, so this check is a "
+          "sanity bound, not a precision test")
+
+    # One rule for all three quantities: the participants' *worst* disagreement anywhere in the window, plus
+    # a floor, applied at every sample. An earlier version took the altitude and heading slack from whichever
+    # references happened to reach each sample time, so wherever the others had stopped integrating the band
+    # collapsed to a single participant plus the floor. On check-case 12 that failed a +57 m excess at
+    # t = 190 s while passing a +78 m one at t = 80 s. How long the participants chose to integrate is not a
+    # property of the run being checked.
+    allowed_m = worst_spread_m + 500.0
+    alt_slack_m = worst_alt_spread_m + 30.0
+    yaw_slack_deg = worst_yaw_spread + 0.5
+
+    failures = 0
+    # (amount beyond the participants, time, which way and past whom)
+    worst_alt_excess = (0.0, 0.0, "")
+    worst_yaw_excess = (0.0, 0.0, "")
+    for t in sample_times:
+        ours = truth.at(t)
+        named = [(r.name, r.at(t)) for r in references]
+        named = [(name, point) for name, point in named if point is not None]
+        if ours is None or not named:
+            continue
+        nearest = min(ground_distance_m(ours[0], ours[1], point[0], point[1]) for _, point in named)
+        highest = max(named, key=lambda item: item[1][2])
+        lowest = min(named, key=lambda item: item[1][2])
+        largest_yaw = max(named, key=lambda item: item[1][3])
+        smallest_yaw = min(named, key=lambda item: item[1][3])
+        if nearest > allowed_m:
+            print(f"  FAIL t={t:6.1f} s  ground track {nearest / 1000.0:.3f} km from the nearest reference "
+                  f"(allowed {allowed_m / 1000.0:.3f})")
+            failures += 1
+        # How far outside the participants' own spread we sit, before the
+        # slack is applied. Tracked whether or not it fails, because "passed
+        # with 13 m of margin left" and "passed comfortably" are different
+        # facts and only one of them is true here.
+        for amount, where in ((ours[2] - highest[1][2], f"above the highest participant ({highest[0]})"),
+                              (lowest[1][2] - ours[2], f"below the lowest participant ({lowest[0]})")):
+            if amount > worst_alt_excess[0]:
+                worst_alt_excess = (amount, t, where)
+        for amount, where in ((ours[3] - largest_yaw[1][3], f"more than the largest ({largest_yaw[0]})"),
+                              (smallest_yaw[1][3] - ours[3], f"less than the smallest ({smallest_yaw[0]})")):
+            if amount > worst_yaw_excess[0]:
+                worst_yaw_excess = (amount, t, where)
+        if not (lowest[1][2] - alt_slack_m <= ours[2] <= highest[1][2] + alt_slack_m):
+            print(f"  FAIL t={t:6.1f} s  altitude {ours[2]:.1f} m outside "
+                  f"[{lowest[1][2] - alt_slack_m:.1f}, {highest[1][2] + alt_slack_m:.1f}] m")
+            failures += 1
+        if not (smallest_yaw[1][3] - yaw_slack_deg <= ours[3] <= largest_yaw[1][3] + yaw_slack_deg):
+            print(f"  FAIL t={t:6.1f} s  heading {ours[3]:.3f} deg outside "
+                  f"[{smallest_yaw[1][3] - yaw_slack_deg:.3f}, {largest_yaw[1][3] + yaw_slack_deg:.3f}] deg")
+            failures += 1
+    notes = []
+    if worst_alt_excess[0] > 0.0:
+        notes.append(f"{worst_alt_excess[0]:.1f} m {worst_alt_excess[2]} at t = {worst_alt_excess[1]:.0f} s")
+    if worst_yaw_excess[0] > 0.0:
+        notes.append(f"heading {worst_yaw_excess[0]:.2f} deg {worst_yaw_excess[2]} at t = {worst_yaw_excess[1]:.0f} s")
+    if notes:
+        print("  note: outside the participants' own spread by up to " + "; ".join(notes))
+    return failures
+
+
+def compare_to_aetherion(truth: Track, aetherion: Track, sample_times: list[float],
+                         position_tol_m: float, yaw_tol_deg: float, alt_tol_m: float) -> int:
+    """Report our track against an Aetherion standalone run. Returns failures."""
+    print(f"\nagainst Aetherion's own run of the same case: {aetherion.name}")
+    failures = 0
+    compared = 0
+    initial_pos = None
+    worst_pos = worst_alt = worst_yaw = 0.0
+    worst_pos_t = worst_alt_t = worst_yaw_t = 0.0
+    for t in sample_times:
+        ours = truth.at(t)
+        theirs = aetherion.at(t)
+        if ours is None or theirs is None:
+            continue
+        compared += 1
+        d_pos = ground_distance_m(ours[0], ours[1], theirs[0], theirs[1])
+        if initial_pos is None:
+            initial_pos = d_pos
+        d_alt = abs(ours[2] - theirs[2])
+        d_yaw = abs(ours[3] - theirs[3])
+        if d_pos > worst_pos:
+            worst_pos, worst_pos_t = d_pos, t
+        if d_alt > worst_alt:
+            worst_alt, worst_alt_t = d_alt, t
+        if d_yaw > worst_yaw:
+            worst_yaw, worst_yaw_t = d_yaw, t
+    # Nothing compared is not agreement. A file with the wrong columns or no
+    # overlapping window would otherwise fall straight through to "OK".
+    if compared == 0:
+        print("  FAIL: no sample time is covered by both runs -- nothing was compared")
+        return 1
+    print(f"  compared at {compared} sample times")
+    # Millimetres, not centimetres: from identical initial conditions the two
+    # drivers agree to a few mm, and two decimals would print that as 0.00 --
+    # and would equally hide a constant offset that is an initial-condition
+    # difference rather than a divergence.
+    print(f"  initial position offset       {initial_pos:.3f} m (identical initial conditions give 0.000)")
+    print(f"  worst ground-track difference {worst_pos:.3f} m (t = {worst_pos_t:.0f} s)")
+    print(f"  worst altitude difference     {worst_alt:.3f} m (t = {worst_alt_t:.0f} s)")
+    print(f"  worst heading difference      {worst_yaw:.2e} deg (t = {worst_yaw_t:.0f} s)")
+    if worst_pos > position_tol_m:
+        print(f"  FAIL ground track: {worst_pos:.3f} m > {position_tol_m:.3f} m")
+        failures += 1
+    if worst_alt > alt_tol_m:
+        print(f"  FAIL altitude: {worst_alt:.3f} m > {alt_tol_m:.3f} m")
+        failures += 1
+    if worst_yaw > yaw_tol_deg:
+        print(f"  FAIL heading: {worst_yaw:.3e} deg > {yaw_tol_deg:.3e} deg")
+        failures += 1
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--truth", type=Path, default=Path("results/f16_truth.csv"),
+                        help="f16_trim_cosim's truth log")
+    parser.add_argument("--reference", type=Path, action="append", default=None,
+                        help="a published NESC Atmos_11 or Atmos_12 CSV; repeat for each participant solution")
+    parser.add_argument("--aetherion", type=Path, default=None,
+                        help="an Aetherion standalone run of the same case -- F16SteadyFlight or F16SupersonicTrim (SI, radians)")
+    # Tight on purpose. Against Aetherion >= 0.14.1 the two drivers of the same plant agree to a few mm and
+    # ~1e-7 deg; the looser defaults these replaced (50 m / 5 m / 0.01 deg) passed the sea-level-gravity trim
+    # bug that 0.14.1 fixed (5.97 m / 2.16 m / 5.5e-4 deg) on two of the three checks. Each default below
+    # still fails that bug by an order of magnitude or more.
+    parser.add_argument("--position-tol-m", type=float, default=1.0,
+                        help="ground-track tolerance against --aetherion (default 1 m over 34 km flown -- wide enough "
+                             "for the 0.49 m by which Aetherion's standalone examples round the published initial "
+                             "position, which shows up as a constant 'initial position offset')")
+    parser.add_argument("--alt-tol-m", type=float, default=0.05,
+                        help="altitude tolerance against --aetherion (default 0.05 m; measured agreement is ~3 mm)")
+    parser.add_argument("--yaw-tol-deg", type=float, default=1e-5,
+                        help="heading tolerance against --aetherion (default 1e-5 deg; measured ~2e-7)")
+    args = parser.parse_args()
+
+    if not args.reference and not args.aetherion:
+        parser.error("give at least one of --reference or --aetherion")
+
+    truth = read_truth(args.truth)
+    print(f"read {len(truth)} samples of {truth.name}")
+
+    # Sample once per 10 s rather than at every communication point: the tracks
+    # are smooth, and 21 comparisons that can each be printed beat 2001 that
+    # cannot.
+    end = min(200.0, truth.time[-1])
+    sample_times = [round(0.1 * i, 1) for i in range(0, int(end * 10) + 1, 100)]
+
+    failures = 0
+    if args.reference:
+        references = [read_reference(p) for p in args.reference]
+        failures += compare_to_envelope(truth, references, sample_times)
+    if args.aetherion:
+        failures += compare_to_aetherion(truth, read_aetherion(args.aetherion), sample_times,
+                                         args.position_tol_m, args.yaw_tol_deg, args.alt_tol_m)
+
+    print()
+    if failures:
+        print(f"FAILED: {failures} check(s)")
+        return 1
+    print("OK: every check passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

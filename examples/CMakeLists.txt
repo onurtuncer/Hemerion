@@ -8,7 +8,7 @@
 # CMAKE_CROSSCOMPILING. Same EXISTS-guarded foreach pattern as apps/CMakeLists.txt.
 # ------------------------------------------------------------------------------
 
-foreach(_hemerion_example rocket_gps_ecos)
+foreach(_hemerion_example rocket_gps_ecos f16_trim_ecos f16_autopilot_ecos)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_hemerion_example}/CMakeLists.txt")
     add_subdirectory("${_hemerion_example}")
   endif()

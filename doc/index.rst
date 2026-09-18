@@ -43,6 +43,8 @@ Flight Dynamics with Spatial Vector Algebra
    :caption: Co-simulation examples
 
    rocket_gps_ecos_cosim
+   f16_trim_ecos_cosim
+   f16_autopilot_ecos_cosim
 
 .. toctree::
    :maxdepth: 2
