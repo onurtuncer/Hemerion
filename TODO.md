@@ -162,6 +162,82 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
 
 ---
 
+## Sensor realism before the EKF is judged — what the figures showed
+
+The F-16 figures (PR #37) reproduce every number on the two doc pages, and in doing so show
+where the sensor chain is *too well-behaved* for a filter to be tuned against it. Ordered by
+how much each assumption currently flatters the EKF. The plant-side half — wind, Dryden
+turbulence, a non-standard atmosphere — is Aetherion's and is written up as
+`TODO-wind-turbulence-atmosphere.md` in that repo; everything below is Hemerion's, in
+`modules/sensors`, and can proceed in parallel with it.
+
+* **GPS errors are white per epoch, and the receiver reports the true sigma.**
+  `gpsNoiseModel.hpp:53–56` draws independent Gaussian N/E/D position, speed and course noise
+  every fix; `:105–106` fills `hAcc`/`vAcc` with the configured sigmas. White noise is the single
+  most flattering assumption a filter can be handed — it makes averaging work, and the rocket
+  page's `gps_error.png` shows the RMS landing exactly on the injected sigma because of it.
+  Real position error is first-order Gauss–Markov (multipath, ionosphere, ephemeris) with
+  tau ≈ 1–3 min. **Add:** GM on N/E/D (sigma ≈ 1.5/3 m, tau ≈ 100 s) over a small white floor,
+  the same on velocity; make `hAcc`/`vAcc` an *estimate* that is not the truth sigma (real
+  receivers are optimistic); 50–200 ms of NAV-PVT latency beyond the communication step. This
+  one first: it changes what the EKF's measurement model has to be more than anything else here.
+
+* **IMU biases are constant.** `imu_noise_model.h:60–64`: white noise + a per-run turn-on bias
+  + int16 quantisation, nothing else. A constant bias converges once and stops mattering, so
+  the filter's bias states are trivially observable. **Add:** rate random walk / bias
+  instability (consumer-MEMS class — gyro ~10 °/h per √h), ~0.1–0.5 % scale-factor error, a
+  small misalignment matrix. The last two only show in the 13.x manoeuvres, which is where the
+  EKF is exercised.
+
+* **IMU full scale is the rocket's, not the aircraft's.** `ImuScale{ 800.0F, 16.4F }` at
+  `imu_noise_model.h:64` is ±40 g / ±2000 °/s. On case 11 every true body rate is below one
+  count (p 0.70 LSB, q 0.32, r 0.39 at 0.061 °/s per count) and body-X specific force varies
+  by 0.82 of one count in 200 s — `case11_imu_body_rates.png` is a picture of quantisation
+  bands. A flight computer would program ±250–500 °/s and ±8–16 g; the real part has the
+  register. **Add:** range selection in the driver and the FMU (`ImuScale` per range), keep the
+  wide range for the rocket. At ±250 °/s the phugoid resolves at ~5 counts — still a phugoid in
+  dead calm, which is the Aetherion half of the fix; the two must not be conflated.
+
+* **Barometer: standard day in both the plant and the sensor.** `baro_noise_model.h` inverts
+  the ISA (`:154` onward); the plant's atmosphere is the US76, identical in the troposphere. So
+  pressure altitude ≡ geometric altitude to within the model's 30 Pa turn-on bias
+  (`bmp390_measurement_model.h:82`), which is what the ~1 m residuals on both altitude figures
+  are. On a real day it is off by hundreds of feet, and that is the actual reason to fuse baro
+  with GPS. **Add, as a stopgap until the plant publishes `out.p_static_Pa`:** `deltaT_K` and
+  `deltaP_sl_Pa` parameters on the BMP390 FMU. Inconsistent with the plant's density (airspeed,
+  thrust) — the note in Aetherion says why the correct place is the plant — but it makes the
+  barometer what it is in reality: a superb *relative* altitude and a poor *absolute* one.
+
+* **Magnetometer: a dipole field and hard iron only.** `geomagnetic_field.hpp:109–113` is a
+  centred tilted dipole; its declination at Kitty Hawk is +0.69° where the real field's is
+  about −11°. Harmless while the simulation is its own truth (the heading figure's 5.33°
+  residual is the modelled hard iron, `mmc5983ma_measurement_model.h:70`, and is predicted to
+  0.17°), wrong the moment the EKF carries a declination table. And with hard iron alone, an
+  in-flight magnetic calibration is a trivial offset fit. **Add:** WMM or IGRF coefficients in
+  place of the single dipole term (the header already says this is what a real site needs); a
+  soft-iron matrix (3×3, near identity) in the measurement model, since that is what a
+  calibration actually has to solve for.
+
+* **Radar altimeter: fed MSL as AGL, no attitude term.** `radalt_noise_model.h:54–55` is 0.1 m
+  noise on a 5 cm bias, quantised; the host wires `f16::out.alt_m → radalt::h_agl_m` because
+  there is no terrain. At the bank angles in 13.3/13.4 a ±20° beam reads slant range or loses
+  the ground. **Add:** terrain (a constant elevation with a little roughness is enough to make
+  the point), a bank-angle dropout, and a cos(roll)·cos(pitch) slant term on the host side.
+
+* **Sensor timing is exact and phase-locked.** `sensor_cadence.png` shows 100.00 / 40.00 /
+  10.00 ms intervals with zero jitter, because every FMU steps on the master's clock. Real
+  sensors run on their own oscillators with drift and jitter, and the flight computer stamps
+  on arrival. **Add:** per-sensor clock skew and jitter in the FMUs, arrival-time stamping in the
+  flight computer. This is what forces delayed-measurement handling in the filter, and it is
+  the one item here that also changes the flight software.
+
+* **Where to start:** correlated GPS (Hemerion) and turbulence + wind (Aetherion) in parallel —
+  together they change what the EKF is tuned against more than everything else combined. Then
+  IMU bias walk and the barometer stopgap. The rest as the filter grows the states that need
+  them.
+
+---
+
 ## Smaller loose ends
 
 * **`E1126` is disabled in `.cmake-format`.** cmakelang 0.6.13 predates
