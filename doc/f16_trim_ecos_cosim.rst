@@ -204,7 +204,8 @@ Case 12: the flight the sensors cannot follow
 ---------------------------------------------
 
 ``./f16_trim_cosim --case 12`` — no other change. Measured over a full 200 s
-run:
+paced run (``--rtf 1``), the same run the figures at the foot of this page are
+drawn from:
 
 .. list-table::
    :header-rows: 1
@@ -231,16 +232,18 @@ run:
        working and has nothing to say — and ``valid`` is a CSV column rather
        than a filter precisely so this record is not an empty file.
    * - BMP390
-     - **253 of 286 conversions below the part's 300 hPa rated pressure
-       floor** (minimum 290.9 hPa), with the die at **−45.9 °C, below its
-       −40 °C rating** (the FMU uses ambient air as die temperature). The
-       part model saturates only at the ADC rails, so the out-of-rating
-       conversions read plausibly — as on the real silicon, which offers no
-       out-of-rating indication either. The FMU adds the side channel the
-       part cannot: its ``conversions`` / ``conversions_out_of_rating`` FMI
-       outputs count the violation (the host prints them in its summary),
-       and each envelope crossing is debug-logged once with the offending
-       value.
+     - **709 of 768 conversions below the part's 300 hPa rated pressure
+       floor** (minimum 291.2 hPa), and **all 768 with the die below its
+       −40 °C rating** — it sits at −45.7 °C, since the FMU drives die
+       temperature with ambient air. The part model saturates only at the ADC
+       rails, so the out-of-rating conversions read plausibly — as on the real
+       silicon, which offers no out-of-rating indication either. The FMU adds
+       the side channel the part cannot: its ``conversions`` /
+       ``conversions_out_of_rating`` FMI outputs count the violation (the host
+       prints them in its summary), and each envelope crossing is debug-logged
+       once with the offending value. These two counts are the ones that move
+       with pacing: unpaced, the same flight yields 286 conversions and the
+       same proportions.
    * - magnetometer, IMU
      - In band. On this flight they are all the sensor fusion has left.
 
@@ -348,3 +351,233 @@ Neither check looks only at altitude. On straight-and-level flight altitude
 is nearly constant, so an altitude-only comparison passes for a vehicle that
 flew a circle at the right height. Ground track and heading carry the
 information.
+
+Results
+-------
+
+``plot_results.py`` (matplotlib) renders the six CSVs — the host's truth log
+and the flight computer's five decoded-sensor logs — into seven figures per
+check-case:
+
+.. code-block:: console
+
+   $ python plot_results.py \
+       --truth results/f16_truth.csv \
+       --reference <aetherion>/data/Atmos_11_TrimCheckSubsonicF16/Atmos_11_sim_02.csv \
+       --reference <aetherion>/data/Atmos_11_TrimCheckSubsonicF16/Atmos_11_sim_04.csv \
+       --reference <aetherion>/data/Atmos_11_TrimCheckSubsonicF16/Atmos_11_sim_05.csv
+   # reads results/, writes plots/case11_*.png
+
+Filenames carry the check-case, read from the ``.config`` sidecar
+``f16_trim_cosim`` writes beside the truth log, so a case-11 and a case-12 run
+fill one directory instead of overwriting each other. That prefix is doing
+real work here: the two cases produce figures identical in *form* and opposite
+in *content*, and a PNG separated from its caption has nothing else to say
+which flight it came from. Every figure is stamped at the foot with the
+check-case, the flight condition, the receiver configuration and whether the
+run was paced.
+
+**All figures below are from paced runs** (``--rtf 1``). Unpaced, 200 s of
+flight yields about 37 barometer conversions against the 896 here, and the
+altitude- and heading-consistency figures become a scatter of dots through
+which no trace can be read. The GPS, IMU and radar-altimeter figures are
+unaffected either way — their data queues in a socket or a FIFO — which is why
+the barometer is the only stack whose counts move with the pacing. The case-12
+table above is measured on the same paced run as these figures.
+
+Check-case 11: the cross-sensor reference
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. figure:: _static/f16_trim_ecos/case11_ground_track.png
+   :width: 100%
+   :alt: Two panels — a straight 34.5 km ground track at true aspect ratio, and cross-track departure growing to -369 m over the same distance with the GPS fixes scattered about it
+
+   The flyout, and the departure the flyout cannot show. At true aspect ratio
+   (left) an open-loop trim flyout is a straight line: 34.5 km on a 45°
+   heading, and drawing the 2001 decoded fixes on top of it would be a lie of
+   resolution, since 1.5 m of injected horizontal noise sits inside the width
+   of the line itself.
+
+   The right panel is the same flight with the commanded heading rotated out:
+   cross-track departure in metres against kilometres flown. The aircraft is
+   asked to hold 45° and the phugoid turns it, reaching **−369 m by cut-off**
+   — and *this* is the quantity the published participants disagree about. It
+   is also the scale at which the receiver's error is finally visible as what
+   it is: a metre-scale scatter about a track that departs by hundreds.
+
+.. figure:: _static/f16_trim_ecos/case11_altitude_consistency.png
+   :width: 100%
+   :alt: Upper panel, four altitude traces following one phugoid from 3052 to 3083 m; lower panel, their residuals against truth — GPS scattered over ±10 m, barometer a tight band near +1.3 m, radar altimeter flat on zero
+
+   The figure check-case 11 exists for. Barometric altitude, GNSS altitude and
+   radar height are three physically unrelated measurements — a pressure, a
+   set of ranging solutions, a time of flight to the ground — and a filter that
+   is going to trust their agreement should be shown that agreement first, on a
+   flight where all three are valid for all 200 s.
+
+   The lower panel is the content, and the three error *characters* are the
+   point rather than the three magnitudes:
+
+   * **GPS is noise.** Mean −0.08 m, RMS 3.07 m over 2001 fixes — which is
+     ``GpsNoiseConfig``'s 3 m vertical 1-sigma recovered end to end, through
+     the UBX encoder, the socket and the parser, with nothing added.
+   * **The barometer is bias.** Mean **+1.32 m**, RMS 1.36 m: the scatter is
+     almost all offset. In pressure it is a constant −11.7 Pa with 3.1 Pa of
+     scatter — the BMP390 model's per-run turn-on offset (30 Pa 1-sigma, drawn
+     once) sitting on its datasheet noise floor, read through the ISA at
+     0.904 kg/m³. No amount of averaging removes it; only a reference pressure
+     does.
+   * **The radar altimeter is the noise floor.** RMS 0.123 m about a mean of
+     −0.07 m — the model's 0.1 m range noise on its 5 cm turn-on bias, then
+     quantised. It is the most accurate altitude on the page and the least
+     useful on its own, since it measures height above terrain that this
+     scenario does not model.
+
+.. figure:: _static/f16_trim_ecos/case11_heading_consistency.png
+   :width: 100%
+   :alt: Upper panel, three heading traces — truth yaw drifting 45 to 43.8 degrees, GPS course scattered about it, magnetic heading offset five degrees above; lower panel, the residuals, with the magnetometer's a tight band at +5.3 degrees
+
+   The second half of the cross-sensor claim, and the harder half. Recovering
+   a heading from a magnetometer needs the aircraft's own tilt and the local
+   declination; both are taken from the simulation here — truth roll and
+   pitch, and the declination of the same centred dipole the host drove the
+   FMU with — because the question is whether the *sensor chain* preserves
+   heading, not whether an attitude filter can be built.
+
+   **The magnetometer is 5.3° off, and it is supposed to be.** The MMC5983MA
+   model draws a hard-iron offset once per run, 1 µT 1-sigma per axis, on top
+   of the bridge offset. The bridge offset is what a SET/RESET pair cancels,
+   and the driver's bring-up calibration duly removes it — the residual here is
+   what SET/RESET *cannot* touch, because hard iron is a real field the
+   installation adds rather than an electrical null error.
+
+   The figure measures that offset from the run rather than asserting it. The
+   mean of (decoded − truth field) is **−1.93 / −0.86 / −0.28 µT**, which
+   against this site's 21.9 µT horizontal field predicts **5.50°** of heading
+   error; the observed residual is **5.33°**. Those two numbers agreeing is
+   the check that the tilt compensation above is right, and the reason the
+   remaining 0.17° can be read as geometry rather than as a decoding fault.
+
+   The consequence for ``modules/gnc`` is the whole point: raw magnetic
+   heading is not a heading reference. The bias is constant, observable, and
+   exactly the kind of state an EKF is supposed to estimate — which is what
+   makes case 11 the flight to judge it on. GPS course, meanwhile, is not yaw
+   at all (it is where the velocity vector points, not the nose), and its
+   residual is the noise plus the sideslip, not an error.
+
+.. figure:: _static/f16_trim_ecos/case11_imu_specific_force.png
+   :width: 100%
+   :alt: Upper panel, body X and Y specific force with the decoded samples in a band around flat truth lines; lower panel, body Z showing a clear phugoid sine riding through discrete quantisation levels
+
+   Specific force, split by scale because one axis cannot carry both: body Z
+   sits near −9.8 m/s² holding the aircraft up while X and Y live within
+   hundredths of zero, and drawn together the lateral and forward channels
+   collapse onto a line.
+
+   The upper panel is the honest result. One accelerometer count is
+   **0.0123 m/s²**, and the entire body-X excursion over 200 s of flight is
+   **0.0101 m/s² — 0.82 of one count**. The forward channel of this IMU cannot
+   see the phugoid at all; what varies in that band is the noise model, not the
+   aircraft. The lower panel is the counter-case: body Z moves about nine
+   counts, and the phugoid is plainly there, riding visibly through the
+   discrete levels.
+
+.. figure:: _static/f16_trim_ecos/case11_imu_body_rates.png
+   :width: 100%
+   :alt: Decoded gyro samples lying on discrete horizontal bands roughly 0.001 rad/s apart, with the three truth rate traces running flat through the middle band
+
+   This figure looks broken and is not. The decoded samples lie on discrete
+   bands because the gyroscope is a 16-bit part at ±2000 °/s — one count is
+   **0.0610 °/s** — and on an open-loop trim flyout *every body rate the
+   aircraft actually has is smaller than one count*. The largest truth rate
+   over the whole flight is 0.0426 °/s, **0.70 of a count**; the truth traces
+   run through the middle of the zero band, and the banding above and below is
+   the noise model being quantised, not motion.
+
+   It earns a figure of its own for what it rules out. A filter cannot
+   integrate these rates into an attitude on this flight — the signal is below
+   the sensor's resolution, so dead reckoning has nothing to work with, and
+   heading has to come from the magnetometer and the receiver instead. That is
+   the argument for the two consistency figures above, made by the sensor that
+   fails to make it.
+
+.. figure:: _static/f16_trim_ecos/case11_nesc_envelope.png
+   :width: 100%
+   :alt: Altitude and yaw against time with the published participants drawn as three dashed lines and the spread between them shaded, this run's trace outside the band on both panels, and a marker at t=180 s past which only one reference continues
+
+   This run against the published participant solutions — a sanity bound, not
+   a precision test, and the figure is drawn to make that unmistakable. The
+   shaded band is the spread *between the published solutions*: where it is
+   narrow the participants agree and a deviation means something, and where it
+   is wide they do not and it does not.
+
+   On altitude the band is wide by t = 100 s, and this run sits above it,
+   drifting +31.4 m through its phugoid where ``sim_04`` and ``sim_05`` hold
+   altitude to a tenth of a foot. On heading the participants disagree about
+   the *direction* of the drift, and this run turns −1.16° — ``sim_02``'s way,
+   past ``sim_02``. Both are the open Aetherion-side trim question of the case
+   sections above, showing up in the flyout.
+
+   The band stops before the plot does, and is marked where it stops. Only
+   ``sim_02`` reaches t = 200 s; a verifier that compares nothing but the times
+   every reference covers leaves the last 20 s silently unchecked and still
+   prints OK.
+
+Check-case 12: three stacks outside their envelopes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. figure:: _static/f16_trim_ecos/case12_sensor_envelopes.png
+   :width: 100%
+   :alt: Four stacked panels — ground speed above both GPS limits with the whole flight shaded as no-fix, radar height at 9.2 km far above the 6000 m tracking range and entirely shaded, barometer pressure below the 300 hPa rated floor, and die temperature below the -40 C floor
+
+   The whole difference between the two check-cases, in one figure. Each panel
+   puts a stack against the limit that bounds it; on case 11 every trace sits
+   clear of its line for 200 s, and here three of the four are on the wrong
+   side of it from the first epoch — **while every part keeps talking**. That
+   distinction is what the example is built to make: an envelope violation is
+   not a silent bus, and none of these figures is an empty file.
+
+   * **GPS: 0 of 2001 epochs carried a fix.** 610 m/s is past the airborne
+     <4 g platform model's 500 m/s bound from the very first epoch. The
+     receiver keeps emitting one NAV-PVT per epoch throughout, ``gnssFixOK``
+     clear, no position in the payload.
+   * **COCOM is an AND, and this is the flight that proves it.** The speed
+     threshold (515 m/s, dotted) is exceeded and the altitude threshold is
+     not — the grey dotted trace holds 9366 m against an 18 000 m bound. An
+     OR receiver would have lost the fix to COCOM here; this one does not, and
+     what takes the fix is the platform model instead. The rocket scenario
+     crosses both thresholds within seconds of each other and cannot tell the
+     two apart.
+   * **Radar altimeter: 0 of 6003 returns found the ground.** 9.2 km is half
+     again the part's 6000 m tracking range. It keeps reporting — a sensor
+     that is working and has nothing to say — which is why ``valid`` is a CSV
+     column rather than a filter.
+   * **BMP390: 709 of 768 conversions below the rated 300 hPa floor**
+     (minimum 291.2 hPa), with the die at −45.7 °C for **all 768**, below its
+     −40 °C rating. The part model saturates only at the ADC rails, so the
+     out-of-rating conversions read plausibly — as they would on real silicon,
+     which offers no out-of-rating indication either. The FMU supplies the side
+     channel the part cannot: ``conversions_out_of_rating`` counts the
+     violation on an FMI output.
+
+.. figure:: _static/f16_trim_ecos/case12_altitude_consistency.png
+   :width: 100%
+   :alt: The same altitude figure as case 11 but with only one trace — the barometer — over a full-width no-fix wash, and a residual panel showing a -4.6 m bias
+
+   The same figure as the case-11 altitude comparison, on the flight where
+   there is nothing to compare. The no-fix wash runs the full width, the radar
+   altimeter contributes nothing, and **one of the four altitude sources
+   survives** — the barometer, running 700 conversions below the pressure its
+   part is rated for.
+
+   Its residual is worth reading rather than dismissing. The bias is
+   **−4.56 m** here against +1.32 m on case 11, and it is still a bias: RMS
+   4.61 m against a mean of −4.56, so the scatter is almost entirely offset.
+   In pressure it is +20.2 Pa with the same 3 Pa of scatter — a fresh draw of
+   the model's 30 Pa turn-on offset, since every run draws its own. What the
+   flight changes is the exchange rate: at 9.2 km the air is 0.458 kg/m³,
+   half of case 11's, so **the same pressure error buys twice the altitude**.
+   The sensor has not become noisy outside its rating; a barometer's fixed
+   pressure error is simply worth more metres the higher it flies. A fusion
+   filter given this stack alone on this flight would hold altitude
+   confidently, and hold it four and a half metres low.

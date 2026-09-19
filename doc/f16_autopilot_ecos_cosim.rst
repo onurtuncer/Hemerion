@@ -214,3 +214,148 @@ Configure reads the ports this example binds out of both archives rather
 than trusting a version string. The 0.14.1 autopilot FMU exposes **no
 parameters** — ``circlePoleSW`` is baked off, which is why NESC cases 15 and
 16 (the circumnavigations) are not rows in the ``--case`` table.
+
+Results
+-------
+
+``plot_results.py`` (matplotlib) renders these four figures. Unlike the trim
+example's script it reads **all four runs at once**, because the four
+check-cases are one experiment — same aircraft, same controller, same loop,
+exactly one command moved — and the figures that say anything are the ones
+that put them side by side:
+
+.. code-block:: console
+
+   $ python plot_results.py --run results/case13p1 --run results/case13p2 \
+         --run results/case13p3 --run results/case13p4 \
+         --nesc-data <aetherion>/data
+   # writes plots/
+
+The participant solutions are located from each run's check-case, so there is
+no per-case ``--reference`` list to keep in step with the run list, and the
+commanded values and their step times are read from the ``.config`` sidecar
+rather than retyped — every response panel draws its own cause.
+
+**These runs are unpaced, and that is the right configuration here.** The trim
+example needs ``--rtf 1`` because it steps at 10 Hz and finishes far faster
+than wall clock, starving the polled I2C parts. This example steps at 100 Hz
+and is the slower of the two by a wide margin: measured, it advances about
+**0.15 s of flight per wall-clock second**, so ``--rtf 1`` cannot bind and
+would only mislabel the run. The polled parts are the beneficiaries — check
+case 13.3 yields 9705 barometer conversions over its 240 s window, about
+40 per second of flight against the trim example's 4.5 in a *paced* run.
+The 240 s cases take roughly half an hour each; a wall-clock cap on the flight
+computer below that truncates its sensor logs while leaving the truth log
+looking complete.
+
+.. figure:: _static/f16_autopilot_ecos/case_responses.png
+   :width: 100%
+   :alt: Four panels, one per check-case — altitude stepping to 10 113 ft, KEAS to 277 kt, heading to 60 degrees and lateral deviation to 2000 ft, each with the commanded value dashed and three participant solutions riding the trace
+
+   The page's results table, drawn. Each panel plots the quantity its case is
+   judged on, with the commanded value and its step time taken from the run's
+   own sidecar, and the three published participants over the top.
+
+   The participants are drawn individually rather than as a shaded envelope,
+   and they are drawn *over* this run rather than under it. On 13.1 and 13.4
+   the agreement is within the width of a line, so whichever went down last
+   would be the only one visible; thin dashes riding the trace read as
+   agreement, where a missing grey line reads as a missing reference. On 13.2
+   the opposite is true and the envelope would have hidden it: ``sim_02``
+   reaches 277.0 kt as this run does, while ``sim_04`` and ``sim_05`` are
+   still at 283 kt when their windows end. The deceleration authority
+   separates the published solutions, which is why the verifier accepts
+   275–285.5 kt rather than asserting the command was met.
+
+   Measured at cut-off: **10 113.5 ft** (+2.83 ft over the command at t = 10 s,
+   peaking +8.6 ft at t = 11.6 s and settled within half a foot by t = 19.5 s),
+   **277.0 kt**, **60.04°** and **2000.1 ft**. Heading here is Euler yaw, not
+   course over ground — the command is a course command and the two differ by
+   the sideslip, about 0.03° — because yaw is what ``verify_trajectory.py``
+   asserts and what this page's tables quote, and one quantity measured three
+   ways is how a figure comes to disagree with its own caption.
+
+   Two details the panels make visible that the table cannot. 13.3's heading
+   dips to **42.0° at t = 15.4 s** — the wrong way by three degrees — before
+   the turn takes. That is adverse yaw at turn entry, not a defect: all three
+   participants do the same thing, bottoming out between 41.6° and 42.3°, and
+   this run sits inside their spread. And 13.3's reference windows are unequal
+   in the opposite direction from the trim cases: ``sim_02`` and ``sim_04``
+   stop at t = 30 s while ``sim_05`` runs to 239.9 s.
+
+.. figure:: _static/f16_autopilot_ecos/hold_quantities.png
+   :width: 100%
+   :alt: Four panels showing, for each case, the two or three quantities it was not commanded, plotted as departure from their trim values — all returning to within a foot, a tenth of a knot and a twentieth of a degree
+
+   What each case had to hold while it manoeuvred — the half of a closed-loop
+   check-case that the commanded response cannot carry. An altitude step flown
+   by rolling into a turn would sit on the commanded line and still be wrong.
+
+   Each panel plots everything its case did *not* step, as departure from
+   where that quantity started, and which quantities those are is read off the
+   same sidecar the response figure draws its steps from rather than listed
+   twice. That includes heading on 13.4: a side-step flown by turning and
+   staying turned would reach the commanded offset and be wrong in exactly the
+   way this panel would show. It does not — heading swings **+14.0°** to
+   translate the aircraft and comes back to **+0.04°**, which is what a
+   side-step is.
+
+   The worst departures over the four cases are 6.9 ft of altitude (13.2,
+   during the deceleration), 0.7 kt of KEAS (13.1, a single-sample transient
+   at the step) and 0.1° of heading outside 13.4's deliberate excursion. The
+   y-axis carries a different unit per series, named in each legend entry:
+   these are three different quantities held at once, and the figure is about
+   whether each returned, not about comparing feet against knots.
+
+.. figure:: _static/f16_autopilot_ecos/case13p4_lateral_offset.png
+   :width: 100%
+   :alt: Upper panel, lateral deviation rising to 2000 ft with the participants and a marker at t=60 s; lower panel, cmd.latOffset_ft stepping to -2000 ft and decaying to zero, with a thick grey recomputed trace exactly underneath it
+
+   Check-case 13.4's ``cmd.latOffset_ft``, the one signal in this loop that is
+   **feedback rather than a setpoint**. Every other command the host writes and
+   forgets; this one it computes every step, from where the aircraft is now
+   and where it began, because the controller is fed ``deviation − commanded
+   step`` and the plant cannot publish that — it depends on the flight's own
+   starting point.
+
+   The lower panel is the check. The crimson trace is ``cmd.latOffset_ft``
+   read back out of the truth log — what the controller was actually handed —
+   and the thick grey trace under it is the deviation minus the commanded step
+   recomputed here from position. They coincide, which is what says the host's
+   feedback path is wired the way the standalone's is, on the flat-earth
+   formula the standalone uses (R = 6 371 000 m about the initial position).
+   It steps to −2000 ft at t = 20 s and decays to zero as the aircraft earns
+   the offset.
+
+   The upper panel is why the verifier judges this case at **t = 60 s**, where
+   this run reads 1982 ft against the participants' 1934–1992 ft. Past that
+   the flat-earth formula drifts out of its own validity — ``sim_05`` reads
+   1817 ft at 239.9 s, visibly peeling away — and a run judged there would be
+   judged on the formula's error rather than the aircraft's.
+
+.. figure:: _static/f16_autopilot_ecos/sensor_cadence.png
+   :width: 100%
+   :alt: Five stacked panels of sample interval against time — GPS flat at 100 ms, radar altimeter at 40 ms, IMU at 10 ms, and the two I2C parts scattered across bands at multiples of 10 ms
+
+   The two-rate scheme, measured rather than asserted. The plant and the
+   autopilot run at 100 Hz because the control loop needs it; the sensors do
+   not follow them down, and Ecos' per-instance step-size hint is what holds
+   them apart. This is the evidence the hints did what they were for, over
+   check-case 13.3's 240 s window:
+
+   * GPS — 2401 samples, mean interval **100.00 ms**. Exactly 10 Hz.
+   * radar altimeter — 6001 samples, **40.00 ms**. Exactly 25 Hz.
+   * IMU — 24000 samples, **10.00 ms**. Exactly one frame per base step.
+
+   The three hinted rows are flat lines, which is the result; their axes are
+   pinned to ±20 % of the mean, because an auto-scaled constant is a picture of
+   numerical dust.
+
+   The two I2C rows are the interesting ones. They carry no hint at all — a
+   BMP390 data register is not a FIFO, so their rate is whatever the flight
+   computer's poll loop achieves — and their intervals are a scatter rather
+   than a line, averaging 24.73 ms and 25.84 ms. The scatter has structure: it
+   lands on bands at multiples of the 10 ms base step, because a polled part
+   only has something new to say once the master has stepped it. That is the
+   whole reason the trim example's figures come from paced runs, and the
+   reason these do not need to be.
