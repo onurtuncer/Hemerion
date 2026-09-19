@@ -5,7 +5,7 @@ verified, so nobody repeats it, and what specifically remains.
 
 ---
 
-## F-16 NESC check-cases — branch `examples/aetherion-specific-force` (not merged)
+## F-16 NESC check-cases — on `main` (PR #36, merge 392e5c6)
 
 Second and third virtually instrumented cases before the EKF in `modules/gnc`. Needs an Aetherion
 **≥ 0.14.0** install (0.14.1 is what was verified against; `F16Plant`/`F16Autopilot`/`TwoStageRocket`
@@ -136,8 +136,29 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   size). Case 12 is a second data point for testing it — Eötvös and curvature grow with v and v² — but
   needs the alpha-per-weight sensitivity at Mach 2 first. Not yet written up for Aetherion.
 
+* **Documentation figures — done (2026-09-19).** `plot_results.py` in both examples, and a
+  `Results` section on each doc page: 7 figures per check-case for the trim example
+  (`doc/_static/f16_trim_ecos/`, 8 embedded), 4 for the autopilot one
+  (`doc/_static/f16_autopilot_ecos/`). Every caption number is measured from the run behind the
+  figure, and all of them reproduce what the pages already claimed. Three things the figures
+  surfaced that the prose did not have:
+
+  - **The magnetometer's 5.3° heading bias is the hard iron, by design.** `Mmc5983maMeasurementConfig`
+    draws it once per run at 1 µT/axis on top of the bridge offset; SET/RESET cancels the bridge
+    offset and *cannot* touch hard iron. Measured from the run as −1.93/−0.86/−0.28 µT, which against
+    the 21.9 µT horizontal field predicts 5.50° against 5.33° observed. Raw magnetic heading is not a
+    heading reference — this is a state the EKF has to estimate.
+  - **Every body rate on the trim flyout is below one gyro count** (p 0.70 LSB, q 0.32, r 0.39 at
+    0.061 °/s per count), and body-X specific force varies by 0.82 of one accelerometer count over
+    200 s. Dead reckoning has nothing to work with on case 11; heading must come from the
+    magnetometer and the receiver.
+  - **The autopilot example must run unpaced.** At a 0.01 s base step it advances 0.149 s of flight
+    per wall-clock second, so `--rtf 1` cannot bind — and the polled I2C parts are the beneficiaries
+    (40.4 baro conversions per second of flight against 4.5 in the trim example's *paced* runs). The
+    240 s cases take ~27 min each; a flight-computer `--max-wall-s` below that truncates the sensor
+    logs while leaving the truth log looking complete.
+
 * **Then:** the EKF itself, judged on case 11, degraded-mode on case 12, exercised by 13.3/13.4.
-  (The PR for this branch is open.)
 
 ---
 
