@@ -598,8 +598,9 @@ def plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
     agreement first, on a flight where all three are valid. The lower panel is
     the actual content: each stack's residual against plant truth, on one
     scale, so their very different error characters are comparable. The
-    barometer's offset is bias (the ISA is not the atmosphere the plant
-    integrates), the GPS's is noise, and the radar altimeter's is quantisation.
+    barometer's offset is bias (the BMP390 model's per-run turn-on pressure
+    offset, read through the ISA), the GPS's is noise, and the radar
+    altimeter's is quantisation.
 
     On check-case 12 the same figure draws the opposite result, which is why it
     is not gated on the case: the GPS trace disappears into a full-width no-fix

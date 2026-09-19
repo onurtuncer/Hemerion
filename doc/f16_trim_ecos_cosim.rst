@@ -422,13 +422,16 @@ Check-case 11: the cross-sensor reference
      ``GpsNoiseConfig``'s 3 m vertical 1-sigma recovered end to end, through
      the UBX encoder, the socket and the parser, with nothing added.
    * **The barometer is bias.** Mean **+1.32 m**, RMS 1.36 m: the scatter is
-     almost all offset. The ISA is not the atmosphere the plant integrates,
-     and a pressure altimeter reads the difference. No amount of averaging
-     removes it; only a reference pressure does.
-   * **The radar altimeter is quantisation.** RMS 0.123 m about a mean of
-     −0.07 m — the part's range LSB, and nothing else. It is the most accurate
-     altitude on the page and the least useful on its own, since it measures
-     height above terrain that this scenario does not model.
+     almost all offset. In pressure it is a constant −11.7 Pa with 3.1 Pa of
+     scatter — the BMP390 model's per-run turn-on offset (30 Pa 1-sigma, drawn
+     once) sitting on its datasheet noise floor, read through the ISA at
+     0.904 kg/m³. No amount of averaging removes it; only a reference pressure
+     does.
+   * **The radar altimeter is the noise floor.** RMS 0.123 m about a mean of
+     −0.07 m — the model's 0.1 m range noise on its 5 cm turn-on bias, then
+     quantised. It is the most accurate altitude on the page and the least
+     useful on its own, since it measures height above terrain that this
+     scenario does not model.
 
 .. figure:: _static/f16_trim_ecos/case11_heading_consistency.png
    :width: 100%
@@ -567,11 +570,14 @@ Check-case 12: three stacks outside their envelopes
    survives** — the barometer, running 700 conversions below the pressure its
    part is rated for.
 
-   Its residual is worth reading rather than dismissing. The bias moves from
-   +1.32 m on case 11 to **−4.56 m** here, and it is still a bias: RMS 4.61 m
-   against a mean of −4.56, so the scatter is almost entirely offset. The
-   sensor has not become noisy outside its rating; it has become *wrong*, in
-   the one way a barometric altimeter is always wrong — the ISA and the
-   atmosphere the plant integrates diverge further at 9 km than at 3 km. A
-   fusion filter given this stack alone on this flight would hold altitude
+   Its residual is worth reading rather than dismissing. The bias is
+   **−4.56 m** here against +1.32 m on case 11, and it is still a bias: RMS
+   4.61 m against a mean of −4.56, so the scatter is almost entirely offset.
+   In pressure it is +20.2 Pa with the same 3 Pa of scatter — a fresh draw of
+   the model's 30 Pa turn-on offset, since every run draws its own. What the
+   flight changes is the exchange rate: at 9.2 km the air is 0.458 kg/m³,
+   half of case 11's, so **the same pressure error buys twice the altitude**.
+   The sensor has not become noisy outside its rating; a barometer's fixed
+   pressure error is simply worth more metres the higher it flies. A fusion
+   filter given this stack alone on this flight would hold altitude
    confidently, and hold it four and a half metres low.
