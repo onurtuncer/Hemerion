@@ -306,7 +306,21 @@ bool parse_args(int argc, char** argv, Options& options)
       print_usage();
       return false;
     }
-    option->apply(options, argv[++i]);
+    // A value the option cannot take -- a word where a number was expected,
+    // a model name that is not one -- is a usage error, not a crash: the
+    // table's lambdas throw (std::stoi/stod on their own, --gps-errors
+    // deliberately), and an exception escaping here would terminate the
+    // process with no message at all.
+    try
+    {
+      option->apply(options, argv[++i]);
+    }
+    catch (const std::exception& ex)
+    {
+      std::cerr << "bad value for " << arg << ": " << ex.what() << "\n";
+      print_usage();
+      return false;
+    }
   }
   return true;
 }
