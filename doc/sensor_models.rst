@@ -177,7 +177,10 @@ be undefined behavior).
 **Reproducibility.** Every model constructor takes an RNG seed, defaulting
 to a nondeterministic ``std::random_device`` draw. Pass a fixed seed for
 bit-identical runs; the turn-on biases are drawn from that same stream at
-construction, so seed + config fully determine the output sequence.
+construction, so seed + config fully determine the output sequence. The GPS
+FMU exposes its seed as a parameter (``seed``, and the examples'
+``--gps-seed``); the other FMUs do not yet, and every run of them is a fresh
+part.
 
 GPS receiver model
 ------------------
@@ -188,6 +191,27 @@ GPS receiver model
 receiver outputs a navigation solution, not register counts — producing a
 ``GpsFix`` that looks like it came from a u-blox M9N in open sky, which
 ``UbxEmitter`` then encodes as a wire-exact UBX-NAV-PVT frame.
+
+Each channel's error is the sum of two terms: a **white** per-epoch draw, and
+a **time-correlated** first-order Gauss–Markov process,
+
+.. math::
+
+   x[k] \;=\; \phi\, x[k-1] \;+\; \sigma_c \sqrt{1 - \phi^2}\; w[k],
+   \qquad \phi = e^{-\Delta t / \tau}
+
+with stationary 1-sigma :math:`\sigma_c` and correlation time :math:`\tau`,
+started from its stationary distribution so the first fix is as wrong as any
+other. Position carries one :math:`\tau` (minutes — multipath, the
+ionospheric and tropospheric residuals and the broadcast ephemeris all change
+that slowly) and velocity a shorter one (seconds — velocity comes from
+Doppler and decorrelates fast). A receiver's position error is not white, and
+the difference is the whole of what a fusion filter can do with a fix: a
+white error averages away over ten epochs, a correlated one does not, and a
+filter that treats the second as the first is confidently wrong by exactly
+the correlated share. **The correlated terms default to zero**, which is the
+model as it was before they existed; the realistic receiver is opt-in through
+the examples' ``--gps-errors correlated`` (table below).
 
 Horizontal noise is drawn independently in local north/east metres and
 converted to degrees with a flat-Earth approximation:
@@ -201,8 +225,11 @@ converted to degrees with a flat-Earth approximation:
 adequate for a sensor noise model, not a navigation-grade datum transform.
 Ground speed is floored at zero after perturbation; course is wrapped into
 [0°, 360°). The receiver's *self-reported* accuracy fields
-(``hAcc``/``vAcc`` in NAV-PVT) are filled with the configured 1-sigma
-values — so the flight software sees an honest receiver.
+(``hAcc``/``vAcc`` in NAV-PVT) carry the total 1-sigma — white and
+correlated in quadrature — times ``accuracy_scale``: 1.0 is an honest
+receiver, and real ones run optimistic, reporting 50–80 % of the error they
+make. A filter that weights fixes by the reported accuracy under-weights the
+truth by that ratio, which is the point of modelling it.
 
 .. list-table:: ``GpsNoiseConfig`` defaults (u-blox M9N, open sky)
    :header-rows: 1
@@ -223,12 +250,77 @@ values — so the flight software sees an honest receiver.
    * - ``course_noise_deg``
      - 1.0°
      - 1-sigma course noise
+   * - ``horizontal_pos_correlated_m``
+     - 0 (off)
+     - Gauss–Markov stationary 1-sigma, north and east
+   * - ``vertical_pos_correlated_m``
+     - 0 (off)
+     - Gauss–Markov stationary 1-sigma, altitude
+   * - ``position_correlation_time_s``
+     - 100 s
+     - :math:`\tau` for the three position channels
+   * - ``speed_correlated_mps``
+     - 0 (off)
+     - Gauss–Markov stationary 1-sigma, speed over ground
+   * - ``course_correlated_deg``
+     - 0 (off)
+     - Gauss–Markov stationary 1-sigma, course
+   * - ``velocity_correlation_time_s``
+     - 10 s
+     - :math:`\tau` for speed and course
+   * - ``accuracy_scale``
+     - 1.0
+     - reported ``hAcc``/``vAcc`` as a multiple of the true total 1-sigma
    * - ``num_satellites``
      - 11
      - constant satellite count reported
    * - ``fix_type``
      - 3D fix
      - constant fix type reported
+
+Every one of these is an FMI **fixed parameter** of the same name on
+``hemerion_gps_fmu``, alongside an integer ``seed`` (0 = nondeterministic,
+any other value reproduces the receiver's error sequence). They are read once,
+when initialisation mode is exited — a part's noise does not change in
+flight — and a master that sets none of them gets the previous receiver.
+
+.. list-table:: The realistic receiver — ``--gps-errors correlated`` in the examples
+   :header-rows: 1
+   :widths: 30 14 14 42
+
+   * - Channel
+     - white
+     - correlated
+     - note
+   * - horizontal position
+     - 0.3 m
+     - 1.5 m, :math:`\tau` = 100 s
+     - total 1.53 m per axis — within 2 % of the default's 1.5 m
+   * - vertical position
+     - 0.6 m
+     - 3.0 m, :math:`\tau` = 100 s
+     - total 3.06 m
+   * - speed over ground
+     - 0.05 m/s
+     - 0.1 m/s, :math:`\tau` = 10 s
+     - total 0.11 m/s
+   * - course
+     - 0.3°
+     - 1.0°, :math:`\tau` = 10 s
+     - total 1.04°
+   * - ``accuracy_scale``
+     - 0.7
+     -
+     - ``hAcc`` reads 1.07 m for a 1.53 m error
+
+The preset keeps every channel's *total* 1-sigma where the default had it, so
+nothing on a results page moves by magnitude; what changes is the spectrum.
+Ninety-six per cent of the horizontal variance now lives in the slow term,
+which is what the F-16 trim page's GPS error figure measures directly
+(:ref:`f16_trim_ecos_cosim`). The values are spelled out in each example's
+host rather than as an FMU-side preset, so an example reads end to end, and
+are written in full to the run's ``.config`` sidecar so a figure can be
+checked against the model that made it.
 
 FMI inputs: ``latitude_deg``, ``longitude_deg``, ``altitude_m``,
 ``ground_speed_mps``, ``course_deg``, ``v_north_mps``, ``v_east_mps``,

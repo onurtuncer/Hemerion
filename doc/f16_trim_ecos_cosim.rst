@@ -356,7 +356,7 @@ Results
 -------
 
 ``plot_results.py`` (matplotlib) renders the six CSVs — the host's truth log
-and the flight computer's five decoded-sensor logs — into seven figures per
+and the flight computer's five decoded-sensor logs — into eight figures per
 check-case:
 
 .. code-block:: console

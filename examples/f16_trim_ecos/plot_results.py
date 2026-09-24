@@ -16,6 +16,7 @@ doc/f16_trim_ecos_cosim.rst:
     <case>_imu_specific_force.png    body specific force, truth + decoded counts
     <case>_imu_body_rates.png        body rates, against the gyroscope's resolution
     <case>_sensor_envelopes.png      each stack against the limit that bounds it
+    <case>_gps_error.png             decoded-fix error, and whether it is white
     <case>_nesc_envelope.png         drift against the published participant spread
 
 ``<case>`` is read from the ``.config`` sidecar ``f16_trim_cosim`` writes beside
@@ -93,6 +94,9 @@ MARKER_IMU = 2.0
 MARKER_SENSOR = 3.0
 
 FT_PER_M = 1.0 / 0.3048
+# GpsNoiseModel's own flat-Earth latitude scale, used here so the error it
+# injected comes back out exactly rather than through a better ellipsoid.
+METERS_PER_DEG_LAT = 111_320.0
 # WGS-84 equatorial radius, for the local ENU frame the ground track is drawn
 # in. A sphere is accurate enough for a picture: over 34 km of flight the
 # ellipsoidal correction is centimetres.
@@ -298,7 +302,10 @@ def config_caption(config: dict[str, str]) -> str:
 
     rtf = config.get("realtime_factor", "")
     pacing = "paced --rtf 1" if rtf == "1" else ("unpaced" if rtf else "")
-    parts = [condition, receiver] + ([pacing] if pacing else [])
+    # The error model is what separates two runs whose every other figure is
+    # identical; a sidecar from before it existed is the white receiver.
+    errors = "GPS errors " + config.get("gps_error_model", "white")
+    parts = [condition, receiver, errors] + ([pacing] if pacing else [])
     return " | ".join(parts)
 
 
@@ -1076,6 +1083,161 @@ def plot_nesc_envelope(truth, references: dict[str, dict[str, list[float]]],
     return save(fig, out, prefix, "nesc_envelope", caption)
 
 
+def autocorrelation(values: list[float], max_lag: int) -> list[float]:
+    """Normalised sample autocorrelation at lags 0..max_lag."""
+    n = len(values)
+    mean = sum(values) / n
+    centred = [v - mean for v in values]
+    variance = sum(c * c for c in centred)
+    if variance <= 0.0:
+        return [1.0] + [0.0] * max_lag
+    out = []
+    for lag in range(max_lag + 1):
+        out.append(sum(centred[k] * centred[k + lag] for k in range(n - lag)) / variance)
+    return out
+
+
+def plot_gps_error(truth, fixes, config: dict[str, str], out: Path, prefix: str, caption: str) -> str:
+    """Decoded-fix error against truth -- and whether it is white.
+
+    The rocket page's version of this figure checks that the error the flight
+    software sees is the error that was injected: the rolling RMS lands on the
+    configured sigma. That is necessary and not sufficient. Two receivers can
+    have identical RMS and be entirely different sensors to a filter, because
+    what a filter can *do* with a fix depends on how much of its error the
+    next fix shares -- a white error averages away over ten epochs, a
+    time-correlated one does not, and treating the second as the first is
+    the classic way to build a filter that is confidently wrong. So the third
+    panel asks the question the RMS cannot: the sample autocorrelation of the
+    north error against lag, with the curve the run's own sidecar says it
+    should follow. A white receiver is a spike at zero lag; a Gauss-Markov one
+    decays as exp(-lag / tau), scaled by the correlated term's share of the
+    variance.
+
+    The first two panels carry the other half of the realism question: what
+    the receiver *reports* about itself. ``hAcc``/``vAcc`` are drawn as the
+    band the receiver claims, against the RMS it actually achieves. An honest
+    receiver's band contains its scatter; an optimistic one's does not, and a
+    filter that weights fixes by the reported accuracy will under-weight the
+    truth by exactly that ratio.
+
+    Alignment: the fix stamped at the end of step k carries the truth from
+    the end of step k-1 -- Ecos propagates connections between steps -- so
+    each fix is compared with truth one communication step earlier, as the
+    rocket script does. Compared at equal times instead, the figure would show
+    17 m of latency at 172 m/s and call it receiver error.
+    """
+    times = truth["time"]
+    step = min((b - a for a, b in zip(times, times[1:])), default=0.1)
+
+    stamps, north, east, vertical, reported_h, reported_v = [], [], [], [], [], []
+    for i, t in enumerate(fixes["sim_time_s"]):
+        t_truth = t - step
+        if t_truth < times[0] or t_truth > times[-1]:
+            continue
+        lat_t = interpolate(times, truth["lat_deg"], t_truth)
+        lon_t = interpolate(times, truth["lon_deg"], t_truth)
+        alt_t = interpolate(times, truth["alt_m"], t_truth)
+        stamps.append(t)
+        north.append((fixes["latitude_deg"][i] - lat_t) * METERS_PER_DEG_LAT)
+        east.append((fixes["longitude_deg"][i] - lon_t) * METERS_PER_DEG_LAT * math.cos(math.radians(lat_t)))
+        vertical.append(fixes["altitude_m"][i] - alt_t)
+        reported_h.append(fixes["horizontal_accuracy_m"][i])
+        reported_v.append(fixes["vertical_accuracy_m"][i])
+
+    def rms(values: list[float]) -> float:
+        return math.sqrt(sum(v * v for v in values) / len(values))
+
+    # What the sidecar says the receiver was. A sidecar from before the error
+    # model was recorded is the FMU's default: white at 1.5 / 3.0 m, honest.
+    sigma_w_h = float(config.get("gps_horizontal_pos_noise_m", 1.5))
+    sigma_c_h = float(config.get("gps_horizontal_pos_correlated_m", 0.0))
+    sigma_w_v = float(config.get("gps_vertical_pos_noise_m", 3.0))
+    sigma_c_v = float(config.get("gps_vertical_pos_correlated_m", 0.0))
+    tau = float(config.get("gps_position_correlation_time_s", 100.0))
+    total_h = math.hypot(sigma_w_h, sigma_c_h)
+    total_v = math.hypot(sigma_w_v, sigma_c_v)
+    share = (sigma_c_h * sigma_c_h) / (total_h * total_h) if total_h > 0.0 else 0.0
+
+    fig, (ax_h, ax_v, ax_r) = plt.subplots(3, 1, figsize=(8.0, 9.0), dpi=150)
+    fig.patch.set_facecolor(SURFACE)
+    for ax in (ax_h, ax_v, ax_r):
+        style_axis(ax)
+
+    # --- horizontal ------------------------------------------------------
+    claimed_h = sum(reported_h) / len(reported_h)
+    ax_h.axhspan(-claimed_h, claimed_h, color=OUTAGE, alpha=0.8, linewidth=0,
+                 label=f"what the receiver claims: hAcc = {claimed_h:.2f} m")
+    ax_h.plot(stamps, north, linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.45, color=TRUTH,
+              label=f"north error, RMS {rms(north):.2f} m")
+    ax_h.plot(stamps, east, linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.45, color=GPS,
+              label=f"east error, RMS {rms(east):.2f} m")
+    for sign in (-1.0, 1.0):
+        ax_h.axhline(sign * total_h, color=LIMIT, linewidth=1.0, linestyle="--", alpha=0.9)
+    ax_h.annotate(f"configured total 1-sigma per axis: {total_h:.2f} m", xy=(0.99, total_h),
+                  xycoords=("axes fraction", "data"), xytext=(0, 3), textcoords="offset points",
+                  ha="right", va="bottom", fontsize=7.5, color=LIMIT)
+    ax_h.set_ylabel("horizontal error [m]")
+    ax_h.set_title("Horizontal error, and the accuracy the receiver reports for it", fontsize=10)
+    add_headroom(ax_h, 0.45)
+    legend(ax_h, loc="upper left", framed=True)
+
+    # --- vertical --------------------------------------------------------
+    claimed_v = sum(reported_v) / len(reported_v)
+    ax_v.axhspan(-claimed_v, claimed_v, color=OUTAGE, alpha=0.8, linewidth=0,
+                 label=f"what the receiver claims: vAcc = {claimed_v:.2f} m")
+    ax_v.plot(stamps, vertical, linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.45, color=BARO,
+              label=f"vertical error, RMS {rms(vertical):.2f} m")
+    for sign in (-1.0, 1.0):
+        ax_v.axhline(sign * total_v, color=LIMIT, linewidth=1.0, linestyle="--", alpha=0.9)
+    ax_v.annotate(f"configured 1-sigma: {total_v:.2f} m", xy=(0.99, total_v),
+                  xycoords=("axes fraction", "data"), xytext=(0, 3), textcoords="offset points",
+                  ha="right", va="bottom", fontsize=7.5, color=LIMIT)
+    ax_v.set_ylabel("vertical error [m]")
+    ax_v.set_title("Vertical error", fontsize=10)
+    add_headroom(ax_v, 0.45)
+    legend(ax_v, loc="upper left", framed=True)
+
+    # --- autocorrelation ----------------------------------------------------
+    # Lags up to a third of the record, capped where the expected curve has
+    # long since reached zero; the fix spacing sets the lag unit.
+    fix_step = min((b - a for a, b in zip(stamps, stamps[1:])), default=0.1)
+    max_lag = int(min(3.0 * max(tau, 10.0), (stamps[-1] - stamps[0]) / 3.0) / fix_step)
+    lags_s = [k * fix_step for k in range(max_lag + 1)]
+    r_north = autocorrelation(north, max_lag)
+    r_east = autocorrelation(east, max_lag)
+    expected = [1.0] + [share * math.exp(-lag / tau) if tau > 0.0 else 0.0 for lag in lags_s[1:]]
+
+    ax_r.axhline(0.0, color=INK_2, linewidth=0.8, alpha=0.5)
+    ax_r.plot(lags_s, r_east, color=GPS, linewidth=1.0, alpha=0.5, label="east error")
+    ax_r.plot(lags_s, r_north, color=TRUTH, linewidth=1.4, label="north error")
+    ax_r.plot(lags_s, expected, color=LIMIT, linewidth=1.2, linestyle="--",
+              label=(f"expected: {share:.2f} · exp(−lag / {tau:.0f} s)" if share > 0.0
+                     else "expected: white, nothing beyond lag 0"))
+    if share > 0.0 and tau <= lags_s[-1]:
+        k_tau = int(round(tau / fix_step))
+        ax_r.axvline(tau, color=LIMIT, linewidth=0.8, linestyle=":", alpha=0.8)
+        ax_r.annotate(f"at lag τ: measured {r_north[k_tau]:.2f}, expected {share * math.exp(-1.0):.2f}",
+                      xy=(tau, r_north[k_tau]), xytext=(8, 12), textcoords="offset points",
+                      fontsize=7.5, color=LIMIT)
+    # A sample autocorrelation is only as good as the record is long in
+    # correlation times: at lag tau it scatters by roughly sqrt(tau / T), so
+    # a 10-tau record cannot tell 0.35 from 0 and a 100-tau one can. Say so on
+    # the figure, where a reader comparing the two curves needs it.
+    record_s = stamps[-1] - stamps[0]
+    if share > 0.0 and tau > 0.0:
+        ax_r.annotate(f"record {record_s / tau:.0f} τ long: a sample autocorrelation at lag τ "
+                      f"scatters by about ±{math.sqrt(tau / record_s):.2f}",
+                      xy=(0.99, 0.62), xycoords="axes fraction", ha="right", fontsize=7.5, color=INK_2)
+    ax_r.set_xlabel("lag [s]")
+    ax_r.set_ylabel("autocorrelation")
+    ax_r.set_ylim(min(-0.15, min(r_north) - 0.05), 1.05)
+    ax_r.set_title("Is the error white? Sample autocorrelation of the position error", fontsize=10)
+    legend(ax_r, loc="upper right", framed=True)
+    return save(fig, out, prefix, "gps_error", caption)
+
+
+
 # ---------------------------------------------------------------------------
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
@@ -1131,6 +1293,13 @@ def main() -> None:
     if imu["sim_time_s"]:
         written.append(plot_imu_specific_force(truth, imu, args.out, prefix, caption))
         written.append(plot_imu_body_rates(truth, imu, args.out, prefix, caption))
+
+    # Fifty fixes is the least an autocorrelation says anything about; a
+    # launch-vehicle envelope, or case 12, can leave none at all.
+    if len(fixes["sim_time_s"]) >= 50:
+        written.append(plot_gps_error(truth, fixes, config, args.out, prefix, caption))
+    else:
+        print(f"only {len(fixes['sim_time_s'])} fixes carried a solution -- skipping the GPS error figure")
 
     references = {p.stem: read_reference(p) for p in args.reference if p.exists()}
     missing = [p for p in args.reference if not p.exists()]
