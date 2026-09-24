@@ -244,6 +244,11 @@ Useful knobs (`--help` lists all):
 * `--imu-rate <hz>` — IMU output data rate (default 100; becomes the FMU's `sample_rate_hz` parameter). The
   BMP390 deliberately has no such knob: its rate is the `ODR` register the flight computer writes.
 * `--dyn-model <code>` / `--no-cocom` / `--reacq <s>` — the receiver's dynamics envelope (see above).
+* `--gps-errors white|correlated` / `--gps-seed <n>` — the receiver's error model: the FMU's default white
+  per-epoch noise with an honest `hAcc`/`vAcc`, or the realistic one — most of the same RMS in a
+  time-correlated (Gauss–Markov, τ = 100 s) term, reported accuracy at 70 % of the truth. A non-zero seed
+  reproduces the receiver's errors run to run. The 31 s of fixes this flight leaves cannot resolve a
+  100 s correlation time; the F-16 trim example's GPS figure is where the difference is visible.
 * `--rtf 1` — pace the co-simulation to wall-clock speed (default is as-fast-as-possible, about 1.7× real
   time on a typical desktop), e.g. to watch the fix stream come in live.
 * `HEMERION_GPS_FMU_UDP_HOST` / `HEMERION_GPS_FMU_UDP_PORT` — read by the GPS FMU at instantiation; point them

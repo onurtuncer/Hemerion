@@ -236,7 +236,8 @@ private:
     {
       pressure_was_out_ = !conversion.pressure_in_rating;
       const double t_lin = measurement_model_.compensator().compensate_temperature(conversion.uncomp_temp);
-      const double pressure_hpa = measurement_model_.compensator().compensate_pressure(conversion.uncomp_press, t_lin) / 100.0;
+      const double pressure_hpa =
+          measurement_model_.compensator().compensate_pressure(conversion.uncomp_press, t_lin) / 100.0;
       std::snprintf(message,
                     sizeof(message),
                     "[hemerion_bmp390_fmu] ambient pressure %.1f hPa is %s the part's rated 300-1250 hPa envelope",

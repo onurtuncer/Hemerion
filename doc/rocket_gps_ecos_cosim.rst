@@ -802,6 +802,13 @@ PNG detached from its caption has no other way to tell you which it is.
    export limits leave, and it is the whole of what a COCOM-limited receiver
    gives you to characterise.
 
+   What this figure cannot say is whether the error is *white*: the receiver
+   model's default is, but its realistic configuration (``--gps-errors
+   correlated``) puts most of the same RMS into a term with a 100 s
+   correlation time, which 31 s of fixes could not resolve. The F-16 trim
+   page's GPS figure asks that question on a flight long enough to answer it
+   (:ref:`f16_trim_ecos_cosim`).
+
 .. figure:: _static/rocket_gps_ecos/imu_specific_force.png
    :width: 100%
    :alt: Body-X specific force vs time: truth line with decoded accelerometer samples overlaid, staging marker, zero during coast

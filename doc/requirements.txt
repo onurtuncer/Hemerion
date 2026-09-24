@@ -3,7 +3,11 @@
 # here must match doc/conf.py.
 sphinx
 sphinx-rtd-theme
-breathe
+# Pinned: breathe 5.0.0 (2026-09) cannot resolve a single doxygenfile directive under this
+# Doxygen/Sphinx pairing -- every doc/api page went red on the day it was released, on files
+# nobody touched. Same reason cmakelang is pinned in the format workflow: an unpinned major
+# release turns main red on its own schedule. Re-test before moving it.
+breathe==4.36.0
 sphinxcontrib-bibtex
 
 # Measures cyclomatic complexity for doc/generate_metrixpp_report.py, which

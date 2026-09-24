@@ -103,6 +103,8 @@ Two terminals, both in `build/examples-native/examples/f16_trim_ecos/`:
 # terminal 2 — the co-simulation
 ./f16_trim_cosim              # check-case 11 (default)
 ./f16_trim_cosim --case 12    # check-case 12; add --dyn-model -1 to give the receiver its fix back
+./f16_trim_cosim --gps-errors correlated --gps-seed 1 --stop 1000   # the realistic receiver, seeded,
+                              # over a window long enough to show its 100 s correlation time
 ```
 
 The flight computer takes no case option: it decodes whatever arrives, unchanged between the two.

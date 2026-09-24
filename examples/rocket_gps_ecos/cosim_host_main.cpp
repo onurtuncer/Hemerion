@@ -120,6 +120,40 @@ using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
 #define HEMERION_MMC5983MA_FMU_PATH ""
 #endif
 
+/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
+/// set and the run's .config sidecar cannot disagree about what the receiver
+/// was -- and plot_results.py can draw the autocorrelation a run *should*
+/// show from the sidecar alone.
+struct GpsErrorModel
+{
+  const char* name;
+  double horizontal_pos_noise_m;
+  double vertical_pos_noise_m;
+  double speed_noise_mps;
+  double course_noise_deg;
+  double horizontal_pos_correlated_m;
+  double vertical_pos_correlated_m;
+  double position_correlation_time_s;
+  double speed_correlated_mps;
+  double course_correlated_deg;
+  double velocity_correlation_time_s;
+  double accuracy_scale;
+};
+
+/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
+/// the parameter set explicitly even though the FMU would default to them, so
+/// the sidecar is always a complete record.
+constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
+
+/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
+/// default's -- nothing on a page changes by magnitude -- but most of it now
+/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
+/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
+/// estimate tends to. Spelled out here rather than as an FMU-side preset so
+/// the example reads end to end; the values are tabulated in
+/// doc/sensor_models.rst.
+constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
+
 struct Options
 {
   std::filesystem::path rocket_fmu = HEMERION_ROCKET_FMU_PATH;
@@ -161,6 +195,12 @@ struct Options
   int dynamic_platform = -1;
   bool cocom_limits = true;
   double reacquisition_time_s = 2.0;
+  // GPS error model: the FMU's default white-only receiver, or the realistic
+  // time-correlated one (doc/sensor_models.rst). Off by default so the
+  // receiver -- and every figure drawn from it -- stays the one this example
+  // was verified with until the change is asked for.
+  bool gps_correlated_errors = false;
+  int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
 };
 
 void print_usage()
@@ -169,6 +209,7 @@ void print_usage()
                "                        [--imu <hemerion_imu_fmu.fmu>] [--baro <hemerion_bmp390_fmu.fmu>]\n"
                "                        [--mag <hemerion_mmc5983ma_fmu.fmu>]\n"
                "                        [--imu-rate <hz>] [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
+               "                        [--gps-errors white|correlated] [--gps-seed <n>]\n"
                "                        [--stg2-ignition <s>] [--lat0 <deg>] [--lon0 <deg>] [--alt0 <m>]\n"
                "                        [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
                "\n"
@@ -187,6 +228,9 @@ void print_usage()
                "  --no-cocom  clear the COCOM export cut-off, as on an export-licensed receiver (default: in force,\n"
                "              so navigation output stops above 18000 m AND 515 m/s)\n"
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
+               "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
+               "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
+               "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
                "  --stg2-ignition  absolute time stage 2 lights [s] (default 131.8 = NASA Scenario 17; the\n"
                "              FMU's own default of 0 means 'immediately after staging', which is a different\n"
                "              flight profile and does not reproduce the reference trajectory)\n"
@@ -207,7 +251,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 16> kValueOptions = { {
+constexpr std::array<ValueOption, 18> kValueOptions = { {
     { "--rocket", [](Options& o, const char* v) { o.rocket_fmu = v; } },
     { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
@@ -216,6 +260,16 @@ constexpr std::array<ValueOption, 16> kValueOptions = { {
     { "--imu-rate", [](Options& o, const char* v) { o.imu_rate_hz = std::stod(v); } },
     { "--dyn-model", [](Options& o, const char* v) { o.dynamic_platform = std::stoi(v); } },
     { "--reacq", [](Options& o, const char* v) { o.reacquisition_time_s = std::stod(v); } },
+    { "--gps-errors",
+      [](Options& o, const char* v) {
+        const std::string model(v);
+        if (model != "white" && model != "correlated")
+        {
+          throw std::invalid_argument("--gps-errors takes 'white' or 'correlated', not '" + model + "'");
+        }
+        o.gps_correlated_errors = (model == "correlated");
+      } },
+    { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
     { "--stg2-ignition", [](Options& o, const char* v) { o.stg2_ignition_s = std::stod(v); } },
     { "--lat0", [](Options& o, const char* v) { o.lat0_deg = std::stod(v); } },
     { "--lon0", [](Options& o, const char* v) { o.lon0_deg = std::stod(v); } },
@@ -252,7 +306,21 @@ bool parse_args(int argc, char** argv, Options& options)
       print_usage();
       return false;
     }
-    option->apply(options, argv[++i]);
+    // A value the option cannot take -- a word where a number was expected,
+    // a model name that is not one -- is a usage error, not a crash: the
+    // table's lambdas throw (std::stoi/stod on their own, --gps-errors
+    // deliberately), and an exception escaping here would terminate the
+    // process with no message at all.
+    try
+    {
+      option->apply(options, argv[++i]);
+    }
+    catch (const std::exception& ex)
+    {
+      std::cerr << "bad value for " << arg << ": " << ex.what() << "\n";
+      print_usage();
+      return false;
+    }
   }
   return true;
 }
@@ -370,9 +438,24 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
     std::cerr << "warning: cannot write " << config_path.string() << "; figures will be unlabelled\n";
     return;
   }
+  // Written in full so a figure can be checked against the model that made it.
+  const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
   out << "dynamic_platform=" << options.dynamic_platform << "\n"
       << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
+      << "gps_error_model=" << receiver.name << "\n"
+      << "gps_seed=" << options.gps_seed << "\n"
+      << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
+      << "gps_vertical_pos_noise_m=" << receiver.vertical_pos_noise_m << "\n"
+      << "gps_speed_noise_mps=" << receiver.speed_noise_mps << "\n"
+      << "gps_course_noise_deg=" << receiver.course_noise_deg << "\n"
+      << "gps_horizontal_pos_correlated_m=" << receiver.horizontal_pos_correlated_m << "\n"
+      << "gps_vertical_pos_correlated_m=" << receiver.vertical_pos_correlated_m << "\n"
+      << "gps_position_correlation_time_s=" << receiver.position_correlation_time_s << "\n"
+      << "gps_speed_correlated_mps=" << receiver.speed_correlated_mps << "\n"
+      << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
+      << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
+      << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
       << "stg2_ignition_s=" << options.stg2_ignition_s << "\n"
       << "lat0_deg=" << options.lat0_deg << "\n"
       << "lon0_deg=" << options.lon0_deg << "\n"
@@ -594,6 +677,20 @@ int main(int argc, char** argv)
     launch_site["gps::dynamic_platform"] = options.dynamic_platform;
     launch_site["gps::cocom_limits_enabled"] = options.cocom_limits;
     launch_site["gps::reacquisition_time_s"] = options.reacquisition_time_s;
+    // The receiver's error model, in full: see GpsErrorModel.
+    const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
+    launch_site["gps::seed"] = options.gps_seed;
+    launch_site["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
+    launch_site["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
+    launch_site["gps::speed_noise_mps"] = receiver.speed_noise_mps;
+    launch_site["gps::course_noise_deg"] = receiver.course_noise_deg;
+    launch_site["gps::horizontal_pos_correlated_m"] = receiver.horizontal_pos_correlated_m;
+    launch_site["gps::vertical_pos_correlated_m"] = receiver.vertical_pos_correlated_m;
+    launch_site["gps::position_correlation_time_s"] = receiver.position_correlation_time_s;
+    launch_site["gps::speed_correlated_mps"] = receiver.speed_correlated_mps;
+    launch_site["gps::course_correlated_deg"] = receiver.course_correlated_deg;
+    launch_site["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
+    launch_site["gps::accuracy_scale"] = receiver.accuracy_scale;
     ss.add_parameter_set("launchSite", launch_site);
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(options.step_s));
@@ -682,6 +779,11 @@ int main(int argc, char** argv)
     }
     std::cout << "COCOM limits " << (options.cocom_limits ? "in force (18000 m AND 515 m/s)" : "disabled")
               << ", re-acquisition " << options.reacquisition_time_s << " s\n";
+
+    std::cout << "[cosim] GPS errors: "
+              << (options.gps_correlated_errors ? "time-correlated (Gauss-Markov) + white, hAcc/vAcc at 70 %" :
+                                                  "white per epoch, hAcc/vAcc honest")
+              << (options.gps_seed != 0 ? " (seed " + std::to_string(options.gps_seed) + ")" : "") << "\n";
 
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time

@@ -182,6 +182,22 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   receivers are optimistic); 50–200 ms of NAV-PVT latency beyond the communication step. This
   one first: it changes what the EKF's measurement model has to be more than anything else here.
 
+  **Done — PR #39 (2026-09-24).** White + first-order Gauss–Markov per channel in
+  `gpsNoiseModel.hpp` (position τ 100 s, velocity τ 10 s), `accuracy_scale` on `hAcc`/`vAcc`, the
+  eleven values plus an integer `seed` as fixed FMI parameters, `--gps-errors white|correlated
+  --gps-seed N` on all three hosts with the full model written to the `.config` sidecar,
+  `sensors.gps_noise` (eight statistical assertions), and `<case>_gps_error.png` on the trim page
+  with an autocorrelation panel against the sidecar's own prediction. Defaults reproduce the old
+  model bit for bit; the realistic preset keeps every total 1-sigma within 2 % of the default and
+  moves 96 % of the horizontal variance into the slow term. Three things learned on the way:
+  both flight computers logged fixes at 6 significant digits (an 11 m grid at 36° latitude — the
+  figure's ACF panel showed it as bands; fixed with `setprecision(10)`); a sample autocorrelation at
+  lag τ scatters by ~√(τ/T), so the figure needs a long record — the published one is 35 τ
+  (3548 s of fixes: the flight computer's `--max-wall-s` cut a 10 000 s run's log short, the
+  trim example running at only ~2× real time unpaced); and **latency is deferred to the timing
+  item** — fixes are stamped by index, so a delayed emission is invisible until arrival stamping
+  exists.
+
 * **IMU biases are constant.** `imu_noise_model.h:60–64`: white noise + a per-run turn-on bias
   + int16 quantisation, nothing else. A constant bias converges once and stops mattering, so
   the filter's bias states are trivially observable. **Add:** rate random walk / bias

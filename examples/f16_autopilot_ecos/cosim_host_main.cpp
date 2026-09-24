@@ -153,6 +153,40 @@ constexpr double kRhoSlKgM3 = 1.225;
 // The standalone's flat-earth radius for the lateral-deviation feedback.
 constexpr double kLatDevEarthRadiusM = 6'371'000.0;
 
+/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
+/// set and the run's .config sidecar cannot disagree about what the receiver
+/// was -- and plot_results.py can draw the autocorrelation a run *should*
+/// show from the sidecar alone.
+struct GpsErrorModel
+{
+  const char* name;
+  double horizontal_pos_noise_m;
+  double vertical_pos_noise_m;
+  double speed_noise_mps;
+  double course_noise_deg;
+  double horizontal_pos_correlated_m;
+  double vertical_pos_correlated_m;
+  double position_correlation_time_s;
+  double speed_correlated_mps;
+  double course_correlated_deg;
+  double velocity_correlation_time_s;
+  double accuracy_scale;
+};
+
+/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
+/// the parameter set explicitly even though the FMU would default to them, so
+/// the sidecar is always a complete record.
+constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
+
+/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
+/// default's -- nothing on a page changes by magnitude -- but most of it now
+/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
+/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
+/// estimate tends to. Spelled out here rather than as an FMU-side preset so
+/// the example reads end to end; the values are tabulated in
+/// doc/sensor_models.rst.
+constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
+
 struct Options
 {
   std::filesystem::path f16_fmu = HEMERION_F16_FMU_PATH;
@@ -188,6 +222,12 @@ struct Options
   int dynamic_platform = 8;
   bool cocom_limits = true;
   double reacquisition_time_s = 2.0;
+  // GPS error model: the FMU's default white-only receiver, or the realistic
+  // time-correlated one (doc/sensor_models.rst). Off by default so the
+  // receiver -- and every figure drawn from it -- stays the one this example
+  // was verified with until the change is asked for.
+  bool gps_correlated_errors = false;
+  int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
 };
 
 /// @brief The four closed-loop autopilot check-cases.
@@ -202,63 +242,103 @@ struct AutopilotCase
 {
   std::string_view id;
   std::string_view summary;
-  double stop_s;             ///< Longest published reference window [s].
-  double alt_cmd_ft;         ///< Altitude command after alt_step_time_s [ft].
-  double alt_step_time_s;    ///< 0 = commanded from the start.
-  double keas_cmd_kt;        ///< KEAS command after keas_step_time_s; NaN = hold trim.
-  double keas_step_time_s;   ///< 0 = commanded from the start.
-  double chi_cmd_deg;        ///< Course command after chi_step_time_s [deg].
-  double chi_step_time_s;    ///< 0 = commanded from the start.
-  double lat_step_ft;        ///< Lateral side-step, +right of course; 0 = none.
-  double lat_step_time_s;    ///< When the side-step is commanded [s].
+  double stop_s;            ///< Longest published reference window [s].
+  double alt_cmd_ft;        ///< Altitude command after alt_step_time_s [ft].
+  double alt_step_time_s;   ///< 0 = commanded from the start.
+  double keas_cmd_kt;       ///< KEAS command after keas_step_time_s; NaN = hold trim.
+  double keas_step_time_s;  ///< 0 = commanded from the start.
+  double chi_cmd_deg;       ///< Course command after chi_step_time_s [deg].
+  double chi_step_time_s;   ///< 0 = commanded from the start.
+  double lat_step_ft;       ///< Lateral side-step, +right of course; 0 = none.
+  double lat_step_time_s;   ///< When the side-step is commanded [s].
 };
 
 constexpr double kHoldTrimKeas = std::numeric_limits<double>::quiet_NaN();
 
 constexpr std::array<AutopilotCase, 4> kAutopilotCases = { {
-    { "13.1", "subsonic altitude change, +100 ft at t = 5 s", 60.0,  //
-      10113.0, 5.0, kHoldTrimKeas, 0.0, 45.0, 0.0, 0.0, 0.0 },
-    { "13.2", "subsonic airspeed change, KEAS -> 277 kt at t = 5 s", 60.0,  //
-      10013.0, 0.0, 277.0, 5.0, 45.0, 0.0, 0.0, 0.0 },
-    { "13.3", "subsonic heading change, course 45 -> 60 deg at t = 15 s", 240.0,  //
-      10013.0, 0.0, kHoldTrimKeas, 0.0, 60.0, 15.0, 0.0, 0.0 },
-    { "13.4", "subsonic lateral side-step, 2000 ft right at t = 20 s", 240.0,  //
-      10013.0, 0.0, kHoldTrimKeas, 0.0, 45.0, 0.0, 2000.0, 20.0 },
+    { "13.1",
+      "subsonic altitude change, +100 ft at t = 5 s",
+      60.0,  //
+      10113.0,
+      5.0,
+      kHoldTrimKeas,
+      0.0,
+      45.0,
+      0.0,
+      0.0,
+      0.0 },
+    { "13.2",
+      "subsonic airspeed change, KEAS -> 277 kt at t = 5 s",
+      60.0,  //
+      10013.0,
+      0.0,
+      277.0,
+      5.0,
+      45.0,
+      0.0,
+      0.0,
+      0.0 },
+    { "13.3",
+      "subsonic heading change, course 45 -> 60 deg at t = 15 s",
+      240.0,  //
+      10013.0,
+      0.0,
+      kHoldTrimKeas,
+      0.0,
+      60.0,
+      15.0,
+      0.0,
+      0.0 },
+    { "13.4",
+      "subsonic lateral side-step, 2000 ft right at t = 20 s",
+      240.0,  //
+      10013.0,
+      0.0,
+      kHoldTrimKeas,
+      0.0,
+      45.0,
+      0.0,
+      2000.0,
+      20.0 },
 } };
 
 void print_usage()
 {
-  std::cout
-      << "usage: f16_autopilot_cosim [--case 13.1|13.2|13.3|13.4] [--f16 <F16Plant.fmu>] [--ap <F16Autopilot.fmu>]\n"
-         "                           [--gps <fmu>] [--imu <fmu>] [--baro <fmu>] [--mag <fmu>] [--radalt <fmu>]\n"
-         "                           [--imu-rate <hz>] [--radalt-rate <hz>] [--gps-period <s>]\n"
-         "                           [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
-         "                           [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
-         "\n"
-         "  --case      NASA TM-2015-218675 closed-loop check-case (default 13.1):\n"
-         "                13.1 = +100 ft altitude step at t=5 s        (60 s window)\n"
-         "                13.2 = KEAS step to 277 kt at t=5 s          (60 s window)\n"
-         "                13.3 = course step 45 -> 60 deg at t=15 s    (240 s window)\n"
-         "                13.4 = 2000 ft lateral side-step at t=20 s   (240 s window)\n"
-         "              Sets the default stop time; an explicit --stop still wins\n"
-         "  --f16       path to Aetherion's F16Plant.fmu (default: configure-time location)\n"
-         "  --ap        path to Aetherion's F16Autopilot.fmu (default: configure-time location)\n"
-         "  --gps/--imu/--baro/--mag/--radalt  paths to the packaged Hemerion sensor FMUs\n"
-         "  --imu-rate  IMU output data rate [Hz] (default 100 = one frame per base step)\n"
-         "  --radalt-rate  radar altimeter pulse rate [Hz] (default 25; the FMU is stepped\n"
-         "              once per sample period, so rates whose period is not a whole number\n"
-         "              of base steps are rounded to one that is)\n"
-         "  --gps-period  NAV-PVT period [s] (default 0.1 = the 10 Hz of the trim example;\n"
-         "              must be a whole number of base steps)\n"
-         "  --dyn-model u-blox dynModel platform code (default 8 = airborne <4 g; every\n"
-         "              case here stays far inside it)\n"
-         "  --no-cocom  clear the COCOM export cut-off (default: in force, never approached)\n"
-         "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
-         "  --stop      simulation stop time [s] (default: the case's reference window)\n"
-         "  --step      base communication step [s] (default 0.01; this is the closed\n"
-         "              loop's sample period AND its transport delay -- see the file header)\n"
-         "  --csv       plant truth output CSV (default results/f16_truth.csv)\n"
-         "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
+  std::cout << "usage: f16_autopilot_cosim [--case 13.1|13.2|13.3|13.4] [--f16 <F16Plant.fmu>] [--ap "
+               "<F16Autopilot.fmu>]\n"
+               "                           [--gps <fmu>] [--imu <fmu>] [--baro <fmu>] [--mag <fmu>] [--radalt <fmu>]\n"
+               "                           [--imu-rate <hz>] [--radalt-rate <hz>] [--gps-period <s>]\n"
+               "                           [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
+               "                           [--gps-errors white|correlated] [--gps-seed <n>]\n"
+               "                           [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
+               "\n"
+               "  --case      NASA TM-2015-218675 closed-loop check-case (default 13.1):\n"
+               "                13.1 = +100 ft altitude step at t=5 s        (60 s window)\n"
+               "                13.2 = KEAS step to 277 kt at t=5 s          (60 s window)\n"
+               "                13.3 = course step 45 -> 60 deg at t=15 s    (240 s window)\n"
+               "                13.4 = 2000 ft lateral side-step at t=20 s   (240 s window)\n"
+               "              Sets the default stop time; an explicit --stop still wins\n"
+               "  --f16       path to Aetherion's F16Plant.fmu (default: configure-time location)\n"
+               "  --ap        path to Aetherion's F16Autopilot.fmu (default: configure-time location)\n"
+               "  --gps/--imu/--baro/--mag/--radalt  paths to the packaged Hemerion sensor FMUs\n"
+               "  --imu-rate  IMU output data rate [Hz] (default 100 = one frame per base step)\n"
+               "  --radalt-rate  radar altimeter pulse rate [Hz] (default 25; the FMU is stepped\n"
+               "              once per sample period, so rates whose period is not a whole number\n"
+               "              of base steps are rounded to one that is)\n"
+               "  --gps-period  NAV-PVT period [s] (default 0.1 = the 10 Hz of the trim example;\n"
+               "              must be a whole number of base steps)\n"
+               "  --dyn-model u-blox dynModel platform code (default 8 = airborne <4 g; every\n"
+               "              case here stays far inside it)\n"
+               "  --no-cocom  clear the COCOM export cut-off (default: in force, never approached)\n"
+               "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
+               "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
+               "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
+               "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
+               "  --stop      simulation stop time [s] (default: the case's reference window)\n"
+               "  --step      base communication step [s] (default 0.01; this is the closed\n"
+               "              loop's sample period AND its transport delay -- see the file header)\n"
+               "  --csv       plant truth output CSV (default results/f16_truth.csv)\n"
+               "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
 }
 
 struct ValueOption
@@ -267,7 +347,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 19> kValueOptions = { {
+constexpr std::array<ValueOption, 21> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -282,6 +362,16 @@ constexpr std::array<ValueOption, 19> kValueOptions = { {
     { "--gps-period", [](Options& o, const char* v) { o.gps_period_s = std::stod(v); } },
     { "--dyn-model", [](Options& o, const char* v) { o.dynamic_platform = std::stoi(v); } },
     { "--reacq", [](Options& o, const char* v) { o.reacquisition_time_s = std::stod(v); } },
+    { "--gps-errors",
+      [](Options& o, const char* v) {
+        const std::string model(v);
+        if (model != "white" && model != "correlated")
+        {
+          throw std::invalid_argument("--gps-errors takes 'white' or 'correlated', not '" + model + "'");
+        }
+        o.gps_correlated_errors = (model == "correlated");
+      } },
+    { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
     { "--stop", [](Options& o, const char* v) { o.stop_s = std::stod(v); } },
     { "--step", [](Options& o, const char* v) { o.step_s = std::stod(v); } },
     { "--csv", [](Options& o, const char* v) { o.csv_path = v; } },
@@ -337,8 +427,7 @@ bool parse_args(int argc, char** argv, Options& options)
       options.cocom_limits = false;
       continue;
     }
-    const auto option =
-        std::ranges::find(kValueOptions, std::string_view(arg), &ValueOption::name);
+    const auto option = std::ranges::find(kValueOptions, std::string_view(arg), &ValueOption::name);
     if (option == kValueOptions.end())
     {
       std::cerr << "unknown option: " << arg << "\n";
@@ -352,7 +441,21 @@ bool parse_args(int argc, char** argv, Options& options)
     }
     try
     {
-      option->apply(options, argv[++i]);
+      // A value the option cannot take -- a word where a number was expected,
+      // a model name that is not one -- is a usage error, not a crash: the
+      // table's lambdas throw (std::stoi/stod on their own, --gps-errors
+      // deliberately), and an exception escaping here would terminate the
+      // process with no message at all.
+      try
+      {
+        option->apply(options, argv[++i]);
+      }
+      catch (const std::exception& ex)
+      {
+        std::cerr << "bad value for " << arg << ": " << ex.what() << "\n";
+        print_usage();
+        return false;
+      }
     }
     catch (const std::exception&)
     {
@@ -393,7 +496,9 @@ bool parse_args(int argc, char** argv, Options& options)
 /// Run-configuration sidecar, `<truth stem>.config` beside the CSV -- same
 /// shape and same reasoning as the trim example: a figure that does not say
 /// which case and which schedule produced it will be read as another one.
-void write_run_config(const std::filesystem::path& csv_path, const Options& options, const AutopilotCase& ap_case,
+void write_run_config(const std::filesystem::path& csv_path,
+                      const Options& options,
+                      const AutopilotCase& ap_case,
                       double keas_trim_kt)
 {
   std::filesystem::path config_path = csv_path;
@@ -404,6 +509,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
     std::cerr << "warning: cannot write " << config_path.string() << "; figures will be unlabelled\n";
     return;
   }
+  // Written in full so a figure can be checked against the model that made it.
+  const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
   out << "check_case=" << options.check_case << "\n"
       << "alt_cmd_ft=" << ap_case.alt_cmd_ft << "\n"
       << "alt_step_time_s=" << ap_case.alt_step_time_s << "\n"
@@ -417,6 +524,19 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "dynamic_platform=" << options.dynamic_platform << "\n"
       << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
+      << "gps_error_model=" << receiver.name << "\n"
+      << "gps_seed=" << options.gps_seed << "\n"
+      << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
+      << "gps_vertical_pos_noise_m=" << receiver.vertical_pos_noise_m << "\n"
+      << "gps_speed_noise_mps=" << receiver.speed_noise_mps << "\n"
+      << "gps_course_noise_deg=" << receiver.course_noise_deg << "\n"
+      << "gps_horizontal_pos_correlated_m=" << receiver.horizontal_pos_correlated_m << "\n"
+      << "gps_vertical_pos_correlated_m=" << receiver.vertical_pos_correlated_m << "\n"
+      << "gps_position_correlation_time_s=" << receiver.position_correlation_time_s << "\n"
+      << "gps_speed_correlated_mps=" << receiver.speed_correlated_mps << "\n"
+      << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
+      << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
+      << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
       << "lat0_deg=" << options.lat0_deg << "\n"
       << "lon0_deg=" << options.lon0_deg << "\n"
       << "alt0_ft=" << options.alt0_ft << "\n"
@@ -586,6 +706,20 @@ int main(int argc, char** argv)
     trim_point["gps::dynamic_platform"] = options.dynamic_platform;
     trim_point["gps::cocom_limits_enabled"] = options.cocom_limits;
     trim_point["gps::reacquisition_time_s"] = options.reacquisition_time_s;
+    // The receiver's error model, in full: see GpsErrorModel.
+    const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
+    trim_point["gps::seed"] = options.gps_seed;
+    trim_point["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
+    trim_point["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
+    trim_point["gps::speed_noise_mps"] = receiver.speed_noise_mps;
+    trim_point["gps::course_noise_deg"] = receiver.course_noise_deg;
+    trim_point["gps::horizontal_pos_correlated_m"] = receiver.horizontal_pos_correlated_m;
+    trim_point["gps::vertical_pos_correlated_m"] = receiver.vertical_pos_correlated_m;
+    trim_point["gps::position_correlation_time_s"] = receiver.position_correlation_time_s;
+    trim_point["gps::speed_correlated_mps"] = receiver.speed_correlated_mps;
+    trim_point["gps::course_correlated_deg"] = receiver.course_correlated_deg;
+    trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
+    trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
     trim_point["ap::fb.alt_m"] = options.alt0_ft / kFtPerM;
     trim_point["ap::fb.vt_m_s"] = options.vt0_fps / kFtPerM;
     trim_point["ap::fb.rho_kg_m3"] = 0.9046;  // ISA at 3 052 m; a seed, not truth
@@ -628,8 +762,7 @@ int main(int argc, char** argv)
     // The hold-KEAS command, from the plant's own trim -- the standalone's
     // formula with the standalone's constants, so the two drivers command
     // the same equivalent airspeed to the same DML.
-    const double keas_trim_kt =
-        (airspeed->get_value() / kKtMps) * std::sqrt(density->get_value() / kRhoSlKgM3);
+    const double keas_trim_kt = (airspeed->get_value() / kKtMps) * std::sqrt(density->get_value() / kRhoSlKgM3);
 
     // The courseline reference for the 13.4 lateral-deviation feedback: the
     // aircraft's *actual* initial geodetic position, as in the standalone.
@@ -651,15 +784,15 @@ int main(int argc, char** argv)
     // the standalone's controller sees when its clock reads t.
     const auto write_commands = [&](double t) {
       cmd_alt->set_value(t >= ap_case.alt_step_time_s ? ap_case.alt_cmd_ft : options.alt0_ft);
-      const double keas_cmd = std::isnan(ap_case.keas_cmd_kt) ? keas_trim_kt
-                              : (t >= ap_case.keas_step_time_s ? ap_case.keas_cmd_kt : keas_trim_kt);
+      const double keas_cmd = std::isnan(ap_case.keas_cmd_kt) ?
+                                  keas_trim_kt :
+                                  (t >= ap_case.keas_step_time_s ? ap_case.keas_cmd_kt : keas_trim_kt);
       cmd_keas->set_value(keas_cmd);
       cmd_chi->set_value(t >= ap_case.chi_step_time_s ? ap_case.chi_cmd_deg : options.heading0_deg);
       double lat_offset_ft = 0.0;
       if (ap_case.lat_step_ft != 0.0)
       {
-        lat_offset_ft =
-            lateral_deviation_ft() - (t >= ap_case.lat_step_time_s ? ap_case.lat_step_ft : 0.0);
+        lat_offset_ft = lateral_deviation_ft() - (t >= ap_case.lat_step_time_s ? ap_case.lat_step_ft : 0.0);
       }
       cmd_lat->set_value(lat_offset_ft);
     };
@@ -667,24 +800,46 @@ int main(int argc, char** argv)
 
     TruthLogger truth_log(options.csv_path,
                           *sim,
-                          { "f16::out.alt_m",       "f16::out.lat_deg",     "f16::out.lon_deg",
-                            "f16::out.v_north_m_s", "f16::out.v_east_m_s",  "f16::out.v_down_m_s",
-                            "f16::out.yaw_rad",     "f16::out.pitch_rad",   "f16::out.roll_rad",
-                            "f16::out.p_rad_s",     "f16::out.q_rad_s",     "f16::out.r_rad_s",
-                            "f16::out.vt_m_s",      "f16::out.rho_kg_m3",   "f16::out.alpha_deg",
-                            "f16::out.beta_deg",    "f16::out.mach",        "f16::out.qbar_Pa",
-                            "f16::out.thrust_N",    "f16::out.mass_kg",
+                          { "f16::out.alt_m",
+                            "f16::out.lat_deg",
+                            "f16::out.lon_deg",
+                            "f16::out.v_north_m_s",
+                            "f16::out.v_east_m_s",
+                            "f16::out.v_down_m_s",
+                            "f16::out.yaw_rad",
+                            "f16::out.pitch_rad",
+                            "f16::out.roll_rad",
+                            "f16::out.p_rad_s",
+                            "f16::out.q_rad_s",
+                            "f16::out.r_rad_s",
+                            "f16::out.vt_m_s",
+                            "f16::out.rho_kg_m3",
+                            "f16::out.alpha_deg",
+                            "f16::out.beta_deg",
+                            "f16::out.mach",
+                            "f16::out.qbar_Pa",
+                            "f16::out.thrust_N",
+                            "f16::out.mass_kg",
                             // The loop itself: what the autopilot commanded the
                             // surfaces to, and what this host commanded the
                             // autopilot to -- so a response plot can carry its
                             // own cause.
-                            "ap::ctrl.el_deg",      "ap::ctrl.ail_deg",     "ap::ctrl.rdr_deg",
-                            "ap::ctrl.pwr_pct",     "ap::cmd.altCmd_ft",    "ap::cmd.keasCmd_kt",
-                            "ap::cmd.baseChiCmd_deg", "ap::cmd.latOffset_ft",
+                            "ap::ctrl.el_deg",
+                            "ap::ctrl.ail_deg",
+                            "ap::ctrl.rdr_deg",
+                            "ap::ctrl.pwr_pct",
+                            "ap::cmd.altCmd_ft",
+                            "ap::cmd.keasCmd_kt",
+                            "ap::cmd.baseChiCmd_deg",
+                            "ap::cmd.latOffset_ft",
                             // What the sensor FMUs were actually given, as in
                             // the trim example.
-                            "imu::f_x_mps2",        "imu::f_y_mps2",        "imu::f_z_mps2",
-                            "mag::b_x_ut",          "mag::b_y_ut",          "mag::b_z_ut",
+                            "imu::f_x_mps2",
+                            "imu::f_y_mps2",
+                            "imu::f_z_mps2",
+                            "mag::b_x_ut",
+                            "mag::b_y_ut",
+                            "mag::b_z_ut",
                             "radalt::h_agl_m" });
     write_run_config(options.csv_path, options, ap_case, keas_trim_kt);
 
@@ -701,12 +856,12 @@ int main(int argc, char** argv)
               << "[cosim] radalt: " << options.radalt_fmu.string() << "\n"
               << "[cosim] check-case " << options.check_case << ": " << ap_case.summary << "\n"
               << "[cosim] loop: " << options.step_s << " s base step (" << 1.0 / options.step_s
-              << " Hz closed loop, one-step transport delay); GPS every " << options.gps_period_s
-              << " s, radalt every " << 1.0 / options.radalt_rate_hz << " s, " << options.imu_rate_hz
+              << " Hz closed loop, one-step transport delay); GPS every " << options.gps_period_s << " s, radalt every "
+              << 1.0 / options.radalt_rate_hz << " s, " << options.imu_rate_hz
               << " Hz IMU; BMP390 and MMC5983MA at the rates the flight computer programs\n"
-              << "[cosim] plant: trimmed at " << std::fixed << std::setprecision(6) << options.lat0_deg
-              << " deg N / " << options.lon0_deg << " deg E, " << std::defaultfloat << options.alt0_ft << " ft, "
-              << options.vt0_fps << " ft/s, heading " << options.heading0_deg << " deg\n"
+              << "[cosim] plant: trimmed at " << std::fixed << std::setprecision(6) << options.lat0_deg << " deg N / "
+              << options.lon0_deg << " deg E, " << std::defaultfloat << options.alt0_ft << " ft, " << options.vt0_fps
+              << " ft/s, heading " << options.heading0_deg << " deg\n"
               << "[cosim] autopilot: holding trim KEAS " << keas_trim_kt << " kt (from the plant's rho and vt)\n"
               << "[cosim] stop " << options.stop_s << " s (the case's longest published reference window)\n";
 

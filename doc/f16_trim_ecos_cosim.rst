@@ -356,7 +356,7 @@ Results
 -------
 
 ``plot_results.py`` (matplotlib) renders the six CSVs — the host's truth log
-and the flight computer's five decoded-sensor logs — into seven figures per
+and the flight computer's five decoded-sensor logs — into eight figures per
 check-case:
 
 .. code-block:: console
@@ -377,7 +377,10 @@ which flight it came from. Every figure is stamped at the foot with the
 check-case, the flight condition, the receiver configuration and whether the
 run was paced.
 
-**All figures below are from paced runs** (``--rtf 1``). Unpaced, 200 s of
+**All figures below are from paced runs** (``--rtf 1``), except the GPS error
+figure, whose record — 3548 s of fixes, 35 correlation times — is unpaced:
+the receiver's data queues in a socket, so pacing changes nothing about it,
+and a record that long at 2× real time would otherwise take an afternoon. Unpaced, 200 s of
 flight yields about 37 barometer conversions against the 896 here, and the
 altitude- and heading-consistency figures become a scatter of dots through
 which no trace can be read. The GPS, IMU and radar-altimeter figures are
@@ -464,6 +467,39 @@ Check-case 11: the cross-sensor reference
    makes case 11 the flight to judge it on. GPS course, meanwhile, is not yaw
    at all (it is where the velocity vector points, not the nose), and its
    residual is the noise plus the sideslip, not an error.
+
+.. figure:: _static/f16_trim_ecos/case11_gps_error.png
+   :width: 100%
+   :alt: Three panels — north/east and vertical position error wandering slowly over 3500 s with the receiver's narrower claimed-accuracy band shaded, and the sample autocorrelation of the north error decaying along the predicted 0.96·exp(−lag/100 s) curve
+
+   The receiver as the EKF will meet it: ``--gps-errors correlated``, the
+   realistic preset, on the one figure of this page not drawn from the run
+   above — the receiver model's realistic configuration is opt-in, and it
+   needs a long record.
+
+   The upper panels are the same measurement as the altitude figure's GPS
+   residual, on a flight long enough to show its character. The RMS is where
+   the default's was — 1.49 / 1.69 m per axis and 3.33 m vertical against a
+   configured 1.53 / 3.06 — but the error no longer scatters about zero from
+   one fix to the next; it *wanders*, in excursions a hundred seconds wide,
+   because 96 % of its variance is a first-order Gauss–Markov term with a
+   100 s correlation time and only the remainder is white. Averaging ten
+   fixes buys a filter nothing here. And the shaded band is what the
+   receiver *claims*: ``hAcc`` reads 1.07 m for an error whose RMS is 1.5 m —
+   the 70 % optimism real receivers show — so a filter that weights fixes by
+   the reported accuracy under-weights the truth by exactly that ratio.
+
+   The lower panel asks the question the RMS cannot: the sample
+   autocorrelation of the north error, against the curve the run's own
+   sidecar predicts. At lag τ = 100 s it measures **0.32 north and 0.32 east
+   against an expected 0.35**; at 10 s, 0.86 and 0.89 against 0.87. The same
+   panel drawn from the default run is a spike at zero lag and nothing
+   after. The record is 35 τ long — the flight computer's wall-clock cap
+   (``--max-wall-s``) ended its log at 3548 s of a 10 000 s run — so a
+   sample autocorrelation at lag τ scatters by about ±0.17, which the figure
+   prints beside the curve; the measured 0.32 is three and a half of those
+   from zero. That is the point: this error is not white, and a filter tuned
+   as though it were would be confidently wrong by the correlated share.
 
 .. figure:: _static/f16_trim_ecos/case11_imu_specific_force.png
    :width: 100%
