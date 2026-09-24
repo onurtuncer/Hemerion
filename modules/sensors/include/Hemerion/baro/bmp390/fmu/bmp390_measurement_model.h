@@ -96,9 +96,9 @@ public:
   /// still read plausibly, exactly as the real converter's do.
   struct Conversion
   {
-    std::uint32_t uncomp_press = 0;   ///< Raw 24-bit pressure word.
-    std::uint32_t uncomp_temp = 0;    ///< Raw 24-bit temperature word.
-    bool pressure_in_rating = true;   ///< Ambient pressure inside 300--1250 hPa.
+    std::uint32_t uncomp_press = 0;     ///< Raw 24-bit pressure word.
+    std::uint32_t uncomp_temp = 0;      ///< Raw 24-bit temperature word.
+    bool pressure_in_rating = true;     ///< Ambient pressure inside 300--1250 hPa.
     bool temperature_in_rating = true;  ///< Die temperature inside -40..+85 °C.
   };
 

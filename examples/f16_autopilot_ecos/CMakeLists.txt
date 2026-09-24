@@ -7,10 +7,9 @@
 # (13.1-13.4): Aetherion's F16Plant.fmu and F16Autopilot.fmu in a loop, with all five Hemerion sensor FMUs riding the
 # same truth. See README.md.
 #
-# One host executable: f16_autopilot_cosim. The flight computer is examples/f16_trim_ecos's f16_flight_computer,
-# reused rather than copied -- the sensor complement, the buses and the trim condition are identical, so a second
-# copy would only be a second place for them to drift. The geomagnetic dipole header is included from there for the
-# same reason.
+# One host executable: f16_autopilot_cosim. The flight computer is examples/f16_trim_ecos's f16_flight_computer, reused
+# rather than copied -- the sensor complement, the buses and the trim condition are identical, so a second copy would
+# only be a second place for them to drift. The geomagnetic dipole header is included from there for the same reason.
 # ------------------------------------------------------------------------------
 
 if(NOT TARGET hemerion_gps_fmu_fmi2
@@ -57,8 +56,8 @@ endif()
 
 FetchContent_GetProperties(ecos)
 
-# Aetherion installs its example FMUs under <prefix>/share/Aetherion/fmu/. Both paths are baked in as runtime
-# defaults; --f16 / --ap override them, so a machine without Aetherion can still build this example.
+# Aetherion installs its example FMUs under <prefix>/share/Aetherion/fmu/. Both paths are baked in as runtime defaults;
+# --f16 / --ap override them, so a machine without Aetherion can still build this example.
 find_file(
   HEMERION_F16_PLANT_FMU
   NAMES F16Plant.fmu
@@ -92,13 +91,17 @@ if(NOT HEMERION_F16_AUTOPILOT_FMU)
   set(HEMERION_F16_AUTOPILOT_FMU "")
 endif()
 
-# The requirement is a set of FMI ports, tested by reading them out of each archive -- same approach and same
-# helper pattern as examples/f16_trim_ecos, one macro because there are now two archives to interrogate.
+# The requirement is a set of FMI ports, tested by reading them out of each archive -- same approach and same helper
+# pattern as examples/f16_trim_ecos, one macro because there are now two archives to interrogate.
 set(HEMERION_AETHERION_MIN_VERSION 0.14.1)
 
 # Reads modelDescription.xml out of ${archive} into ${out_var}. `cmake -E tar` for the reasons documented in
 # examples/f16_trim_ecos/CMakeLists.txt (the pinned cmake-format cannot parse file(ARCHIVE_EXTRACT)).
-function(hemerion_read_model_description archive workdir out_var)
+function(
+  hemerion_read_model_description
+  archive
+  workdir
+  out_var)
   file(REMOVE_RECURSE "${workdir}")
   file(MAKE_DIRECTORY "${workdir}")
   execute_process(
@@ -122,9 +125,7 @@ if(HEMERION_F16_PLANT_FMU)
   string(FIND "${_f16_ports}" "out.specificForce_x_m_s2" _f16_specific_force_at)
   # ...plus the loop itself: the four surface inputs the autopilot drives.
   string(FIND "${_f16_ports}" "ctrl.el_deg" _f16_ctrl_at)
-  if(_f16_lat_deg_at LESS 0
-     OR _f16_specific_force_at LESS 0
-     OR _f16_ctrl_at LESS 0)
+  if(_f16_lat_deg_at LESS 0 OR _f16_specific_force_at LESS 0 OR _f16_ctrl_at LESS 0)
     message(
       FATAL_ERROR
         "${HEMERION_F16_PLANT_FMU} does not publish every port this example binds (out.lat_deg, "
@@ -141,14 +142,11 @@ if(HEMERION_F16_AUTOPILOT_FMU)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HEMERION_F16_AUTOPILOT_FMU}")
   hemerion_read_model_description("${HEMERION_F16_AUTOPILOT_FMU}"
                                   "${CMAKE_CURRENT_BINARY_DIR}/F16Autopilot.modelDescription" _ap_ports)
-  # One representative of each variable group the host binds: a command
-  # input, a feedback input, a surface output.
+  # One representative of each variable group the host binds: a command input, a feedback input, a surface output.
   string(FIND "${_ap_ports}" "cmd.altCmd_ft" _ap_cmd_at)
   string(FIND "${_ap_ports}" "fb.alt_m" _ap_fb_at)
   string(FIND "${_ap_ports}" "ctrl.el_deg" _ap_ctrl_at)
-  if(_ap_cmd_at LESS 0
-     OR _ap_fb_at LESS 0
-     OR _ap_ctrl_at LESS 0)
+  if(_ap_cmd_at LESS 0 OR _ap_fb_at LESS 0 OR _ap_ctrl_at LESS 0)
     message(
       FATAL_ERROR
         "${HEMERION_F16_AUTOPILOT_FMU} does not publish every port this example binds (cmd.altCmd_ft, fb.alt_m, "
