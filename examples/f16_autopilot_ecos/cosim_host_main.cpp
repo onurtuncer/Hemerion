@@ -153,6 +153,40 @@ constexpr double kRhoSlKgM3 = 1.225;
 // The standalone's flat-earth radius for the lateral-deviation feedback.
 constexpr double kLatDevEarthRadiusM = 6'371'000.0;
 
+/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
+/// set and the run's .config sidecar cannot disagree about what the receiver
+/// was -- and plot_results.py can draw the autocorrelation a run *should*
+/// show from the sidecar alone.
+struct GpsErrorModel
+{
+  const char* name;
+  double horizontal_pos_noise_m;
+  double vertical_pos_noise_m;
+  double speed_noise_mps;
+  double course_noise_deg;
+  double horizontal_pos_correlated_m;
+  double vertical_pos_correlated_m;
+  double position_correlation_time_s;
+  double speed_correlated_mps;
+  double course_correlated_deg;
+  double velocity_correlation_time_s;
+  double accuracy_scale;
+};
+
+/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
+/// the parameter set explicitly even though the FMU would default to them, so
+/// the sidecar is always a complete record.
+constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
+
+/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
+/// default's -- nothing on a page changes by magnitude -- but most of it now
+/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
+/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
+/// estimate tends to. Spelled out here rather than as an FMU-side preset so
+/// the example reads end to end; the values are tabulated in
+/// doc/sensor_models.rst.
+constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
+
 struct Options
 {
   std::filesystem::path f16_fmu = HEMERION_F16_FMU_PATH;
@@ -188,6 +222,12 @@ struct Options
   int dynamic_platform = 8;
   bool cocom_limits = true;
   double reacquisition_time_s = 2.0;
+  // GPS error model: the FMU's default white-only receiver, or the realistic
+  // time-correlated one (doc/sensor_models.rst). Off by default so the
+  // receiver -- and every figure drawn from it -- stays the one this example
+  // was verified with until the change is asked for.
+  bool gps_correlated_errors = false;
+  int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
 };
 
 /// @brief The four closed-loop autopilot check-cases.
@@ -233,6 +273,7 @@ void print_usage()
          "                           [--gps <fmu>] [--imu <fmu>] [--baro <fmu>] [--mag <fmu>] [--radalt <fmu>]\n"
          "                           [--imu-rate <hz>] [--radalt-rate <hz>] [--gps-period <s>]\n"
          "                           [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
+         "                           [--gps-errors white|correlated] [--gps-seed <n>]\n"
          "                           [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
          "\n"
          "  --case      NASA TM-2015-218675 closed-loop check-case (default 13.1):\n"
@@ -254,6 +295,9 @@ void print_usage()
          "              case here stays far inside it)\n"
          "  --no-cocom  clear the COCOM export cut-off (default: in force, never approached)\n"
          "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
+         "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
+         "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
+         "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
          "  --stop      simulation stop time [s] (default: the case's reference window)\n"
          "  --step      base communication step [s] (default 0.01; this is the closed\n"
          "              loop's sample period AND its transport delay -- see the file header)\n"
@@ -267,7 +311,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 19> kValueOptions = { {
+constexpr std::array<ValueOption, 21> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -282,6 +326,16 @@ constexpr std::array<ValueOption, 19> kValueOptions = { {
     { "--gps-period", [](Options& o, const char* v) { o.gps_period_s = std::stod(v); } },
     { "--dyn-model", [](Options& o, const char* v) { o.dynamic_platform = std::stoi(v); } },
     { "--reacq", [](Options& o, const char* v) { o.reacquisition_time_s = std::stod(v); } },
+    { "--gps-errors",
+      [](Options& o, const char* v) {
+        const std::string model(v);
+        if (model != "white" && model != "correlated")
+        {
+          throw std::invalid_argument("--gps-errors takes 'white' or 'correlated', not '" + model + "'");
+        }
+        o.gps_correlated_errors = (model == "correlated");
+      } },
+    { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
     { "--stop", [](Options& o, const char* v) { o.stop_s = std::stod(v); } },
     { "--step", [](Options& o, const char* v) { o.step_s = std::stod(v); } },
     { "--csv", [](Options& o, const char* v) { o.csv_path = v; } },
@@ -404,6 +458,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
     std::cerr << "warning: cannot write " << config_path.string() << "; figures will be unlabelled\n";
     return;
   }
+  // Written in full so a figure can be checked against the model that made it.
+  const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
   out << "check_case=" << options.check_case << "\n"
       << "alt_cmd_ft=" << ap_case.alt_cmd_ft << "\n"
       << "alt_step_time_s=" << ap_case.alt_step_time_s << "\n"
@@ -417,6 +473,19 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "dynamic_platform=" << options.dynamic_platform << "\n"
       << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
+      << "gps_error_model=" << receiver.name << "\n"
+      << "gps_seed=" << options.gps_seed << "\n"
+      << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
+      << "gps_vertical_pos_noise_m=" << receiver.vertical_pos_noise_m << "\n"
+      << "gps_speed_noise_mps=" << receiver.speed_noise_mps << "\n"
+      << "gps_course_noise_deg=" << receiver.course_noise_deg << "\n"
+      << "gps_horizontal_pos_correlated_m=" << receiver.horizontal_pos_correlated_m << "\n"
+      << "gps_vertical_pos_correlated_m=" << receiver.vertical_pos_correlated_m << "\n"
+      << "gps_position_correlation_time_s=" << receiver.position_correlation_time_s << "\n"
+      << "gps_speed_correlated_mps=" << receiver.speed_correlated_mps << "\n"
+      << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
+      << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
+      << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
       << "lat0_deg=" << options.lat0_deg << "\n"
       << "lon0_deg=" << options.lon0_deg << "\n"
       << "alt0_ft=" << options.alt0_ft << "\n"
@@ -586,6 +655,20 @@ int main(int argc, char** argv)
     trim_point["gps::dynamic_platform"] = options.dynamic_platform;
     trim_point["gps::cocom_limits_enabled"] = options.cocom_limits;
     trim_point["gps::reacquisition_time_s"] = options.reacquisition_time_s;
+    // The receiver's error model, in full: see GpsErrorModel.
+    const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
+    trim_point["gps::seed"] = options.gps_seed;
+    trim_point["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
+    trim_point["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
+    trim_point["gps::speed_noise_mps"] = receiver.speed_noise_mps;
+    trim_point["gps::course_noise_deg"] = receiver.course_noise_deg;
+    trim_point["gps::horizontal_pos_correlated_m"] = receiver.horizontal_pos_correlated_m;
+    trim_point["gps::vertical_pos_correlated_m"] = receiver.vertical_pos_correlated_m;
+    trim_point["gps::position_correlation_time_s"] = receiver.position_correlation_time_s;
+    trim_point["gps::speed_correlated_mps"] = receiver.speed_correlated_mps;
+    trim_point["gps::course_correlated_deg"] = receiver.course_correlated_deg;
+    trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
+    trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
     trim_point["ap::fb.alt_m"] = options.alt0_ft / kFtPerM;
     trim_point["ap::fb.vt_m_s"] = options.vt0_fps / kFtPerM;
     trim_point["ap::fb.rho_kg_m3"] = 0.9046;  // ISA at 3 052 m; a seed, not truth

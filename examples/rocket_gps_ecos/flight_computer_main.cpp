@@ -77,6 +77,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -591,6 +592,12 @@ int main(int argc, char** argv)
   }
   gps_csv << "fix_index,sim_time_s,latitude_deg,longitude_deg,altitude_m,ground_speed_mps,course_deg,"
              "horizontal_accuracy_m,vertical_accuracy_m,num_satellites,fix_type\n";
+  // Ten significant digits: at 36 deg of latitude the stream's default six put
+  // the fix on a 0.0001 deg (11 m) grid, which is seven times the noise the
+  // receiver model injects -- an error figure drawn from that log would be a
+  // picture of this line. (Near the equator six digits happen to suffice,
+  // which is how the rocket example never noticed.)
+  gps_csv << std::setprecision(10);
 
   std::ofstream imu_csv = open_csv(options.imu_csv_path);
   if (!imu_csv)
