@@ -51,6 +51,13 @@ target_link_libraries(test_hemerion_sensors_gps_dynamics PRIVATE hemerion_sensor
 add_test(NAME sensors.gps_dynamics COMMAND test_hemerion_sensors_gps_dynamics)
 set_tests_properties(sensors.gps_dynamics PROPERTIES LABELS "unit")
 
+# Error model of the GPS FMU simulator (white + time-correlated Gauss-Markov terms, reported accuracy, seeding).
+# Header-only, so nothing from gps/fmu/ is compiled in; the statistics it asserts are on 20 000-fix sequences.
+add_executable(test_hemerion_sensors_gps_noise test_gps_noise.cpp)
+target_link_libraries(test_hemerion_sensors_gps_noise PRIVATE hemerion_sensors hemerion_test_support)
+add_test(NAME sensors.gps_noise COMMAND test_hemerion_sensors_gps_noise)
+set_tests_properties(sensors.gps_noise PROPERTIES LABELS "unit")
+
 # Round-trip test for the IMU FMU simulator (imu/fmu/). imu_packet_emitter.cpp is compiled directly into this test
 # binary rather than via hemerion_sensors, since the emitter is sim-only code gated behind HEMERION_BUILD_FMU in
 # imu/fmu/CMakeLists.txt and must not be linked into cross-compiled firmware.
