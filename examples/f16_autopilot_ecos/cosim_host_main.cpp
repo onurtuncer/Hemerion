@@ -93,6 +93,8 @@
 // third copy of the model would be a third place for it to drift.
 #include "geomagnetic_field.hpp"
 
+#include "environment.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -115,6 +117,15 @@
 
 namespace
 {
+
+using hemerion::examples::dryden_low_altitude;
+using hemerion::examples::DrydenAtAltitude;
+using hemerion::examples::GpsErrorModel;
+using hemerion::examples::kCorrelatedReceiver;
+using hemerion::examples::kFeetToMetres;
+using hemerion::examples::kWhiteReceiver;
+using hemerion::examples::parse_csv_doubles;
+
 using hemerion::examples::f16_trim_ecos::FieldBody;
 using hemerion::examples::f16_trim_ecos::FieldNed;
 using hemerion::examples::f16_trim_ecos::GeomagneticDipole;
@@ -153,107 +164,6 @@ constexpr double kKtMps = 0.5144444;
 constexpr double kRhoSlKgM3 = 1.225;
 // The standalone's flat-earth radius for the lateral-deviation feedback.
 constexpr double kLatDevEarthRadiusM = 6'371'000.0;
-
-/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
-/// set and the run's .config sidecar cannot disagree about what the receiver
-/// was -- and plot_results.py can draw the autocorrelation a run *should*
-/// show from the sidecar alone.
-struct GpsErrorModel
-{
-  const char* name;
-  double horizontal_pos_noise_m;
-  double vertical_pos_noise_m;
-  double speed_noise_mps;
-  double course_noise_deg;
-  double horizontal_pos_correlated_m;
-  double vertical_pos_correlated_m;
-  double position_correlation_time_s;
-  double speed_correlated_mps;
-  double course_correlated_deg;
-  double velocity_correlation_time_s;
-  double accuracy_scale;
-};
-
-/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
-/// the parameter set explicitly even though the FMU would default to them, so
-/// the sidecar is always a complete record.
-constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
-
-/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
-/// default's -- nothing on a page changes by magnitude -- but most of it now
-/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
-/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
-/// estimate tends to. Spelled out here rather than as an FMU-side preset so
-/// the example reads end to end; the values are tabulated in
-/// doc/sensor_models.rst.
-constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
-
-/// MIL-F-8785C low-altitude turbulence, evaluated once at the trim altitude.
-///
-/// The standard's low-altitude rules are formulae rather than a chart: the
-/// vertical intensity is 0.1 W20, the horizontal ones scale it by
-/// (h / 1000 ft)^0.4, the vertical scale length is the altitude itself and the
-/// horizontal ones h / (0.177 + 0.000823 h)^1.2, all in feet.
-///
-/// **Above 2000 ft this is an extrapolation, not the standard.** There
-/// MIL-F-8785C switches to a probability-of-exceedance chart, which is why
-/// Aetherion exposes the six Dryden numbers rather than a preset (see its
-/// TODO-wind-turbulence-atmosphere.md). Continuing the low-altitude form
-/// upward gives a defensible, monotone, reproducible intensity for a
-/// demonstration; it is not a certification atmosphere, and a run that needs
-/// one should write turb.sigma_* and turb.L_* directly.
-/// Parses "a,b" or "a,b,c" into `out`, throwing if the shape is wrong.
-///
-/// std::sscanf would be shorter, but MSVC's CRT deprecates it and the
-/// diagnostic it gives ("expected 3 fields") is worse than naming the option's
-/// grammar. std::stod's own exception carries the offending text.
-inline void parse_csv_doubles(const char* text, std::span<double> out, const char* option, const char* grammar)
-{
-  std::string_view rest(text);
-  for (std::size_t i = 0; i < out.size(); ++i)
-  {
-    const std::size_t comma = rest.find(',');
-    const std::string_view field = rest.substr(0, comma);
-    if (field.empty() || (comma == std::string_view::npos && i + 1 != out.size()))
-    {
-      throw std::invalid_argument(std::string(option) + " takes " + grammar);
-    }
-    out[i] = std::stod(std::string(field));
-    rest = (comma == std::string_view::npos) ? std::string_view{} : rest.substr(comma + 1);
-  }
-  if (!rest.empty())
-  {
-    throw std::invalid_argument(std::string(option) + " takes " + grammar);
-  }
-}
-
-struct DrydenAtAltitude
-{
-  double sigma_u_mps;
-  double sigma_v_mps;
-  double sigma_w_mps;
-  double L_u_m;
-  double L_v_m;
-  double L_w_m;
-};
-
-constexpr double kFeetToMetres = 0.3048;
-
-[[nodiscard]] inline DrydenAtAltitude dryden_low_altitude(double altitude_m, double w20_mps)
-{
-  const double h_ft = std::max(10.0, altitude_m / kFeetToMetres);
-  const double sigma_w = 0.1 * w20_mps;
-  const double sigma_uv = sigma_w / std::pow(h_ft / 1000.0, 0.4);
-
-  DrydenAtAltitude dryden;
-  dryden.sigma_u_mps = sigma_uv;
-  dryden.sigma_v_mps = sigma_uv;
-  dryden.sigma_w_mps = sigma_w;
-  dryden.L_u_m = (h_ft / std::pow(0.177 + 0.000823 * h_ft, 1.2)) * kFeetToMetres;
-  dryden.L_v_m = dryden.L_u_m;
-  dryden.L_w_m = h_ft * kFeetToMetres;
-  return dryden;
-}
 
 struct Options
 {

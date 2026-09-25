@@ -177,7 +177,7 @@ target_link_libraries(f16_trim_cosim PRIVATE libecos)
 target_compile_features(f16_trim_cosim PRIVATE cxx_std_23)
 # Ecos keeps src/ off its public include path. cosim_host_main.cpp reaches into it for util/unzipper.hpp so its
 # FMU-extraction preflight runs the same code Ecos will rather than a reimplementation that could drift.
-target_include_directories(f16_trim_cosim PRIVATE "${ecos_SOURCE_DIR}/src")
+target_include_directories(f16_trim_cosim PRIVATE "${ecos_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/examples/common")
 target_compile_definitions(
   f16_trim_cosim
   PRIVATE HEMERION_F16_FMU_PATH="${HEMERION_F16_PLANT_FMU}"

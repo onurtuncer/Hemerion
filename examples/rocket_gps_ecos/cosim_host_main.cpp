@@ -76,6 +76,8 @@
 
 #include "geomagnetic_field.hpp"
 
+#include "environment.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -97,6 +99,11 @@
 
 namespace
 {
+
+using hemerion::examples::GpsErrorModel;
+using hemerion::examples::kCorrelatedReceiver;
+using hemerion::examples::kWhiteReceiver;
+
 using hemerion::examples::rocket_gps_ecos::FieldBody;
 using hemerion::examples::rocket_gps_ecos::FieldNed;
 using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
@@ -119,40 +126,6 @@ using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
 #ifndef HEMERION_MMC5983MA_FMU_PATH
 #define HEMERION_MMC5983MA_FMU_PATH ""
 #endif
-
-/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
-/// set and the run's .config sidecar cannot disagree about what the receiver
-/// was -- and plot_results.py can draw the autocorrelation a run *should*
-/// show from the sidecar alone.
-struct GpsErrorModel
-{
-  const char* name;
-  double horizontal_pos_noise_m;
-  double vertical_pos_noise_m;
-  double speed_noise_mps;
-  double course_noise_deg;
-  double horizontal_pos_correlated_m;
-  double vertical_pos_correlated_m;
-  double position_correlation_time_s;
-  double speed_correlated_mps;
-  double course_correlated_deg;
-  double velocity_correlation_time_s;
-  double accuracy_scale;
-};
-
-/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
-/// the parameter set explicitly even though the FMU would default to them, so
-/// the sidecar is always a complete record.
-constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
-
-/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
-/// default's -- nothing on a page changes by magnitude -- but most of it now
-/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
-/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
-/// estimate tends to. Spelled out here rather than as an FMU-side preset so
-/// the example reads end to end; the values are tabulated in
-/// doc/sensor_models.rst.
-constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
 
 struct Options
 {

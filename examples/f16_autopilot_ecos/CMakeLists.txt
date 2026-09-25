@@ -172,7 +172,7 @@ target_link_libraries(f16_autopilot_cosim PRIVATE libecos)
 target_compile_features(f16_autopilot_cosim PRIVATE cxx_std_23)
 # Ecos' src/ for util/unzipper.hpp (the extraction preflight), and the sibling example for geomagnetic_field.hpp --
 # shared, not copied; see the header comment in cosim_host_main.cpp.
-target_include_directories(f16_autopilot_cosim PRIVATE "${ecos_SOURCE_DIR}/src"
+target_include_directories(f16_autopilot_cosim PRIVATE "${ecos_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/examples/common"
                                                        "${CMAKE_CURRENT_SOURCE_DIR}/../f16_trim_ecos")
 target_compile_definitions(
   f16_autopilot_cosim
