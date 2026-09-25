@@ -88,6 +88,10 @@ namespace hemerion::sensors::baro::bmp390::fmu
 namespace
 {
 
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr Bmp390MeasurementConfig kDefaultNoise{};
+
 using fmu4cpp::causality_t;
 using fmu4cpp::initial_t;
 using fmu4cpp::variability_t;
@@ -147,6 +151,30 @@ public:
         .setDescription("Conversions produced with ambient pressure or die temperature outside the part's rated "
                         "envelope (300-1250 hPa, -40..+85 degC); the words themselves stay plausible, as on the "
                         "real part");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("pressure_noise_pa", &pressure_noise_pa_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Pressure white noise, 1-sigma [Pa]");
+    register_real("temperature_noise_c", &temperature_noise_c_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Die-temperature white noise, 1-sigma [degrees C]");
+    register_real("pressure_bias_sigma_pa", &pressure_bias_sigma_pa_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Turn-on pressure bias 1-sigma, drawn once per run [Pa]");
+    register_real("temperature_bias_sigma_c", &temperature_bias_sigma_c_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Turn-on die-temperature bias 1-sigma, drawn once per run [degrees C]");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -155,6 +183,7 @@ public:
   /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_bmp390_fmu] Unable to create the I2C bus '" + endpoint_.bus_name() +
@@ -173,6 +202,11 @@ public:
   /// a reset does not swap out.
   void reset() override
   {
+    seed_ = 0;
+    pressure_noise_pa_ = kDefaultNoise.pressure_noise_pa;
+    temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
+    pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
+    temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
     altitude_m_ = 0.0;
     ambient_pressure_pa_ = 0.0;
     ambient_temperature_c_ = 0.0;
@@ -289,6 +323,27 @@ private:
       debugLog(temperature_was_out_ ? fmiWarning : fmiOK, message);
     }
   }
+
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    Bmp390MeasurementConfig config;
+    config.pressure_noise_pa = static_cast<float>(pressure_noise_pa_);
+    config.temperature_noise_c = static_cast<float>(temperature_noise_c_);
+    config.pressure_bias_sigma_pa = static_cast<float>(pressure_bias_sigma_pa_);
+    config.temperature_bias_sigma_c = static_cast<float>(temperature_bias_sigma_c_);
+    config.calibration = measurement_model_.calibration();
+    measurement_model_ = (seed_ == 0) ? Bmp390MeasurementModel(config) :
+                                        Bmp390MeasurementModel(config, static_cast<std::uint64_t>(seed_));
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double pressure_noise_pa_ = kDefaultNoise.pressure_noise_pa;
+  double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
+  double pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
+  double temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
 
   Bmp390MeasurementModel measurement_model_;
   Bmp390I2cSlave slave_{ measurement_model_.calibration() };

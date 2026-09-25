@@ -83,7 +83,12 @@ namespace hemerion::sensors::mag::mmc5983ma::fmu
 namespace
 {
 
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr Mmc5983maMeasurementConfig kDefaultNoise{};
+
 using fmu4cpp::causality_t;
+using fmu4cpp::variability_t;
 
 /// Where this part sits: the bus it creates, and the environment variable a
 /// launch script can retarget it with.
@@ -119,6 +124,32 @@ public:
     register_real("temperature_c", &temperature_c_)
         .setCausality(causality_t::INPUT)
         .setDescription("True die temperature [degrees C]; the part reports it at 0.8 C resolution");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("noise_ut", &noise_ut_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("White noise, 1-sigma per axis [uT]");
+    register_real("hard_iron_sigma_ut", &hard_iron_sigma_ut_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Hard-iron offset 1-sigma per axis, drawn once per run [uT]; a real field the installation "
+                        "adds, so SET/RESET does not remove it");
+    register_real("bridge_offset_sigma_ut", &bridge_offset_sigma_ut_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Bridge offset 1-sigma per axis, drawn once per run [uT]; this is what a SET/RESET pair "
+                        "removes");
+    register_real("temperature_noise_c", &temperature_noise_c_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Die-temperature white noise, 1-sigma [degrees C]");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -127,6 +158,7 @@ public:
   /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_mmc5983ma_fmu] Unable to create the I2C bus '" + endpoint_.bus_name() +
@@ -146,6 +178,11 @@ public:
   /// swap out.
   void reset() override
   {
+    seed_ = 0;
+    noise_ut_ = kDefaultNoise.noise_ut;
+    hard_iron_sigma_ut_ = kDefaultNoise.hard_iron_sigma_ut;
+    bridge_offset_sigma_ut_ = kDefaultNoise.bridge_offset_sigma_ut;
+    temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
     truth_x_ut_ = 0.0;
     truth_y_ut_ = 0.0;
     truth_z_ut_ = 0.0;
@@ -215,6 +252,26 @@ private:
     const Mmc5983maSensingState sensing = slave_.sensing_state();
     slave_.latch_measurement(measurement_model_.measure(truth_x_ut_, truth_y_ut_, truth_z_ut_, sensing));
   }
+
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    Mmc5983maMeasurementConfig config;
+    config.noise_ut = static_cast<float>(noise_ut_);
+    config.hard_iron_sigma_ut = static_cast<float>(hard_iron_sigma_ut_);
+    config.bridge_offset_sigma_ut = static_cast<float>(bridge_offset_sigma_ut_);
+    config.temperature_noise_c = static_cast<float>(temperature_noise_c_);
+    measurement_model_ = (seed_ == 0) ? Mmc5983maMeasurementModel(config) :
+                                        Mmc5983maMeasurementModel(config, static_cast<std::uint64_t>(seed_));
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double noise_ut_ = kDefaultNoise.noise_ut;
+  double hard_iron_sigma_ut_ = kDefaultNoise.hard_iron_sigma_ut;
+  double bridge_offset_sigma_ut_ = kDefaultNoise.bridge_offset_sigma_ut;
+  double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
 
   Mmc5983maMeasurementModel measurement_model_;
   Mmc5983maI2cSlave slave_;
