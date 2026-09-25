@@ -95,7 +95,7 @@ endif()
 # out.specificForce_{x,y,z}_m_s2, the (F_aero + F_thrust)/m at the CG that the IMU FMU's inputs take.
 # cosim_host_main.cpp binds both sets by name, so an older plant is a missing variable rather than a unit to compensate
 # for.
-set(HEMERION_AETHERION_MIN_VERSION 0.14.0)
+set(HEMERION_AETHERION_MIN_VERSION 0.16.0)
 
 if(HEMERION_F16_PLANT_FMU)
   # Re-check when the FMU is replaced under an already-configured build tree -- what happens when Aetherion is rebuilt
@@ -148,6 +148,20 @@ if(HEMERION_F16_PLANT_FMU)
         "out.specificForce_* ports into the IMU FMU. Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
         "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
   endif()
+
+  # Third requirement, third release: 0.16.0 gave the plant an environment. The host writes wind.* and atm.* into the
+  # parameter set on every run (their defaults are the calm standard day) and turb.* when --turbulence asks for it, so
+  # an older plant fails at load inside Ecos with an unknown-variable error rather than here with a sentence.
+  # wind.north_mps stands for the set: they landed together.
+  string(FIND "${_f16_ports}" "wind.north_mps" _f16_wind_at)
+  if(_f16_wind_at LESS 0)
+    message(
+      FATAL_ERROR
+        "${HEMERION_F16_PLANT_FMU} publishes no wind.north_mps parameter, but f16_trim_cosim writes the "
+        "wind.*/atm.* environment into every run. Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
+        "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
+  endif()
+  unset(_f16_wind_at)
 
   unset(_f16_unpack_dir)
   unset(_f16_unpack_result)

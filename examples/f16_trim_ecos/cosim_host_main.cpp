@@ -136,6 +136,7 @@
 #include <memory>
 #include <numbers>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -203,6 +204,73 @@ constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 1
 /// doc/sensor_models.rst.
 constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
 
+/// MIL-F-8785C low-altitude turbulence, evaluated once at the trim altitude.
+///
+/// The standard's low-altitude rules are formulae rather than a chart: the
+/// vertical intensity is 0.1 W20, the horizontal ones scale it by
+/// (h / 1000 ft)^0.4, the vertical scale length is the altitude itself and the
+/// horizontal ones h / (0.177 + 0.000823 h)^1.2, all in feet.
+///
+/// **Above 2000 ft this is an extrapolation, not the standard.** There
+/// MIL-F-8785C switches to a probability-of-exceedance chart, which is why
+/// Aetherion exposes the six Dryden numbers rather than a preset (see its
+/// TODO-wind-turbulence-atmosphere.md). Continuing the low-altitude form
+/// upward gives a defensible, monotone, reproducible intensity for a
+/// demonstration; it is not a certification atmosphere, and a run that needs
+/// one should write turb.sigma_* and turb.L_* directly.
+/// Parses "a,b" or "a,b,c" into `out`, throwing if the shape is wrong.
+///
+/// std::sscanf would be shorter, but MSVC's CRT deprecates it and the
+/// diagnostic it gives ("expected 3 fields") is worse than naming the option's
+/// grammar. std::stod's own exception carries the offending text.
+inline void parse_csv_doubles(const char* text, std::span<double> out, const char* option, const char* grammar)
+{
+  std::string_view rest(text);
+  for (std::size_t i = 0; i < out.size(); ++i)
+  {
+    const std::size_t comma = rest.find(',');
+    const std::string_view field = rest.substr(0, comma);
+    if (field.empty() || (comma == std::string_view::npos && i + 1 != out.size()))
+    {
+      throw std::invalid_argument(std::string(option) + " takes " + grammar);
+    }
+    out[i] = std::stod(std::string(field));
+    rest = (comma == std::string_view::npos) ? std::string_view{} : rest.substr(comma + 1);
+  }
+  if (!rest.empty())
+  {
+    throw std::invalid_argument(std::string(option) + " takes " + grammar);
+  }
+}
+
+struct DrydenAtAltitude
+{
+  double sigma_u_mps;
+  double sigma_v_mps;
+  double sigma_w_mps;
+  double L_u_m;
+  double L_v_m;
+  double L_w_m;
+};
+
+constexpr double kFeetToMetres = 0.3048;
+
+[[nodiscard]] inline DrydenAtAltitude dryden_low_altitude(double altitude_m, double w20_mps)
+{
+  const double h_ft = std::max(10.0, altitude_m / kFeetToMetres);
+  const double sigma_w = 0.1 * w20_mps;
+  const double sigma_uv = sigma_w / std::pow(h_ft / 1000.0, 0.4);
+
+  DrydenAtAltitude dryden;
+  dryden.sigma_u_mps = sigma_uv;
+  dryden.sigma_v_mps = sigma_uv;
+  dryden.sigma_w_mps = sigma_w;
+  dryden.L_u_m = (h_ft / std::pow(0.177 + 0.000823 * h_ft, 1.2)) * kFeetToMetres;
+  dryden.L_v_m = dryden.L_u_m;
+  dryden.L_w_m = h_ft * kFeetToMetres;
+  return dryden;
+}
+
 struct Options
 {
   std::filesystem::path f16_fmu = HEMERION_F16_FMU_PATH;
@@ -268,6 +336,16 @@ struct Options
   // was verified with until the change is asked for.
   bool gps_correlated_errors = false;
   int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
+
+  // The plant's environment (Aetherion >= 0.16.0). All zero is the calm,
+  // standard day every published figure on these pages was measured on.
+  double wind_north_mps = 0.0;
+  double wind_east_mps = 0.0;
+  double wind_down_mps = 0.0;
+  double turbulence_w20_mps = 0.0;  // MIL-F-8785C W20 at 20 ft; 0 = no turbulence
+  int turbulence_seed = 1;
+  double atmosphere_delta_t_k = 0.0;
+  double atmosphere_delta_p_pa = 0.0;
 };
 
 /// @brief The open-loop trim flyouts this example flies.
@@ -301,6 +379,7 @@ void print_usage()
                "                      [--imu-rate <hz>] [--radalt-rate <hz>]\n"
                "                      [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                      [--gps-errors white|correlated] [--gps-seed <n>]\n"
+               "                      [--wind <n,e,d>] [--turbulence <w20>] [--atmosphere <dT,dP>]\n"
                "                      [--lat0 <deg>] [--lon0 <deg>] [--alt0 <ft>] [--vt0 <ft/s>]\n"
                "                      [--heading0 <deg>] [--roll0 <deg>]\n"
                "                      [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
@@ -328,6 +407,11 @@ void print_usage()
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
                "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
+               "  --wind      steady wind as north,east,down in m/s (default calm); the velocity of the air\n"
+               "  --turbulence  MIL-F-8785C W20 wind speed at 20 ft in m/s: 0 = off (default), ~5 light,\n"
+               "              ~15 moderate. Sets the Dryden sigmas and scale lengths for the trim altitude\n"
+               "  --turbulence-seed  turbulence RNG seed (default 1); one seed is one realisation\n"
+               "  --atmosphere  non-standard day as deltaT_K,deltaP_sl_Pa (default 0,0 = the ISA)\n"
                "  --lat0 --lon0  trim position [deg] (default 36.019167 / -75.674444, Kitty Hawk NC)\n"
                "  --alt0      trim altitude [ft] (default 10013, or 30013 for --case 12)\n"
                "  --vt0       trim true airspeed [ft/s] (default 565.685 = 335.15 KTAS, or 2000 for --case 12)\n"
@@ -348,7 +432,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 23> kValueOptions = { {
+constexpr std::array<ValueOption, 27> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -371,6 +455,27 @@ constexpr std::array<ValueOption, 23> kValueOptions = { {
         o.gps_correlated_errors = (model == "correlated");
       } },
     { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
+    { "--wind",
+      [](Options& o, const char* v) {
+        // north,east,down in m/s -- the velocity *of the air*, NED, which is
+        // Aetherion's wind.* convention and the sign of out.v_*_m_s.
+        double ned[3] = { 0.0, 0.0, 0.0 };
+        parse_csv_doubles(v, ned, "--wind", "north,east,down in m/s, e.g. 10,0,0");
+        o.wind_north_mps = ned[0];
+        o.wind_east_mps = ned[1];
+        o.wind_down_mps = ned[2];
+      } },
+    { "--turbulence", [](Options& o, const char* v) { o.turbulence_w20_mps = std::stod(v); } },
+    { "--turbulence-seed", [](Options& o, const char* v) { o.turbulence_seed = std::stoi(v); } },
+    { "--atmosphere",
+      [](Options& o, const char* v) {
+        // deltaT_K,deltaP_sl_Pa -- the two numbers that turn the book's day
+        // into a real one.
+        double offsets[2] = { 0.0, 0.0 };
+        parse_csv_doubles(v, offsets, "--atmosphere", "deltaT_K,deltaP_sl_Pa, e.g. 20,-1000");
+        o.atmosphere_delta_t_k = offsets[0];
+        o.atmosphere_delta_p_pa = offsets[1];
+      } },
     { "--lat0", [](Options& o, const char* v) { o.lat0_deg = std::stod(v); } },
     { "--lon0", [](Options& o, const char* v) { o.lon0_deg = std::stod(v); } },
     { "--alt0", [](Options& o, const char* v) { o.alt0_ft = std::stod(v); } },
@@ -580,6 +685,13 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
       << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
       << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
+      << "wind_north_mps=" << options.wind_north_mps << "\n"
+      << "wind_east_mps=" << options.wind_east_mps << "\n"
+      << "wind_down_mps=" << options.wind_down_mps << "\n"
+      << "turbulence_w20_mps=" << options.turbulence_w20_mps << "\n"
+      << "turbulence_seed=" << options.turbulence_seed << "\n"
+      << "atmosphere_deltaT_K=" << options.atmosphere_delta_t_k << "\n"
+      << "atmosphere_deltaP_sl_Pa=" << options.atmosphere_delta_p_pa << "\n"
       << "lat0_deg=" << options.lat0_deg << "\n"
       << "lon0_deg=" << options.lon0_deg << "\n"
       << "alt0_ft=" << options.alt0_ft << "\n"
@@ -770,6 +882,14 @@ int main(int argc, char** argv)
     // else about its behaviour -- rate included -- is register state the
     // flight computer programs over I2C.
     ss.make_connection<double>("f16::out.alt_m", "baro::h_m");
+    // And the air it is actually in. The part inverts the ISA from h_m when
+    // nothing writes p_Pa, which is only right on a standard day; the plant
+    // integrates its own atmosphere and publishes it, so on a non-standard
+    // day (Aetherion's atm.deltaT_K / atm.deltaP_sl_Pa) the barometer reads
+    // the day the aircraft is flying through rather than the book's.
+    ss.make_connection<double>("f16::out.P_Pa", "baro::p_Pa");
+    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
+    ss.make_connection<double>("f16::out.T_K", "baro::T_degC", kelvin2celsius);
 
     // The radar altimeter measures height above *ground*, and this scenario
     // carries no terrain model, so MSL altitude goes in unmodified. At Kitty
@@ -787,7 +907,6 @@ int main(int argc, char** argv)
     // plant output to connect -- it is computed in the stepping loop below,
     // because it depends on position *and* attitude and an Ecos connection
     // modifier sees only its single source variable.
-    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
     ss.make_connection<double>("f16::out.T_K", "mag::temperature_c", kelvin2celsius);
 
     // The check-case's trim condition: Kitty Hawk, NC, heading 45 deg, a
@@ -843,6 +962,27 @@ int main(int argc, char** argv)
     trim_point["gps::course_correlated_deg"] = receiver.course_correlated_deg;
     trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
     trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
+
+    // The plant's environment. Written unconditionally, because every one of
+    // these defaults to the calm standard day: a run that asks for nothing gets
+    // the plant the published figures were measured on, and the .config sidecar
+    // records what was asked for either way.
+    trim_point["f16::wind.north_mps"] = options.wind_north_mps;
+    trim_point["f16::wind.east_mps"] = options.wind_east_mps;
+    trim_point["f16::wind.down_mps"] = options.wind_down_mps;
+    trim_point["f16::atm.deltaT_K"] = options.atmosphere_delta_t_k;
+    trim_point["f16::atm.deltaP_sl_Pa"] = options.atmosphere_delta_p_pa;
+    if (options.turbulence_w20_mps > 0.0)
+    {
+      const DrydenAtAltitude dryden = dryden_low_altitude(options.alt0_ft * kFeetToMetres, options.turbulence_w20_mps);
+      trim_point["f16::turb.sigma_u_mps"] = dryden.sigma_u_mps;
+      trim_point["f16::turb.sigma_v_mps"] = dryden.sigma_v_mps;
+      trim_point["f16::turb.sigma_w_mps"] = dryden.sigma_w_mps;
+      trim_point["f16::turb.L_u_m"] = dryden.L_u_m;
+      trim_point["f16::turb.L_v_m"] = dryden.L_v_m;
+      trim_point["f16::turb.L_w_m"] = dryden.L_w_m;
+      trim_point["f16::turb.seed"] = options.turbulence_seed;
+    }
     ss.add_parameter_set("trimPoint", trim_point);
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(options.step_s));
@@ -876,6 +1016,11 @@ int main(int argc, char** argv)
                             "f16::out.beta_deg",
                             "f16::out.mach",
                             "f16::out.qbar_Pa",
+                            // The air the forces actually used: on a non-standard day
+                            // (atm.deltaT_K / atm.deltaP_sl_Pa) this is not ISA(alt), and it is
+                            // what the barometer is driven with.
+                            "f16::out.P_Pa",
+                            "f16::out.T_K",
                             "f16::out.thrust_N",
                             "f16::out.mass_kg",
                             // What the IMU FMU actually receives: the plant's body-frame

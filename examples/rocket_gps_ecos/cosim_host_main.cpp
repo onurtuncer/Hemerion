@@ -641,12 +641,19 @@ int main(int argc, char** argv)
     // else about its behaviour -- rate included -- is register state the
     // flight computer programs over I2C.
     ss.make_connection<double>("rocket::out.alt_m", "baro::h_m");
+    // And the air it is actually in. The part inverts the ISA from h_m when
+    // nothing writes p_Pa, which is only right on a standard day; the plant
+    // integrates its own atmosphere and publishes it, so on a non-standard
+    // day (Aetherion's atm.deltaT_K / atm.deltaP_sl_Pa) the barometer reads
+    // the day the aircraft is flying through rather than the book's.
+    ss.make_connection<double>("rocket::out.P_Pa", "baro::p_Pa");
+    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
+    ss.make_connection<double>("rocket::out.T_K", "baro::T_degC", kelvin2celsius);
 
     // The magnetometer's die temperature: ambient air, near enough for a part
     // whose temperature channel quantizes at 0.8 C. The field itself has no
     // rocket output to connect -- it is computed in the stepping loop below,
     // for the same reason specific force is.
-    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
     ss.make_connection<double>("rocket::out.T_K", "mag::temperature_c", kelvin2celsius);
 
     // NASA TM-2015-218675 Scenario 17's initial conditions: equatorial pad on
