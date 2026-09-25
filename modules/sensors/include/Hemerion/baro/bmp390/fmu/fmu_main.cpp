@@ -110,7 +110,27 @@ public:
     // and temperature the part would convert.
     register_real("h_m", &altitude_m_)
         .setCausality(causality_t::INPUT)
-        .setDescription("True geometric altitude above mean sea level [m]");
+        .setDescription("True geometric altitude above mean sea level [m]; ignored once p_Pa is written");
+
+    // The ambient the die is actually in, for a plant that integrates its own
+    // atmosphere. Writing p_Pa switches the part off the ISA-from-altitude
+    // path for the rest of the run: on a non-standard day the two disagree by
+    // hundreds of feet of indicated altitude, and that disagreement is the
+    // whole reason a barometer is fused with GNSS rather than trusted. A
+    // master that connects neither gets the standard day, as before.
+    //
+    // T_degC is separate and optional: a master with pressure but no air
+    // temperature still gets the ISA temperature for the altitude, which is
+    // the better of the two available wrongs -- the pressure channel is what
+    // the altimeter reads, and the temperature channel only trims the
+    // compensation polynomial.
+    const auto onAmbientWritten = [this] { ambient_pressure_set_ = true; };
+    register_real("p_Pa", &ambient_pressure_pa_, onAmbientWritten)
+        .setCausality(causality_t::INPUT)
+        .setDescription("True static pressure at the part [Pa]; once written, supersedes h_m");
+    register_real("T_degC", &ambient_temperature_c_, [this] { ambient_temperature_set_ = true; })
+        .setCausality(causality_t::INPUT)
+        .setDescription("True die temperature [degrees Celsius]; defaults to the ISA temperature for h_m");
 
     // Diagnostics, not sensor data -- the sample stream stays on the I2C
     // bus. DISCRETE because an FMI 2.0 Integer must not claim continuity;
@@ -154,6 +174,10 @@ public:
   void reset() override
   {
     altitude_m_ = 0.0;
+    ambient_pressure_pa_ = 0.0;
+    ambient_temperature_c_ = 0.0;
+    ambient_pressure_set_ = false;
+    ambient_temperature_set_ = false;
     time_into_period_s_ = 0.0;
     conversions_ = 0;
     conversions_out_of_rating_ = 0;
@@ -212,7 +236,15 @@ protected:
 private:
   void latch_one(double sample_time_s)
   {
-    const Bmp390MeasurementModel::Conversion conversion = measurement_model_.measure(altitude_m_);
+    // Driven by the plant's own air when it publishes it, by the ISA
+    // otherwise -- see the p_Pa registration.
+    const Bmp390MeasurementModel::Conversion conversion =
+        ambient_pressure_set_ ?
+            measurement_model_.measure_ambient(ambient_pressure_pa_,
+                                               ambient_temperature_set_ ?
+                                                   ambient_temperature_c_ :
+                                                   baro::fmu::BaroNoiseModel::isa_temperature_c(altitude_m_)) :
+            measurement_model_.measure(altitude_m_);
     slave_.latch_conversion(
         conversion.uncomp_press, conversion.uncomp_temp, static_cast<std::uint64_t>(sample_time_s * 1e6));
 
@@ -262,6 +294,15 @@ private:
   Bmp390I2cSlave slave_{ measurement_model_.calibration() };
   sim::i2c_shm::I2cPeripheralEndpoint<Bmp390I2cSlave> endpoint_{ slave_, kI2cBus };
   double altitude_m_ = 0.0;
+
+  // The plant's own air, when it publishes it. The two "written" flags latch
+  // on the first write and stay set: a connected input is a property of the
+  // wiring, not of the value, and a plant that legitimately publishes 0 Pa
+  // would otherwise fall back to the ISA on that step alone.
+  double ambient_pressure_pa_ = 0.0;
+  double ambient_temperature_c_ = 0.0;
+  bool ambient_pressure_set_ = false;
+  bool ambient_temperature_set_ = false;
   double time_into_period_s_ = 0.0;
   int conversions_ = 0;
   int conversions_out_of_rating_ = 0;

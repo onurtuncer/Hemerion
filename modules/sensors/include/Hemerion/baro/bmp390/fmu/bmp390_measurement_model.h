@@ -124,20 +124,35 @@ public:
     }
   }
 
-  /// @brief Produces one conversion from one truth altitude.
+  /// @brief Produces one conversion from one truth altitude, through the ISA.
+  ///
+  /// Convenience for a caller with no atmosphere of its own: the altitude is
+  /// mapped to ambient pressure and temperature by the standard atmosphere
+  /// and handed to measure_ambient(). A caller whose plant integrates its own
+  /// air -- a non-standard day, a pressure that is not ISA(h) -- should use
+  /// that directly instead, or the part will read the standard atmosphere
+  /// while the vehicle flies through a different one.
+  ///
+  /// @param altitude_m True geometric altitude above mean sea level [m].
+  [[nodiscard]] Conversion measure(double altitude_m)
+  {
+    return measure_ambient(baro::fmu::BaroNoiseModel::isa_pressure_pa(altitude_m),
+                           baro::fmu::BaroNoiseModel::isa_temperature_c(altitude_m));
+  }
+
+  /// @brief Produces one conversion from the ambient the die is actually in.
   ///
   /// Temperature is inverted first: the pressure polynomial is conditioned
   /// on `t_lin`, and the value used is the *compensated* temperature of the
   /// chosen raw word -- i.e. exactly what the driver will compute -- so the
   /// pressure inversion is conditioned the same way the forward path will be.
   ///
-  /// @param altitude_m True geometric altitude above mean sea level [m].
-  [[nodiscard]] Conversion measure(double altitude_m)
+  /// @param ambient_pressure_pa    True static pressure at the part [Pa].
+  /// @param ambient_temperature_c  True die temperature [degrees Celsius].
+  [[nodiscard]] Conversion measure_ambient(double ambient_pressure_pa, double ambient_temperature_c)
   {
-    const double pressure_pa = baro::fmu::BaroNoiseModel::isa_pressure_pa(altitude_m) + pressure_bias_pa_ +
-                               draw_noise(config_.pressure_noise_pa);
-    const double temperature_c = baro::fmu::BaroNoiseModel::isa_temperature_c(altitude_m) + temperature_bias_c_ +
-                                 draw_noise(config_.temperature_noise_c);
+    const double pressure_pa = ambient_pressure_pa + pressure_bias_pa_ + draw_noise(config_.pressure_noise_pa);
+    const double temperature_c = ambient_temperature_c + temperature_bias_c_ + draw_noise(config_.temperature_noise_c);
 
     Conversion conversion;
     conversion.uncomp_temp = invert_monotonic(
