@@ -88,6 +88,10 @@ namespace hemerion::sensors::baro::bmp390::fmu
 namespace
 {
 
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr Bmp390MeasurementConfig kDefaultNoise{};
+
 using fmu4cpp::causality_t;
 using fmu4cpp::initial_t;
 using fmu4cpp::variability_t;
@@ -110,7 +114,27 @@ public:
     // and temperature the part would convert.
     register_real("h_m", &altitude_m_)
         .setCausality(causality_t::INPUT)
-        .setDescription("True geometric altitude above mean sea level [m]");
+        .setDescription("True geometric altitude above mean sea level [m]; ignored once p_Pa is written");
+
+    // The ambient the die is actually in, for a plant that integrates its own
+    // atmosphere. Writing p_Pa switches the part off the ISA-from-altitude
+    // path for the rest of the run: on a non-standard day the two disagree by
+    // hundreds of feet of indicated altitude, and that disagreement is the
+    // whole reason a barometer is fused with GNSS rather than trusted. A
+    // master that connects neither gets the standard day, as before.
+    //
+    // T_degC is separate and optional: a master with pressure but no air
+    // temperature still gets the ISA temperature for the altitude, which is
+    // the better of the two available wrongs -- the pressure channel is what
+    // the altimeter reads, and the temperature channel only trims the
+    // compensation polynomial.
+    const auto onAmbientWritten = [this] { ambient_pressure_set_ = true; };
+    register_real("p_Pa", &ambient_pressure_pa_, onAmbientWritten)
+        .setCausality(causality_t::INPUT)
+        .setDescription("True static pressure at the part [Pa]; once written, supersedes h_m");
+    register_real("T_degC", &ambient_temperature_c_, [this] { ambient_temperature_set_ = true; })
+        .setCausality(causality_t::INPUT)
+        .setDescription("True die temperature [degrees Celsius]; defaults to the ISA temperature for h_m");
 
     // Diagnostics, not sensor data -- the sample stream stays on the I2C
     // bus. DISCRETE because an FMI 2.0 Integer must not claim continuity;
@@ -127,6 +151,30 @@ public:
         .setDescription("Conversions produced with ambient pressure or die temperature outside the part's rated "
                         "envelope (300-1250 hPa, -40..+85 degC); the words themselves stay plausible, as on the "
                         "real part");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("pressure_noise_pa", &pressure_noise_pa_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Pressure white noise, 1-sigma [Pa]");
+    register_real("temperature_noise_c", &temperature_noise_c_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Die-temperature white noise, 1-sigma [degrees C]");
+    register_real("pressure_bias_sigma_pa", &pressure_bias_sigma_pa_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Turn-on pressure bias 1-sigma, drawn once per run [Pa]");
+    register_real("temperature_bias_sigma_c", &temperature_bias_sigma_c_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Turn-on die-temperature bias 1-sigma, drawn once per run [degrees C]");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -135,6 +183,7 @@ public:
   /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_bmp390_fmu] Unable to create the I2C bus '" + endpoint_.bus_name() +
@@ -153,7 +202,16 @@ public:
   /// a reset does not swap out.
   void reset() override
   {
+    seed_ = 0;
+    pressure_noise_pa_ = kDefaultNoise.pressure_noise_pa;
+    temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
+    pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
+    temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
     altitude_m_ = 0.0;
+    ambient_pressure_pa_ = 0.0;
+    ambient_temperature_c_ = 0.0;
+    ambient_pressure_set_ = false;
+    ambient_temperature_set_ = false;
     time_into_period_s_ = 0.0;
     conversions_ = 0;
     conversions_out_of_rating_ = 0;
@@ -212,7 +270,15 @@ protected:
 private:
   void latch_one(double sample_time_s)
   {
-    const Bmp390MeasurementModel::Conversion conversion = measurement_model_.measure(altitude_m_);
+    // Driven by the plant's own air when it publishes it, by the ISA
+    // otherwise -- see the p_Pa registration.
+    const Bmp390MeasurementModel::Conversion conversion =
+        ambient_pressure_set_ ?
+            measurement_model_.measure_ambient(ambient_pressure_pa_,
+                                               ambient_temperature_set_ ?
+                                                   ambient_temperature_c_ :
+                                                   baro::fmu::BaroNoiseModel::isa_temperature_c(altitude_m_)) :
+            measurement_model_.measure(altitude_m_);
     slave_.latch_conversion(
         conversion.uncomp_press, conversion.uncomp_temp, static_cast<std::uint64_t>(sample_time_s * 1e6));
 
@@ -258,10 +324,40 @@ private:
     }
   }
 
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    Bmp390MeasurementConfig config;
+    config.pressure_noise_pa = static_cast<float>(pressure_noise_pa_);
+    config.temperature_noise_c = static_cast<float>(temperature_noise_c_);
+    config.pressure_bias_sigma_pa = static_cast<float>(pressure_bias_sigma_pa_);
+    config.temperature_bias_sigma_c = static_cast<float>(temperature_bias_sigma_c_);
+    config.calibration = measurement_model_.calibration();
+    measurement_model_ = (seed_ == 0) ? Bmp390MeasurementModel(config) :
+                                        Bmp390MeasurementModel(config, static_cast<std::uint64_t>(seed_));
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double pressure_noise_pa_ = kDefaultNoise.pressure_noise_pa;
+  double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
+  double pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
+  double temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
+
   Bmp390MeasurementModel measurement_model_;
   Bmp390I2cSlave slave_{ measurement_model_.calibration() };
   sim::i2c_shm::I2cPeripheralEndpoint<Bmp390I2cSlave> endpoint_{ slave_, kI2cBus };
   double altitude_m_ = 0.0;
+
+  // The plant's own air, when it publishes it. The two "written" flags latch
+  // on the first write and stay set: a connected input is a property of the
+  // wiring, not of the value, and a plant that legitimately publishes 0 Pa
+  // would otherwise fall back to the ISA on that step alone.
+  double ambient_pressure_pa_ = 0.0;
+  double ambient_temperature_c_ = 0.0;
+  bool ambient_pressure_set_ = false;
+  bool ambient_temperature_set_ = false;
   double time_into_period_s_ = 0.0;
   int conversions_ = 0;
   int conversions_out_of_rating_ = 0;

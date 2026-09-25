@@ -73,6 +73,10 @@ namespace hemerion::sensors::imu::fmu
 namespace
 {
 
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr ImuNoiseConfig kDefaultNoise{};
+
 using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
 
@@ -125,6 +129,40 @@ public:
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::TUNABLE)
         .setDescription("Sensor output data rate [Hz]; each step buffers round(step * rate) samples, at least one");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("accel_noise_mps2", &accel_noise_mps2_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer white noise, 1-sigma per axis [m/s^2]");
+    register_real("gyro_noise_rad_s", &gyro_noise_rad_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope white noise, 1-sigma per axis [rad/s]");
+    register_real("accel_bias_sigma_mps2", &accel_bias_sigma_mps2_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer turn-on bias 1-sigma per axis, drawn once per run [m/s^2]");
+    register_real("gyro_bias_sigma_rad_s", &gyro_bias_sigma_rad_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope turn-on bias 1-sigma per axis, drawn once per run [rad/s]");
+    register_real("accel_lsb_per_g", &accel_lsb_per_g_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer register sensitivity [LSB per g]; the consuming driver must convert with the "
+                        "same value, exactly as on real silicon -- scale is not part of the wire format");
+    register_real("gyro_lsb_per_dps", &gyro_lsb_per_dps_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope register sensitivity [LSB per degree/s]; the consuming driver must convert with the "
+                        "same value");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -133,6 +171,7 @@ public:
   /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to create the SPI bus '" + endpoint_.bus_name() +
@@ -161,6 +200,13 @@ public:
   /// reset does not swap out.
   void reset() override
   {
+    seed_ = 0;
+    accel_noise_mps2_ = kDefaultNoise.accel_noise_mps2;
+    gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
+    accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
+    gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
+    accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
+    gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
     truth_ = ImuTruthSample{};
     sample_rate_hz_ = kDefaultSampleRateHz;
     slave_.reset();
@@ -207,6 +253,29 @@ protected:
   }
 
 private:
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    ImuNoiseConfig config;
+    config.accel_noise_mps2 = static_cast<float>(accel_noise_mps2_);
+    config.gyro_noise_rad_s = static_cast<float>(gyro_noise_rad_s_);
+    config.accel_bias_sigma_mps2 = static_cast<float>(accel_bias_sigma_mps2_);
+    config.gyro_bias_sigma_rad_s = static_cast<float>(gyro_bias_sigma_rad_s_);
+    config.scale.accel_lsb_per_g = static_cast<float>(accel_lsb_per_g_);
+    config.scale.gyro_lsb_per_dps = static_cast<float>(gyro_lsb_per_dps_);
+    noise_model_ = (seed_ == 0) ? ImuNoiseModel(config) : ImuNoiseModel(config, static_cast<std::uint64_t>(seed_));
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double accel_noise_mps2_ = kDefaultNoise.accel_noise_mps2;
+  double gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
+  double accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
+  double gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
+  double accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
+  double gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
+
   ImuNoiseModel noise_model_;
   ImuSpiSlave slave_;
   sim::spi_shm::SpiPeripheralEndpoint<ImuSpiSlave> endpoint_{ slave_, kSpiBus };

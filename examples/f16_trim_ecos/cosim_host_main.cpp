@@ -121,6 +121,8 @@
 
 #include "geomagnetic_field.hpp"
 
+#include "environment.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -136,6 +138,7 @@
 #include <memory>
 #include <numbers>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -143,6 +146,15 @@
 
 namespace
 {
+
+using hemerion::examples::dryden_low_altitude;
+using hemerion::examples::DrydenAtAltitude;
+using hemerion::examples::GpsErrorModel;
+using hemerion::examples::kCorrelatedReceiver;
+using hemerion::examples::kFeetToMetres;
+using hemerion::examples::kWhiteReceiver;
+using hemerion::examples::parse_csv_doubles;
+
 using hemerion::examples::f16_trim_ecos::FieldBody;
 using hemerion::examples::f16_trim_ecos::FieldNed;
 using hemerion::examples::f16_trim_ecos::GeomagneticDipole;
@@ -168,40 +180,6 @@ using hemerion::examples::f16_trim_ecos::GeomagneticDipole;
 #ifndef HEMERION_RADALT_FMU_PATH
 #define HEMERION_RADALT_FMU_PATH ""
 #endif
-
-/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
-/// set and the run's .config sidecar cannot disagree about what the receiver
-/// was -- and plot_results.py can draw the autocorrelation a run *should*
-/// show from the sidecar alone.
-struct GpsErrorModel
-{
-  const char* name;
-  double horizontal_pos_noise_m;
-  double vertical_pos_noise_m;
-  double speed_noise_mps;
-  double course_noise_deg;
-  double horizontal_pos_correlated_m;
-  double vertical_pos_correlated_m;
-  double position_correlation_time_s;
-  double speed_correlated_mps;
-  double course_correlated_deg;
-  double velocity_correlation_time_s;
-  double accuracy_scale;
-};
-
-/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
-/// the parameter set explicitly even though the FMU would default to them, so
-/// the sidecar is always a complete record.
-constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
-
-/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
-/// default's -- nothing on a page changes by magnitude -- but most of it now
-/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
-/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
-/// estimate tends to. Spelled out here rather than as an FMU-side preset so
-/// the example reads end to end; the values are tabulated in
-/// doc/sensor_models.rst.
-constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
 
 struct Options
 {
@@ -268,6 +246,16 @@ struct Options
   // was verified with until the change is asked for.
   bool gps_correlated_errors = false;
   int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
+
+  // The plant's environment (Aetherion >= 0.16.0). All zero is the calm,
+  // standard day every published figure on these pages was measured on.
+  double wind_north_mps = 0.0;
+  double wind_east_mps = 0.0;
+  double wind_down_mps = 0.0;
+  double turbulence_w20_mps = 0.0;  // MIL-F-8785C W20 at 20 ft; 0 = no turbulence
+  int turbulence_seed = 1;
+  double atmosphere_delta_t_k = 0.0;
+  double atmosphere_delta_p_pa = 0.0;
 };
 
 /// @brief The open-loop trim flyouts this example flies.
@@ -301,6 +289,7 @@ void print_usage()
                "                      [--imu-rate <hz>] [--radalt-rate <hz>]\n"
                "                      [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                      [--gps-errors white|correlated] [--gps-seed <n>]\n"
+               "                      [--wind <n,e,d>] [--turbulence <w20>] [--atmosphere <dT,dP>]\n"
                "                      [--lat0 <deg>] [--lon0 <deg>] [--alt0 <ft>] [--vt0 <ft/s>]\n"
                "                      [--heading0 <deg>] [--roll0 <deg>]\n"
                "                      [--stop <s>] [--step <s>] [--csv <file>] [--rtf <x>]\n"
@@ -328,6 +317,11 @@ void print_usage()
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
                "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
+               "  --wind      steady wind as north,east,down in m/s (default calm); the velocity of the air\n"
+               "  --turbulence  MIL-F-8785C W20 wind speed at 20 ft in m/s: 0 = off (default), ~5 light,\n"
+               "              ~15 moderate. Sets the Dryden sigmas and scale lengths for the trim altitude\n"
+               "  --turbulence-seed  turbulence RNG seed (default 1); one seed is one realisation\n"
+               "  --atmosphere  non-standard day as deltaT_K,deltaP_sl_Pa (default 0,0 = the ISA)\n"
                "  --lat0 --lon0  trim position [deg] (default 36.019167 / -75.674444, Kitty Hawk NC)\n"
                "  --alt0      trim altitude [ft] (default 10013, or 30013 for --case 12)\n"
                "  --vt0       trim true airspeed [ft/s] (default 565.685 = 335.15 KTAS, or 2000 for --case 12)\n"
@@ -348,7 +342,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 23> kValueOptions = { {
+constexpr std::array<ValueOption, 27> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -371,6 +365,27 @@ constexpr std::array<ValueOption, 23> kValueOptions = { {
         o.gps_correlated_errors = (model == "correlated");
       } },
     { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
+    { "--wind",
+      [](Options& o, const char* v) {
+        // north,east,down in m/s -- the velocity *of the air*, NED, which is
+        // Aetherion's wind.* convention and the sign of out.v_*_m_s.
+        double ned[3] = { 0.0, 0.0, 0.0 };
+        parse_csv_doubles(v, ned, "--wind", "north,east,down in m/s, e.g. 10,0,0");
+        o.wind_north_mps = ned[0];
+        o.wind_east_mps = ned[1];
+        o.wind_down_mps = ned[2];
+      } },
+    { "--turbulence", [](Options& o, const char* v) { o.turbulence_w20_mps = std::stod(v); } },
+    { "--turbulence-seed", [](Options& o, const char* v) { o.turbulence_seed = std::stoi(v); } },
+    { "--atmosphere",
+      [](Options& o, const char* v) {
+        // deltaT_K,deltaP_sl_Pa -- the two numbers that turn the book's day
+        // into a real one.
+        double offsets[2] = { 0.0, 0.0 };
+        parse_csv_doubles(v, offsets, "--atmosphere", "deltaT_K,deltaP_sl_Pa, e.g. 20,-1000");
+        o.atmosphere_delta_t_k = offsets[0];
+        o.atmosphere_delta_p_pa = offsets[1];
+      } },
     { "--lat0", [](Options& o, const char* v) { o.lat0_deg = std::stod(v); } },
     { "--lon0", [](Options& o, const char* v) { o.lon0_deg = std::stod(v); } },
     { "--alt0", [](Options& o, const char* v) { o.alt0_ft = std::stod(v); } },
@@ -580,6 +595,13 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
       << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
       << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
+      << "wind_north_mps=" << options.wind_north_mps << "\n"
+      << "wind_east_mps=" << options.wind_east_mps << "\n"
+      << "wind_down_mps=" << options.wind_down_mps << "\n"
+      << "turbulence_w20_mps=" << options.turbulence_w20_mps << "\n"
+      << "turbulence_seed=" << options.turbulence_seed << "\n"
+      << "atmosphere_deltaT_K=" << options.atmosphere_delta_t_k << "\n"
+      << "atmosphere_deltaP_sl_Pa=" << options.atmosphere_delta_p_pa << "\n"
       << "lat0_deg=" << options.lat0_deg << "\n"
       << "lon0_deg=" << options.lon0_deg << "\n"
       << "alt0_ft=" << options.alt0_ft << "\n"
@@ -770,6 +792,14 @@ int main(int argc, char** argv)
     // else about its behaviour -- rate included -- is register state the
     // flight computer programs over I2C.
     ss.make_connection<double>("f16::out.alt_m", "baro::h_m");
+    // And the air it is actually in. The part inverts the ISA from h_m when
+    // nothing writes p_Pa, which is only right on a standard day; the plant
+    // integrates its own atmosphere and publishes it, so on a non-standard
+    // day (Aetherion's atm.deltaT_K / atm.deltaP_sl_Pa) the barometer reads
+    // the day the aircraft is flying through rather than the book's.
+    ss.make_connection<double>("f16::out.P_Pa", "baro::p_Pa");
+    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
+    ss.make_connection<double>("f16::out.T_K", "baro::T_degC", kelvin2celsius);
 
     // The radar altimeter measures height above *ground*, and this scenario
     // carries no terrain model, so MSL altitude goes in unmodified. At Kitty
@@ -787,7 +817,6 @@ int main(int argc, char** argv)
     // plant output to connect -- it is computed in the stepping loop below,
     // because it depends on position *and* attitude and an Ecos connection
     // modifier sees only its single source variable.
-    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
     ss.make_connection<double>("f16::out.T_K", "mag::temperature_c", kelvin2celsius);
 
     // The check-case's trim condition: Kitty Hawk, NC, heading 45 deg, a
@@ -843,6 +872,27 @@ int main(int argc, char** argv)
     trim_point["gps::course_correlated_deg"] = receiver.course_correlated_deg;
     trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
     trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
+
+    // The plant's environment. Written unconditionally, because every one of
+    // these defaults to the calm standard day: a run that asks for nothing gets
+    // the plant the published figures were measured on, and the .config sidecar
+    // records what was asked for either way.
+    trim_point["f16::wind.north_mps"] = options.wind_north_mps;
+    trim_point["f16::wind.east_mps"] = options.wind_east_mps;
+    trim_point["f16::wind.down_mps"] = options.wind_down_mps;
+    trim_point["f16::atm.deltaT_K"] = options.atmosphere_delta_t_k;
+    trim_point["f16::atm.deltaP_sl_Pa"] = options.atmosphere_delta_p_pa;
+    if (options.turbulence_w20_mps > 0.0)
+    {
+      const DrydenAtAltitude dryden = dryden_low_altitude(options.alt0_ft * kFeetToMetres, options.turbulence_w20_mps);
+      trim_point["f16::turb.sigma_u_mps"] = dryden.sigma_u_mps;
+      trim_point["f16::turb.sigma_v_mps"] = dryden.sigma_v_mps;
+      trim_point["f16::turb.sigma_w_mps"] = dryden.sigma_w_mps;
+      trim_point["f16::turb.L_u_m"] = dryden.L_u_m;
+      trim_point["f16::turb.L_v_m"] = dryden.L_v_m;
+      trim_point["f16::turb.L_w_m"] = dryden.L_w_m;
+      trim_point["f16::turb.seed"] = options.turbulence_seed;
+    }
     ss.add_parameter_set("trimPoint", trim_point);
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(options.step_s));
@@ -876,6 +926,11 @@ int main(int argc, char** argv)
                             "f16::out.beta_deg",
                             "f16::out.mach",
                             "f16::out.qbar_Pa",
+                            // The air the forces actually used: on a non-standard day
+                            // (atm.deltaT_K / atm.deltaP_sl_Pa) this is not ISA(alt), and it is
+                            // what the barometer is driven with.
+                            "f16::out.P_Pa",
+                            "f16::out.T_K",
                             "f16::out.thrust_N",
                             "f16::out.mass_kg",
                             // What the IMU FMU actually receives: the plant's body-frame

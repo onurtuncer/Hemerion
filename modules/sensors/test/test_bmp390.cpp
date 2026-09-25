@@ -161,6 +161,58 @@ void test_noiseless_sample_round_trips()
   }
 }
 
+// The ambient path: a plant that integrates its own atmosphere hands the part
+// the pressure and temperature it is actually in, instead of an altitude the
+// part maps through the ISA. Driving the two paths with the same ambient must
+// give the same conversion -- measure(h) is defined as measure_ambient() of
+// the ISA at h -- and driving the ambient path with a non-standard day must
+// reach the driver as that day, which is the whole point: on ISA+20 K the
+// pressure at a given altitude is a kilopascal higher, and a barometer that
+// still read the standard day would be measuring the book rather than the air.
+void test_ambient_path_matches_and_carries_a_non_standard_day()
+{
+  Bmp390MeasurementConfig config;
+  config.pressure_noise_pa = 0.0F;
+  config.temperature_noise_c = 0.0F;
+  config.pressure_bias_sigma_pa = 0.0F;
+  config.temperature_bias_sigma_c = 0.0F;
+
+  constexpr double kAltitudeM = 3052.0;  // check-case 11's trim altitude
+  const double isa_pressure_pa = BaroNoiseModel::isa_pressure_pa(kAltitudeM);
+  const double isa_temperature_c = BaroNoiseModel::isa_temperature_c(kAltitudeM);
+
+  // Same ambient by either route: identical raw words, not merely close.
+  Bmp390MeasurementModel by_altitude(config, /*seed=*/7);
+  Bmp390MeasurementModel by_ambient(config, /*seed=*/7);
+  const auto from_altitude = by_altitude.measure(kAltitudeM);
+  const auto from_ambient = by_ambient.measure_ambient(isa_pressure_pa, isa_temperature_c);
+  assert(from_altitude.uncomp_press == from_ambient.uncomp_press);
+  assert(from_altitude.uncomp_temp == from_ambient.uncomp_temp);
+
+  // A non-standard day reaches the driver. ISA+20 K at this altitude is about
+  // +1.8 kPa and +20 degC; both must survive the inversion, the wire format
+  // and the driver's forward compensation.
+  Bmp390MeasurementModel hot(config, /*seed=*/7);
+  Bmp390I2cSlave slave(hot.calibration());
+  DirectBus bus(slave);
+  Bmp390Driver driver(bus);
+  assert(driver.probe() == Bmp390Error::kNone);
+
+  const double hot_pressure_pa = isa_pressure_pa + 1800.0;
+  const double hot_temperature_c = isa_temperature_c + 20.0;
+  const auto conversion = hot.measure_ambient(hot_pressure_pa, hot_temperature_c);
+  slave.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp, 20000);
+  assert(driver.data_ready());
+
+  BaroSample sample;
+  assert(driver.read_sample(sample) == Bmp390ReadResult::kSample);
+  assert(near(sample.pressure_pa, hot_pressure_pa, 0.5));
+  assert(near(sample.temperature_c, hot_temperature_c, 0.01));
+  // And it is genuinely a different reading from the standard day, by far more
+  // than the tolerances above.
+  assert(sample.pressure_pa - isa_pressure_pa > 1700.0);
+}
+
 // Reading the data block consumes the conversion: until the next latch, the
 // driver sees no new data, exactly as the drdy status bits behave on the
 // part.
@@ -286,6 +338,7 @@ int main()
   test_probe_reads_identity_and_calibration();
   test_probe_wrong_address_fails();
   test_noiseless_sample_round_trips();
+  test_ambient_path_matches_and_carries_a_non_standard_day();
   test_read_consumes_data_ready();
   test_noisy_sample_stays_bounded();
   test_rating_flags_mark_the_envelope();

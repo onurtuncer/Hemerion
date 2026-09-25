@@ -295,7 +295,7 @@ flight — and a master that sets none of them gets the previous receiver.
    * - horizontal position
      - 0.3 m
      - 1.5 m, :math:`\tau` = 100 s
-     - total 1.53 m per axis — within 2 % of the default's 1.5 m
+     - total 1.53 m per axis — 2 % over the default's 1.5 m
    * - vertical position
      - 0.6 m
      - 3.0 m, :math:`\tau` = 100 s
@@ -303,18 +303,23 @@ flight — and a master that sets none of them gets the previous receiver.
    * - speed over ground
      - 0.05 m/s
      - 0.1 m/s, :math:`\tau` = 10 s
-     - total 0.11 m/s
+     - total 0.112 m/s — 12 % over the default, the loosest of the four
    * - course
      - 0.3°
      - 1.0°, :math:`\tau` = 10 s
-     - total 1.04°
+     - total 1.044° — 4 % over the default
    * - ``accuracy_scale``
      - 0.7
      -
      - ``hAcc`` reads 1.07 m for a 1.53 m error
 
-The preset keeps every channel's *total* 1-sigma where the default had it, so
-nothing on a results page moves by magnitude; what changes is the spectrum.
+The preset keeps each *position* channel's total 1-sigma within 2 % of where
+the default had it, so nothing on a results page moves by magnitude — position
+is what they all plot. What changes is the spectrum. (The velocity channels
+are looser, 4 % and 12 % over; rounding them to hit a total exactly would mean
+quoting receiver characteristics chosen to flatter an arithmetic claim rather
+than to be plausible. ``examples.environment`` in ``tests/unit`` asserts the
+bound that is actually true, per channel.)
 Ninety-six per cent of the horizontal variance now lives in the slow term,
 which is what the F-16 trim page's GPS error figure measures directly
 (:ref:`f16_trim_ecos_cosim`). The values are spelled out in each example's

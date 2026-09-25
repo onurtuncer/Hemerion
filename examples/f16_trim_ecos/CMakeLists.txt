@@ -95,7 +95,7 @@ endif()
 # out.specificForce_{x,y,z}_m_s2, the (F_aero + F_thrust)/m at the CG that the IMU FMU's inputs take.
 # cosim_host_main.cpp binds both sets by name, so an older plant is a missing variable rather than a unit to compensate
 # for.
-set(HEMERION_AETHERION_MIN_VERSION 0.14.0)
+set(HEMERION_AETHERION_MIN_VERSION 0.16.0)
 
 if(HEMERION_F16_PLANT_FMU)
   # Re-check when the FMU is replaced under an already-configured build tree -- what happens when Aetherion is rebuilt
@@ -149,6 +149,20 @@ if(HEMERION_F16_PLANT_FMU)
         "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
   endif()
 
+  # Third requirement, third release: 0.16.0 gave the plant an environment. The host writes wind.* and atm.* into the
+  # parameter set on every run (their defaults are the calm standard day) and turb.* when --turbulence asks for it, so
+  # an older plant fails at load inside Ecos with an unknown-variable error rather than here with a sentence.
+  # wind.north_mps stands for the set: they landed together.
+  string(FIND "${_f16_ports}" "wind.north_mps" _f16_wind_at)
+  if(_f16_wind_at LESS 0)
+    message(
+      FATAL_ERROR
+        "${HEMERION_F16_PLANT_FMU} publishes no wind.north_mps parameter, but f16_trim_cosim writes the "
+        "wind.*/atm.* environment into every run. Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
+        "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
+  endif()
+  unset(_f16_wind_at)
+
   unset(_f16_unpack_dir)
   unset(_f16_unpack_result)
   unset(_f16_description)
@@ -163,7 +177,7 @@ target_link_libraries(f16_trim_cosim PRIVATE libecos)
 target_compile_features(f16_trim_cosim PRIVATE cxx_std_23)
 # Ecos keeps src/ off its public include path. cosim_host_main.cpp reaches into it for util/unzipper.hpp so its
 # FMU-extraction preflight runs the same code Ecos will rather than a reimplementation that could drift.
-target_include_directories(f16_trim_cosim PRIVATE "${ecos_SOURCE_DIR}/src")
+target_include_directories(f16_trim_cosim PRIVATE "${ecos_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/examples/common")
 target_compile_definitions(
   f16_trim_cosim
   PRIVATE HEMERION_F16_FMU_PATH="${HEMERION_F16_PLANT_FMU}"

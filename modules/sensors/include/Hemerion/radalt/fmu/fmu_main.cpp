@@ -48,6 +48,10 @@ namespace hemerion::sensors::radalt::fmu
 namespace
 {
 
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr RadAltNoiseConfig kDefaultNoise{};
+
 using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
 using hemerion::sensors::gps::fmu::UdpSender;
@@ -77,6 +81,31 @@ public:
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::TUNABLE)
         .setDescription("Sensor output data rate [Hz]; each step emits round(step * rate) frames, at least one");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("range_noise_m", &range_noise_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Range white noise, 1-sigma [m]");
+    register_real("range_bias_sigma_m", &range_bias_sigma_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Turn-on range bias 1-sigma, drawn once per run [m]");
+    register_real("max_range_m", &max_range_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Maximum tracking range [m]; beyond it the emitted frames carry a no-return status");
+    register_real("range_lsb_per_m", &range_lsb_per_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Range register sensitivity [LSB per m]; the consuming driver must convert with the same "
+                        "value");
   }
 
   /// Opens the UDP socket. Deliberately not done in the constructor: the
@@ -84,6 +113,7 @@ public:
   /// to enumerate its variables, and that must not touch the network.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     sender_ = UdpSender::create_from_env(kUdpHostVariable, kUdpPortVariable, kDefaultUdpHost, kDefaultUdpPort);
     if (!sender_.has_value())
     {
@@ -98,6 +128,11 @@ public:
   /// reset does not swap out.
   void reset() override
   {
+    seed_ = 0;
+    range_noise_m_ = kDefaultNoise.range_noise_m;
+    range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
+    max_range_m_ = kDefaultNoise.max_range_m;
+    range_lsb_per_m_ = kDefaultNoise.scale.range_lsb_per_m;
     truth_ = RadAltTruthSample{};
     sample_rate_hz_ = kDefaultSampleRateHz;
     sender_.reset();
@@ -135,6 +170,26 @@ protected:
   }
 
 private:
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    RadAltNoiseConfig config;
+    config.range_noise_m = static_cast<float>(range_noise_m_);
+    config.range_bias_sigma_m = static_cast<float>(range_bias_sigma_m_);
+    config.max_range_m = static_cast<float>(max_range_m_);
+    config.scale.range_lsb_per_m = static_cast<float>(range_lsb_per_m_);
+    noise_model_ =
+        (seed_ == 0) ? RadAltNoiseModel(config) : RadAltNoiseModel(config, static_cast<std::uint64_t>(seed_));
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double range_noise_m_ = kDefaultNoise.range_noise_m;
+  double range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
+  double max_range_m_ = kDefaultNoise.max_range_m;
+  double range_lsb_per_m_ = kDefaultNoise.scale.range_lsb_per_m;
+
   RadAltNoiseModel noise_model_;
   std::optional<UdpSender> sender_;
   RadAltTruthSample truth_;

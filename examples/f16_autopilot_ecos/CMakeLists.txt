@@ -93,7 +93,7 @@ endif()
 
 # The requirement is a set of FMI ports, tested by reading them out of each archive -- same approach and same helper
 # pattern as examples/f16_trim_ecos, one macro because there are now two archives to interrogate.
-set(HEMERION_AETHERION_MIN_VERSION 0.14.1)
+set(HEMERION_AETHERION_MIN_VERSION 0.16.0)
 
 # Reads modelDescription.xml out of ${archive} into ${out_var}. `cmake -E tar` for the reasons documented in
 # examples/f16_trim_ecos/CMakeLists.txt (the pinned cmake-format cannot parse file(ARCHIVE_EXTRACT)).
@@ -123,19 +123,27 @@ if(HEMERION_F16_PLANT_FMU)
   # Same two floors as the trim example: degrees position (0.13.0) and specific force (0.14.0)...
   string(FIND "${_f16_ports}" "out.lat_deg" _f16_lat_deg_at)
   string(FIND "${_f16_ports}" "out.specificForce_x_m_s2" _f16_specific_force_at)
-  # ...plus the loop itself: the four surface inputs the autopilot drives.
+  # ...plus the loop itself: the four surface inputs the autopilot drives...
   string(FIND "${_f16_ports}" "ctrl.el_deg" _f16_ctrl_at)
-  if(_f16_lat_deg_at LESS 0 OR _f16_specific_force_at LESS 0 OR _f16_ctrl_at LESS 0)
+  # ...plus the environment (0.16.0), which the host writes into the parameter set on every run: wind.* and atm.*
+  # always, turb.* when --turbulence asks for it. wind.north_mps stands for the set; they landed together.
+  string(FIND "${_f16_ports}" "wind.north_mps" _f16_wind_at)
+  if(_f16_lat_deg_at LESS 0
+     OR _f16_specific_force_at LESS 0
+     OR _f16_ctrl_at LESS 0
+     OR _f16_wind_at LESS 0)
     message(
       FATAL_ERROR
         "${HEMERION_F16_PLANT_FMU} does not publish every port this example binds (out.lat_deg, "
-        "out.specificForce_x_m_s2, ctrl.el_deg). Install Aetherion >= ${HEMERION_AETHERION_MIN_VERSION} "
-        "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
+        "out.specificForce_x_m_s2, ctrl.el_deg, wind.north_mps). Install Aetherion >= "
+        "${HEMERION_AETHERION_MIN_VERSION} (https://github.com/onurtuncer/Aetherion) and reconfigure, or point "
+        "AETHERION_ROOT at one.")
   endif()
   unset(_f16_ports)
   unset(_f16_lat_deg_at)
   unset(_f16_specific_force_at)
   unset(_f16_ctrl_at)
+  unset(_f16_wind_at)
 endif()
 
 if(HEMERION_F16_AUTOPILOT_FMU)
@@ -164,7 +172,7 @@ target_link_libraries(f16_autopilot_cosim PRIVATE libecos)
 target_compile_features(f16_autopilot_cosim PRIVATE cxx_std_23)
 # Ecos' src/ for util/unzipper.hpp (the extraction preflight), and the sibling example for geomagnetic_field.hpp --
 # shared, not copied; see the header comment in cosim_host_main.cpp.
-target_include_directories(f16_autopilot_cosim PRIVATE "${ecos_SOURCE_DIR}/src"
+target_include_directories(f16_autopilot_cosim PRIVATE "${ecos_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/examples/common"
                                                        "${CMAKE_CURRENT_SOURCE_DIR}/../f16_trim_ecos")
 target_compile_definitions(
   f16_autopilot_cosim
