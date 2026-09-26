@@ -245,7 +245,11 @@ struct Options
   double step_s = 0.1;           // communication step == GPS output period (10 Hz)
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double radalt_rate_hz = 25.0;  // radar altimeter pulse rate
-  double realtime_factor = 0.0;  // 0 = run as fast as possible
+
+  // The world under the aircraft, and the beam that looks at it.
+  double terrain_elevation_m = 0.0;
+  double radalt_beam_half_angle_deg = 0.0;  // 0 = ignore attitude, as the part did before
+  double realtime_factor = 0.0;             // 0 = run as fast as possible
   // Receiver dynamics envelope. Both mechanisms are left in force, and the
   // setting is deliberately the same for both check-cases: it is a property
   // of the receiver bolted to the aircraft, not of the flight, and changing it
@@ -363,6 +367,10 @@ void print_usage()
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
+               "  --terrain   ground elevation under the flight [m] (default 0: the part is handed MSL\n"
+               "              altitude, this example's long-standing approximation)\n"
+               "  --radalt-beam  antenna beam half-angle [deg]; 0 (default) ignores attitude, otherwise\n"
+               "              the part reports slant range and drops lock past this bank angle\n"
                "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
                "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
                "              on the wire, so both ends must be configured alike\n"
@@ -396,7 +404,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 29> kValueOptions = { {
+constexpr std::array<ValueOption, 31> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -419,6 +427,8 @@ constexpr std::array<ValueOption, 29> kValueOptions = { {
         o.gps_correlated_errors = (model == "correlated");
       } },
     { "--seed", [](Options& o, const char* v) { o.seed = std::stoi(v); } },
+    { "--terrain", [](Options& o, const char* v) { o.terrain_elevation_m = std::stod(v); } },
+    { "--radalt-beam", [](Options& o, const char* v) { o.radalt_beam_half_angle_deg = std::stod(v); } },
     { "--imu-range",
       [](Options& o, const char* v) {
         if (!hemerion::sensors::imu::imu_range_from_name(v, o.imu_range))
@@ -646,6 +656,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
+      << "terrain_elevation_m=" << options.terrain_elevation_m << "\n"
+      << "radalt_beam_half_angle_deg=" << options.radalt_beam_half_angle_deg << "\n"
       << "imu_gyro_lsb_per_dps=" << hemerion::sensors::imu::imu_scale_for(options.imu_range).gyro_lsb_per_dps << "\n"
       << "gps_seed=" << options.gps_seed << "\n"
       << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
@@ -874,7 +886,18 @@ int main(int argc, char** argv)
     // 3052 m, well inside the part's 6000 m tracking range. Case 12's
     // 30 013 ft is 9148 m, well outside it, and the part reports loss of track
     // for the whole flight -- a sensor that is working and has nothing to say.
-    ss.make_connection<double>("f16::out.alt_m", "radalt::h_agl_m");
+    // Height above ground, not above the sea: --terrain makes the ground's
+    // elevation a number rather than an assumption. Still the simplest possible
+    // terrain -- one elevation, no relief -- because inventing a height field
+    // would be inventing data, and the part only needs to be told where the
+    // ground is.
+    const std::function<double(const double&)> subtract_terrain =
+        [elevation = options.terrain_elevation_m](const double& msl) { return msl - elevation; };
+    ss.make_connection<double>("f16::out.alt_m", "radalt::h_agl_m", subtract_terrain);
+    // And the attitude its beam is fixed to: with --radalt-beam set the part
+    // reports slant range and loses the ground past the beam's half-angle.
+    ss.make_connection<double>("f16::out.roll_rad", "radalt::roll_rad");
+    ss.make_connection<double>("f16::out.pitch_rad", "radalt::pitch_rad");
 
     // The magnetometer's die temperature: ambient air, near enough for a part
     // whose temperature channel quantizes at 0.8 C. The field itself has no
@@ -915,6 +938,7 @@ int main(int argc, char** argv)
     trim_point["imu::accel_lsb_per_g"] = imu_scale.accel_lsb_per_g;
     trim_point["imu::gyro_lsb_per_dps"] = imu_scale.gyro_lsb_per_dps;
     trim_point["radalt::sample_rate_hz"] = options.radalt_rate_hz;
+    trim_point["radalt::beam_half_angle_deg"] = options.radalt_beam_half_angle_deg;
     // Written explicitly even though these match the GPS FMU's own defaults:
     // whether the receiver keeps a fix through this flight is the scenario's
     // most consequential setting, and it should be readable here rather than

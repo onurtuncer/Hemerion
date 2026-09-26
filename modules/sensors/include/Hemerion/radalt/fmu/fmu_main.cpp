@@ -75,7 +75,15 @@ public:
     // no-return status instead of a range word, exactly as a real part loses ground track.
     register_real("h_agl_m", &truth_.height_agl_m)
         .setCausality(causality_t::INPUT)
-        .setDescription("True height above ground level along the radar beam [m]");
+        .setDescription("True height above ground level, measured vertically [m]; the part converts it to the "
+                        "slant range its beam sees, given roll and pitch");
+    register_real("roll_rad", &truth_.roll_rad)
+        .setCausality(causality_t::INPUT)
+        .setDescription("Bank angle [rad]; with a non-zero beam_half_angle_deg it lengthens the measured range "
+                        "and, past the beam, takes the ground out of the footprint");
+    register_real("pitch_rad", &truth_.pitch_rad)
+        .setCausality(causality_t::INPUT)
+        .setDescription("Pitch angle [rad]; same effect as roll");
 
     register_real("sample_rate_hz", &sample_rate_hz_)
         .setCausality(causality_t::PARAMETER)
@@ -89,6 +97,12 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
                         "run reproducible");
+    register_real("beam_half_angle_deg", &beam_half_angle_deg_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Antenna beam half-angle [degrees]; 0 (default) ignores attitude entirely, as the part "
+                        "did before. Past this tilt the ground leaves the footprint and the part reports no "
+                        "return");
     register_real("range_noise_m", &range_noise_m_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
@@ -129,6 +143,7 @@ public:
   void reset() override
   {
     seed_ = 0;
+    beam_half_angle_deg_ = 0.0;
     range_noise_m_ = kDefaultNoise.range_noise_m;
     range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
     max_range_m_ = kDefaultNoise.max_range_m;
@@ -175,6 +190,7 @@ private:
   void apply_noise_config()
   {
     RadAltNoiseConfig config;
+    config.beam_half_angle_rad = static_cast<float>(beam_half_angle_deg_ * 3.14159265358979323846 / 180.0);
     config.range_noise_m = static_cast<float>(range_noise_m_);
     config.range_bias_sigma_m = static_cast<float>(range_bias_sigma_m_);
     config.max_range_m = static_cast<float>(max_range_m_);
@@ -185,6 +201,7 @@ private:
 
   // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
   int seed_ = 0;
+  double beam_half_angle_deg_ = 0.0;
   double range_noise_m_ = kDefaultNoise.range_noise_m;
   double range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
   double max_range_m_ = kDefaultNoise.max_range_m;
