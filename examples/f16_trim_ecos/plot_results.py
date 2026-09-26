@@ -812,16 +812,44 @@ def plot_heading_consistency(truth, fixes, mag, gps_gaps, out: Path, prefix: str
             deltas = [value - interpolate(truth["time"], truth[f"b_{component}_ut"], t)
                       for t, value in zip(mag["sim_time_s"], mag[f"mag_{component}_ut"])]
             offsets.append(sum(deltas) / len(deltas))
+        # First order, not a magnitude bound. Heading comes from
+        # atan2(-Yh, Xh), so an offset perturbs it by
+        # (Yh dXh - Xh dYh) / (Xh^2 + Yh^2): the *direction* of the offset
+        # relative to the field matters, and an offset lying along the field
+        # costs almost no heading at all. Using |offset| instead gives an
+        # upper bound that happens to be close when the offset is roughly
+        # across the field and badly wrong when it is along it -- measured on
+        # two runs, the bound read 5.5 deg against 5.3 observed on one and
+        # 2.9 against 0.24 on the other, while this expression gives 5.2 and
+        # 0.24.
         horizontal_ut = math.hypot(*dipole_field_ned(truth["lat_deg"][0], truth["lon_deg"][0],
                                                      truth["alt_m"][0])[:2])
-        predicted_deg = math.degrees(math.atan2(math.hypot(offsets[0], offsets[1]), horizontal_ut))
+        errors_deg = []
+        for t in mag["sim_time_s"]:
+            roll = interpolate(truth["time"], truth["roll_rad"], t)
+            pitch = interpolate(truth["time"], truth["pitch_rad"], t)
+
+            def horizontal(bx, by, bz, roll=roll, pitch=pitch):
+                x = bx * math.cos(pitch) + by * math.sin(roll) * math.sin(pitch) + bz * math.cos(roll) * math.sin(pitch)
+                y = by * math.cos(roll) - bz * math.sin(roll)
+                return x, y
+
+            bx = interpolate(truth["time"], truth["b_x_ut"], t)
+            by = interpolate(truth["time"], truth["b_y_ut"], t)
+            bz = interpolate(truth["time"], truth["b_z_ut"], t)
+            x_h, y_h = horizontal(bx, by, bz)
+            x_off, y_off = horizontal(bx + offsets[0], by + offsets[1], bz + offsets[2])
+            denominator = x_h * x_h + y_h * y_h
+            if denominator > 0.0:
+                errors_deg.append(math.degrees((y_h * (x_off - x_h) - x_h * (y_off - y_h)) / denominator))
+        predicted_deg = (sum(errors_deg) / len(errors_deg)) if errors_deg else 0.0
         residuals = [wrap_180(h - interpolate(truth["time"], truth_yaw, t))
                      for t, h in zip(mag["sim_time_s"], mag_heading)]
         observed_deg = sum(residuals) / len(residuals)
         ax_err.annotate(
             f"hard iron measured from this run: {offsets[0]:+.2f} / {offsets[1]:+.2f} / {offsets[2]:+.2f} µT\n"
-            f"predicts {predicted_deg:.2f}° of heading error against a {horizontal_ut:.1f} µT "
-            f"horizontal field; observed {abs(observed_deg):.2f}°",
+            f"predicts {predicted_deg:+.2f}° of heading error against a {horizontal_ut:.1f} µT "
+            f"horizontal field; observed {observed_deg:+.2f}°",
             xy=(0.99, 0.06), xycoords="axes fraction", ha="right", fontsize=8, color=INK_2,
             bbox=ANNOTATION_CARD)
 

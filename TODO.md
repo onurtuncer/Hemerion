@@ -247,6 +247,27 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   flight computer. This is what forces delayed-measurement handling in the filter, and it is
   the one item here that also changes the flight software.
 
+* **Done since (2026-09-25/26).** Aetherion 0.16.0's environment is consumed (PR #40): `--wind`,
+  `--turbulence`, `--atmosphere` on the F-16 hosts, the barometer driven by the plant's `out.P_Pa`,
+  version floor 0.16.0 by port test. Every sensor FMU now exposes a seed and its error terms as FMI
+  parameters, with `--seed` setting all five from one number (item 6 of the groundwork). The
+  examples got their first tests: `examples.environment` covers the shared host logic in CI, which
+  cannot run a co-simulation at all since it has no Aetherion. IMU bias random walk, scale factor
+  and misalignment (2b); `--imu-range` with a named sensitivity table (2a); magnetometer soft iron
+  (3b, first half).
+
+  Three numbers worth keeping: turbulence at W20 = 8 m/s takes the case-11 peak roll rate from
+  **0.7 gyro counts to 47.4**, overturning this section's headline finding; ISA + 20 K puts the
+  barometer **195 m** below truth while GNSS and radar hold it; a 10 m/s crosswind opens **2.28°**
+  between GNSS course and yaw. All three were invisible in calm, standard-day air.
+
+* **Still open in 3b:** the field model is still a centred dipole, whose declination at Kitty Hawk
+  is +0.69° against the real field's ≈ −11°. WMM/IGRF needs an authoritative coefficient set — it
+  must not be transcribed from memory, for the reason Aetherion refused to transcribe MIL-F-8785C's
+  exceedance chart. `geomagnetic_field.hpp` is still duplicated between the rocket and F-16
+  examples and should become one module header when that lands. The driver's calibration still
+  solves only the hard-iron offset, so soft iron is modelled but not yet estimated.
+
 * **Where to start:** correlated GPS (Hemerion) and turbulence + wind (Aetherion) in parallel —
   together they change what the EKF is tuned against more than everything else combined. Then
   IMU bias walk and the barometer stopgap. The rest as the filter grows the states that need
