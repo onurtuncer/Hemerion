@@ -24,10 +24,11 @@
 //
 // Plain asserts + exit code, matching test_gps_noise.cpp.
 // ------------------------------------------------------------------------------
-#include <cassert>
+#include <cstdlib>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <numbers>
 #include <vector>
 
 #include "Hemerion/baro/bmp390/fmu/bmp390_measurement_model.h"
@@ -48,8 +49,30 @@ using hemerion::sensors::radalt::fmu::RadAltNoiseConfig;
 using hemerion::sensors::radalt::fmu::RadAltNoiseModel;
 using hemerion::sensors::radalt::fmu::RadAltTruthSample;
 
+#define CHECK(condition) check((condition), #condition, __FILE__, __LINE__)
+
 namespace
 {
+
+// assert() is compiled out under NDEBUG, and these files are compiled (though
+// not run) by the Release SWIL job -- where every check below would vanish,
+// taking the variables feeding it with it. A test that silently asserts
+// nothing is exactly the vacuous green this repo has been bitten by before, so
+// the checks here survive the optimiser rather than depending on the build
+// type.
+[[noreturn]] void check_failed(const char* expression, const char* file, int line)
+{
+  std::fprintf(stderr, "%s:%d: check failed: %s\n", file, line, expression);
+  std::abort();
+}
+
+void check(bool condition, const char* expression, const char* file, int line)
+{
+  if (!condition)
+  {
+    check_failed(expression, file, line);
+  }
+}
 
 constexpr int kDraws = 4000;
 
@@ -103,10 +126,10 @@ void test_imu_seeding()
     const auto ra = a.apply(truth);
     const auto rb = b.apply(truth);
     const auto rc = c.apply(truth);
-    assert(ra.accel_x == rb.accel_x && ra.accel_z == rb.accel_z && ra.gyro_y == rb.gyro_y);
+    CHECK(ra.accel_x == rb.accel_x && ra.accel_z == rb.accel_z && ra.gyro_y == rb.gyro_y);
     any_difference = any_difference || (ra.accel_x != rc.accel_x);
   }
-  assert(any_difference);  // a different seed is a different part
+  CHECK(any_difference);  // a different seed is a different part
 
   // The turn-on bias is drawn once: the mean of a long run sits off truth by
   // that draw and does not wander, while the samples themselves scatter by the
@@ -116,18 +139,17 @@ void test_imu_seeding()
   ImuNoiseModel model(config, /*seed=*/9);
   std::vector<double> gyro_x;
   gyro_x.reserve(kDraws);
-  const double gyro_lsb_per_rad_s =
-      static_cast<double>(config.scale.gyro_lsb_per_dps) * (180.0 / 3.14159265358979323846);
+  const double gyro_lsb_per_rad_s = static_cast<double>(config.scale.gyro_lsb_per_dps) * (180.0 / std::numbers::pi);
   for (int k = 0; k < kDraws; ++k)
   {
     gyro_x.push_back(static_cast<std::int16_t>(model.apply(truth).gyro_x) / gyro_lsb_per_rad_s);
   }
   // White sigma recovered (quantisation adds a little; 15 % is several
   // standard errors of a 4000-sample estimate either way).
-  assert(near(stddev(gyro_x), config.gyro_noise_rad_s, 0.15 * config.gyro_noise_rad_s));
+  CHECK(near(stddev(gyro_x), config.gyro_noise_rad_s, 0.15 * config.gyro_noise_rad_s));
   // And the mean is the turn-on bias, not zero: within a few sigma of the
   // configured 1-sigma, and far outside the standard error of the mean.
-  assert(std::fabs(mean(gyro_x)) < 4.0 * config.gyro_bias_sigma_rad_s);
+  CHECK(std::fabs(mean(gyro_x)) < 4.0 * config.gyro_bias_sigma_rad_s);
 
   // A zero-sigma configuration draws nothing at all and is exactly truth.
   ImuNoiseConfig quiet;
@@ -138,7 +160,7 @@ void test_imu_seeding()
   ImuNoiseModel noiseless(quiet, /*seed=*/1);
   const auto first = noiseless.apply(truth);
   const auto second = noiseless.apply(truth);
-  assert(first.accel_x == second.accel_x && first.gyro_z == second.gyro_z);
+  CHECK(first.accel_x == second.accel_x && first.gyro_z == second.gyro_z);
 }
 
 // --- BMP390 ------------------------------------------------------------------
@@ -154,10 +176,10 @@ void test_bmp390_seeding()
     const auto ra = a.measure(3052.0);
     const auto rb = b.measure(3052.0);
     const auto rc = c.measure(3052.0);
-    assert(ra.uncomp_press == rb.uncomp_press && ra.uncomp_temp == rb.uncomp_temp);
+    CHECK(ra.uncomp_press == rb.uncomp_press && ra.uncomp_temp == rb.uncomp_temp);
     any_difference = any_difference || (ra.uncomp_press != rc.uncomp_press);
   }
-  assert(any_difference);
+  CHECK(any_difference);
 
   // The turn-on pressure bias is what makes two unseeded runs of the same
   // scenario differ by metres of indicated altitude: across seeds its spread
@@ -173,8 +195,8 @@ void test_bmp390_seeding()
                           conversion.uncomp_press, model.compensator().compensate_temperature(conversion.uncomp_temp)) -
                       70000.0);
   }
-  assert(near(stddev(bias_pa), config.pressure_bias_sigma_pa, 0.2 * config.pressure_bias_sigma_pa));
-  assert(std::fabs(mean(bias_pa)) < 0.3 * config.pressure_bias_sigma_pa);
+  CHECK(near(stddev(bias_pa), config.pressure_bias_sigma_pa, 0.2 * config.pressure_bias_sigma_pa));
+  CHECK(std::fabs(mean(bias_pa)) < 0.3 * config.pressure_bias_sigma_pa);
 }
 
 // --- MMC5983MA ---------------------------------------------------------------
@@ -191,10 +213,10 @@ void test_mmc5983ma_seeding()
     const auto ra = a.measure(13.6, -15.4, 45.0, sensing);
     const auto rb = b.measure(13.6, -15.4, 45.0, sensing);
     const auto rc = c.measure(13.6, -15.4, 45.0, sensing);
-    assert(ra.x == rb.x && ra.y == rb.y && ra.z == rb.z);
+    CHECK(ra.x == rb.x && ra.y == rb.y && ra.z == rb.z);
     any_difference = any_difference || (ra.x != rc.x);
   }
-  assert(any_difference);
+  CHECK(any_difference);
 
   // Hard iron is drawn once per run and survives SET/RESET by construction --
   // it is a real field, not an electrical null error. Its spread across seeds
@@ -208,8 +230,8 @@ void test_mmc5983ma_seeding()
     Mmc5983maMeasurementModel model(config, static_cast<std::uint64_t>(seed));
     hard_iron_x.push_back(model.hard_iron_ut()[0]);
   }
-  assert(near(stddev(hard_iron_x), config.hard_iron_sigma_ut, 0.2 * config.hard_iron_sigma_ut));
-  assert(std::fabs(mean(hard_iron_x)) < 0.3 * config.hard_iron_sigma_ut);
+  CHECK(near(stddev(hard_iron_x), config.hard_iron_sigma_ut, 0.2 * config.hard_iron_sigma_ut));
+  CHECK(std::fabs(mean(hard_iron_x)) < 0.3 * config.hard_iron_sigma_ut);
 }
 
 // --- Radar altimeter ---------------------------------------------------------
@@ -228,10 +250,10 @@ void test_radalt_seeding()
     const auto ra = a.apply(truth);
     const auto rb = b.apply(truth);
     const auto rc = c.apply(truth);
-    assert(ra.range == rb.range && ra.status == rb.status);
+    CHECK(ra.range == rb.range && ra.status == rb.status);
     any_difference = any_difference || (ra.range != rc.range);
   }
-  assert(any_difference);
+  CHECK(any_difference);
 
   RadAltNoiseConfig config;
   RadAltNoiseModel model(config, /*seed=*/3);
@@ -241,12 +263,12 @@ void test_radalt_seeding()
   {
     range_m.push_back(model.apply(truth).range / static_cast<double>(config.scale.range_lsb_per_m));
   }
-  assert(near(stddev(range_m), config.range_noise_m, 0.15 * config.range_noise_m));
-  assert(std::fabs(mean(range_m) - truth.height_agl_m) < 4.0 * config.range_bias_sigma_m);
+  CHECK(near(stddev(range_m), config.range_noise_m, 0.15 * config.range_noise_m));
+  CHECK(std::fabs(mean(range_m) - truth.height_agl_m) < 4.0 * config.range_bias_sigma_m);
 
   // Past the tracking range the part reports no ground, whatever the seed.
   truth.height_agl_m = config.max_range_m + 1000.0;
-  assert(model.apply(truth).status == hemerion::sensors::radalt::kRadAltStatusNoReturn);
+  CHECK(model.apply(truth).status == hemerion::sensors::radalt::kRadAltStatusNoReturn);
 }
 
 }  // namespace
