@@ -163,6 +163,113 @@ void test_imu_seeding()
   CHECK(first.accel_x == second.accel_x && first.gyro_z == second.gyro_z);
 }
 
+// Bias random walk: the bias must wander, its spread must grow as sqrt(t), and
+// -- the property that matters -- the drift after a given elapsed time must not
+// depend on how often the model was sampled. A walk implemented as a per-sample
+// step rather than a per-second one would double its drift when the rate
+// doubles, which is the classic way to get this wrong.
+void test_imu_bias_random_walk()
+{
+  const ImuTruthSample truth = imu_truth();
+  constexpr double kRate = 0.01;  // rad/s per sqrt(s), deliberately large so it is visible
+  constexpr double kSeconds = 100.0;
+
+  const auto drift_after = [&](double dt_s, int seed) {
+    ImuNoiseConfig config;
+    config.gyro_noise_rad_s = 0.0F;       // isolate the walk
+    config.gyro_bias_sigma_rad_s = 0.0F;  // start from zero bias
+    config.gyro_bias_walk_rad_s_sqrt_s = static_cast<float>(kRate);
+    ImuNoiseModel model(config, static_cast<std::uint64_t>(seed));
+    ImuTruthSample sample = truth;
+    const auto steps = static_cast<int>(kSeconds / dt_s);
+    for (int k = 1; k <= steps; ++k)
+    {
+      sample.timestamp_us = static_cast<std::uint64_t>(k * dt_s * 1e6);
+      (void)model.apply(sample);
+    }
+    return static_cast<double>(model.gyro_bias_rad_s()[0]);
+  };
+
+  // Spread over many seeds, at two sample rates a decade apart.
+  const auto spread = [&](double dt_s) {
+    std::vector<double> drift;
+    drift.reserve(300);
+    for (int seed = 1; seed <= 300; ++seed)
+    {
+      drift.push_back(drift_after(dt_s, seed));
+    }
+    return stddev(drift);
+  };
+
+  const double expected = kRate * std::sqrt(kSeconds);  // 0.1 rad/s
+  const double coarse = spread(0.1);
+  const double fine = spread(0.01);
+  CHECK(near(coarse, expected, 0.15 * expected));
+  CHECK(near(fine, expected, 0.15 * expected));
+  // Rate independence, the point of the sqrt(dt) increment.
+  CHECK(near(coarse / fine, 1.0, 0.2));
+
+  // And with the walk off the bias does not move at all.
+  ImuNoiseConfig still;
+  still.gyro_bias_walk_rad_s_sqrt_s = 0.0F;
+  ImuNoiseModel fixed_bias(still, /*seed=*/3);
+  ImuTruthSample sample = truth;
+  const double before = static_cast<double>(fixed_bias.gyro_bias_rad_s()[0]);
+  for (int k = 1; k <= 500; ++k)
+  {
+    sample.timestamp_us = static_cast<std::uint64_t>(k * 10000);
+    (void)fixed_bias.apply(sample);
+  }
+  CHECK(static_cast<double>(fixed_bias.gyro_bias_rad_s()[0]) == before);
+}
+
+// Scale factor and misalignment are cross-axis errors invisible at rest: they
+// scale with the signal. A part with 1 % scale error reads 1 % high on a rate
+// it is actually turning at, and nothing extra on a rate of zero.
+void test_imu_scale_and_misalignment()
+{
+  const auto sensed_gyro_x = [](const ImuNoiseConfig& config, double rate_x, double rate_y) {
+    ImuNoiseModel model(config, /*seed=*/11);
+    ImuTruthSample truth = imu_truth();
+    truth.angular_rate_x_rad_s = rate_x;
+    truth.angular_rate_y_rad_s = rate_y;
+    truth.timestamp_us = 10000;
+    const double lsb_per_rad_s = static_cast<double>(config.scale.gyro_lsb_per_dps) * (180.0 / std::numbers::pi);
+    return static_cast<std::int16_t>(model.apply(truth).gyro_x) / lsb_per_rad_s;
+  };
+
+  ImuNoiseConfig quiet;  // no noise or bias, so the geometry is all that is left
+  quiet.accel_noise_mps2 = 0.0F;
+  quiet.gyro_noise_rad_s = 0.0F;
+  quiet.accel_bias_sigma_mps2 = 0.0F;
+  quiet.gyro_bias_sigma_rad_s = 0.0F;
+
+  // Perfect part: what goes in comes out, to the quantiser.
+  const double one_count = 1.0 / (static_cast<double>(quiet.scale.gyro_lsb_per_dps) * (180.0 / std::numbers::pi));
+  CHECK(near(sensed_gyro_x(quiet, 1.0, 0.0), 1.0, one_count));
+  CHECK(near(sensed_gyro_x(quiet, 0.0, 1.0), 0.0, one_count));
+
+  // Scale error: proportional to the rate, and exactly zero at zero rate.
+  ImuNoiseConfig scaled = quiet;
+  scaled.gyro_scale_sigma = 0.05F;  // large, so one draw is unambiguous
+  const double at_one = sensed_gyro_x(scaled, 1.0, 0.0);
+  const double at_two = sensed_gyro_x(scaled, 2.0, 0.0);
+  CHECK(std::fabs(at_one - 1.0) > 3.0 * one_count);  // the error is there
+  CHECK(near(at_two / at_one, 2.0, 0.01));           // and it is proportional
+  CHECK(near(sensed_gyro_x(scaled, 0.0, 0.0), 0.0, one_count));
+
+  // Misalignment: X picks up a little of Y, and still reads nothing when the
+  // vehicle is not turning at all.
+  ImuNoiseConfig skewed = quiet;
+  skewed.misalignment_sigma_rad = 0.02F;
+  CHECK(std::fabs(sensed_gyro_x(skewed, 0.0, 1.0)) > 3.0 * one_count);
+  CHECK(near(sensed_gyro_x(skewed, 0.0, 0.0), 0.0, one_count));
+
+  // Both default to off, and then the triad is exactly the identity: the
+  // default model must be bit-identical to the one before these existed.
+  CHECK(sensed_gyro_x(quiet, 0.0, 1.0) == 0.0);
+}
+
 // --- BMP390 ------------------------------------------------------------------
 
 void test_bmp390_seeding()
@@ -276,6 +383,8 @@ void test_radalt_seeding()
 int main()
 {
   test_imu_seeding();
+  test_imu_bias_random_walk();
+  test_imu_scale_and_misalignment();
   test_bmp390_seeding();
   test_mmc5983ma_seeding();
   test_radalt_seeding();

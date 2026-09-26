@@ -153,6 +153,26 @@ public:
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
         .setDescription("Gyroscope turn-on bias 1-sigma per axis, drawn once per run [rad/s]");
+    register_real("accel_bias_walk_mps2_sqrt_s", &accel_bias_walk_mps2_sqrt_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer bias random walk [m/s^2 per sqrt(s)]; 0 leaves the turn-on bias constant");
+    register_real("gyro_bias_walk_rad_s_sqrt_s", &gyro_bias_walk_rad_s_sqrt_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope bias random walk [rad/s per sqrt(s)]; a 10 deg/h/sqrt(h) part is about 8.1e-6");
+    register_real("accel_scale_sigma", &accel_scale_sigma_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer scale-factor error, 1-sigma per axis, drawn once per run [fraction]");
+    register_real("gyro_scale_sigma", &gyro_scale_sigma_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope scale-factor error, 1-sigma per axis, drawn once per run [fraction]");
+    register_real("misalignment_sigma_rad", &misalignment_sigma_rad_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Axis misalignment, 1-sigma per angle, drawn once per run [rad]; 0.001 is about 0.06 deg");
     register_real("accel_lsb_per_g", &accel_lsb_per_g_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
@@ -205,6 +225,11 @@ public:
     gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
     accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
     gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
+    accel_bias_walk_mps2_sqrt_s_ = kDefaultNoise.accel_bias_walk_mps2_sqrt_s;
+    gyro_bias_walk_rad_s_sqrt_s_ = kDefaultNoise.gyro_bias_walk_rad_s_sqrt_s;
+    accel_scale_sigma_ = kDefaultNoise.accel_scale_sigma;
+    gyro_scale_sigma_ = kDefaultNoise.gyro_scale_sigma;
+    misalignment_sigma_rad_ = kDefaultNoise.misalignment_sigma_rad;
     accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
     gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
     truth_ = ImuTruthSample{};
@@ -262,6 +287,11 @@ private:
     config.gyro_noise_rad_s = static_cast<float>(gyro_noise_rad_s_);
     config.accel_bias_sigma_mps2 = static_cast<float>(accel_bias_sigma_mps2_);
     config.gyro_bias_sigma_rad_s = static_cast<float>(gyro_bias_sigma_rad_s_);
+    config.accel_bias_walk_mps2_sqrt_s = static_cast<float>(accel_bias_walk_mps2_sqrt_s_);
+    config.gyro_bias_walk_rad_s_sqrt_s = static_cast<float>(gyro_bias_walk_rad_s_sqrt_s_);
+    config.accel_scale_sigma = static_cast<float>(accel_scale_sigma_);
+    config.gyro_scale_sigma = static_cast<float>(gyro_scale_sigma_);
+    config.misalignment_sigma_rad = static_cast<float>(misalignment_sigma_rad_);
     config.scale.accel_lsb_per_g = static_cast<float>(accel_lsb_per_g_);
     config.scale.gyro_lsb_per_dps = static_cast<float>(gyro_lsb_per_dps_);
     noise_model_ = (seed_ == 0) ? ImuNoiseModel(config) : ImuNoiseModel(config, static_cast<std::uint64_t>(seed_));
@@ -273,6 +303,11 @@ private:
   double gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
   double accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
   double gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
+  double accel_bias_walk_mps2_sqrt_s_ = kDefaultNoise.accel_bias_walk_mps2_sqrt_s;
+  double gyro_bias_walk_rad_s_sqrt_s_ = kDefaultNoise.gyro_bias_walk_rad_s_sqrt_s;
+  double accel_scale_sigma_ = kDefaultNoise.accel_scale_sigma;
+  double gyro_scale_sigma_ = kDefaultNoise.gyro_scale_sigma;
+  double misalignment_sigma_rad_ = kDefaultNoise.misalignment_sigma_rad;
   double accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
   double gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
 
