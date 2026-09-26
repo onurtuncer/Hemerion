@@ -29,9 +29,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <numbers>
+#include <random>
 #include <utility>
 #include <vector>
 
+#include "Hemerion/sensor_clock.h"
 #include "Hemerion/baro/bmp390/fmu/bmp390_measurement_model.h"
 #include "Hemerion/imu/fmu/imu_noise_model.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_measurement_model.h"
@@ -440,6 +442,65 @@ void test_radalt_beam_geometry()
   CHECK(near(ignored.range / static_cast<double>(flat.scale.range_lsb_per_m), 1000.0, 0.02));
 }
 
+// A part's own clock. Skew is a rate error and accumulates; jitter is a
+// per-sample error and does not. Telling them apart matters to a filter: one
+// slides two sensors' streams against each other over a flight and has to be
+// estimated or tolerated, the other just blurs a timestamp.
+void test_sensor_clock_skew_and_jitter()
+{
+  using hemerion::sensors::SensorClock;
+  using hemerion::sensors::SensorClockConfig;
+
+  // A perfect clock reports the instant it was given, and draws nothing.
+  std::mt19937_64 rng(1);
+  SensorClock perfect(SensorClockConfig{}, rng);
+  CHECK(perfect.skew_ppm() == 0.0F);
+  CHECK(perfect.stamp(1.0, rng) == 1000000U);
+  CHECK(perfect.stamp(123.456789, rng) == 123456789U);
+
+  // Skew is a rate: the error grows with elapsed time, linearly, and a given
+  // instance's is constant.
+  std::mt19937_64 skew_rng(7);
+  SensorClock skewed(SensorClockConfig{ 50.0F, 0.0F }, skew_rng);
+  const double ppm = static_cast<double>(skewed.skew_ppm());
+  CHECK(ppm != 0.0);
+  for (const double seconds : { 1.0, 10.0, 1000.0 })
+  {
+    const double reported = static_cast<double>(skewed.stamp(seconds, skew_rng)) * 1e-6;
+    CHECK(near(reported - seconds, seconds * ppm * 1e-6, 1e-6 + 1e-9 * seconds));
+  }
+
+  // Across instances its spread is the configured sigma.
+  std::vector<double> draws;
+  draws.reserve(500);
+  for (int seed = 1; seed <= 500; ++seed)
+  {
+    std::mt19937_64 one(static_cast<std::uint64_t>(seed));
+    draws.push_back(static_cast<double>(SensorClock(SensorClockConfig{ 50.0F, 0.0F }, one).skew_ppm()));
+  }
+  CHECK(near(stddev(draws), 50.0, 8.0));
+  CHECK(std::fabs(mean(draws)) < 12.0);
+
+  // Jitter has no memory: its spread is the configured sigma and does not
+  // grow with elapsed time, which is exactly how it differs from skew.
+  std::mt19937_64 jitter_rng(9);
+  SensorClock jittery(SensorClockConfig{ 0.0F, 1e-3F }, jitter_rng);
+  const auto jitter_spread = [&](double seconds) {
+    std::vector<double> error;
+    error.reserve(2000);
+    for (int k = 0; k < 2000; ++k)
+    {
+      error.push_back(static_cast<double>(jittery.stamp(seconds, jitter_rng)) * 1e-6 - seconds);
+    }
+    return stddev(error);
+  };
+  const double early = jitter_spread(1.0);
+  const double late = jitter_spread(1000.0);
+  CHECK(near(early, 1e-3, 1.5e-4));
+  CHECK(near(late, 1e-3, 1.5e-4));
+  CHECK(near(late / early, 1.0, 0.25));
+}
+
 }  // namespace
 
 int main()
@@ -451,6 +512,7 @@ int main()
   test_mmc5983ma_seeding();
   test_radalt_seeding();
   test_radalt_beam_geometry();
+  test_sensor_clock_skew_and_jitter();
 
   std::puts("test_sensor_seeding: all checks passed");
   return 0;

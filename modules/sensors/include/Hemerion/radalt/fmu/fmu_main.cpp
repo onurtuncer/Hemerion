@@ -31,6 +31,7 @@
 /// sensor-agnostic and lives in the same module, so duplicating it here would
 /// only invite drift.
 
+#include "Hemerion/sensor_clock.h"
 #include "Hemerion/gps/fmu/udpSender.hpp"
 #include "Hemerion/radalt/fmu/radalt_noise_model.h"
 #include "Hemerion/radalt/fmu/radalt_packet_emitter.h"
@@ -40,6 +41,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <optional>
 
 namespace hemerion::sensors::radalt::fmu
@@ -47,6 +49,9 @@ namespace hemerion::sensors::radalt::fmu
 
 namespace
 {
+
+using hemerion::sensors::SensorClock;
+using hemerion::sensors::SensorClockConfig;
 
 /// The error model's own defaults, so modelDescription.xml's start values and the model cannot
 /// drift apart: both read this.
@@ -97,6 +102,17 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
                         "run reproducible");
+    register_real("clock_skew_sigma_ppm", &clock_skew_sigma_ppm_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Oscillator rate error, 1-sigma, drawn once per run [ppm]. It accumulates, so it slides this "
+                        "part's stream against the other sensors' over a long flight, which is what a filter fusing "
+                        "them has to be robust to");
+    register_real("clock_jitter_sigma_s", &clock_jitter_sigma_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Per-sample timestamp jitter, 1-sigma [s]. No memory, so unlike skew it does not accumulate: "
+                        "it is the gap between when a sample was taken and when the part says it was");
     register_real("beam_half_angle_deg", &beam_half_angle_deg_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
@@ -143,6 +159,8 @@ public:
   void reset() override
   {
     seed_ = 0;
+    clock_skew_sigma_ppm_ = 0.0;
+    clock_jitter_sigma_s_ = 0.0;
     beam_half_angle_deg_ = 0.0;
     range_noise_m_ = kDefaultNoise.range_noise_m;
     range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
@@ -171,7 +189,7 @@ protected:
     for (long k = 1; k <= count; ++k)
     {
       const double sample_time_s = currentTime() + static_cast<double>(k) * sample_period_s;
-      truth_.timestamp_us = static_cast<std::uint64_t>(sample_time_s * 1e6);
+      truth_.timestamp_us = clock_.stamp(sample_time_s, clock_rng_);
       const RadAltPacketEmitter::Frame frame = RadAltPacketEmitter::encode_raw_sample(noise_model_.apply(truth_));
       if (!sender_->send(frame.data(), frame.size()))
       {
@@ -197,16 +215,27 @@ private:
     config.scale.range_lsb_per_m = static_cast<float>(range_lsb_per_m_);
     noise_model_ =
         (seed_ == 0) ? RadAltNoiseModel(config) : RadAltNoiseModel(config, static_cast<std::uint64_t>(seed_));
+    // The part's own clock. Seeded from the same number so one seed
+    // determines the whole instrument, but from its own stream, so turning
+    // the clock on does not move the error draws.
+    clock_rng_.seed((seed_ == 0) ? std::random_device{}() : static_cast<std::uint64_t>(seed_) ^ 0x5DEECE66DULL);
+    clock_ = SensorClock(
+        SensorClockConfig{ static_cast<float>(clock_skew_sigma_ppm_), static_cast<float>(clock_jitter_sigma_s_) },
+        clock_rng_);
   }
 
   // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
   int seed_ = 0;
+  double clock_skew_sigma_ppm_ = 0.0;
+  double clock_jitter_sigma_s_ = 0.0;
   double beam_half_angle_deg_ = 0.0;
   double range_noise_m_ = kDefaultNoise.range_noise_m;
   double range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
   double max_range_m_ = kDefaultNoise.max_range_m;
   double range_lsb_per_m_ = kDefaultNoise.scale.range_lsb_per_m;
 
+  std::mt19937_64 clock_rng_{ 1 };
+  SensorClock clock_{ SensorClockConfig{}, clock_rng_ };
   RadAltNoiseModel noise_model_;
   std::optional<UdpSender> sender_;
   RadAltTruthSample truth_;
