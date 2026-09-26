@@ -121,6 +121,8 @@
 
 #include "geomagnetic_field.hpp"
 
+#include "Hemerion/imu/imu_types.h"
+
 #include "environment.hpp"
 
 #include <algorithm>
@@ -180,6 +182,34 @@ using hemerion::examples::f16_trim_ecos::GeomagneticDipole;
 #ifndef HEMERION_RADALT_FMU_PATH
 #define HEMERION_RADALT_FMU_PATH ""
 #endif
+
+/// @brief A distinct, reproducible seed per sensor from one run seed.
+///
+/// Seeding every part with the same number would hand the barometer and the
+/// radar altimeter the same first draw -- a correlation between independent
+/// parts that no real hardware has, and a coincidence a figure should never
+/// rest on. A cheap integer hash (splitmix64's finaliser) decorrelates them
+/// while keeping the whole run a function of the one number the user typed.
+///
+/// A run seed of 0 means "draw a fresh instrument", and stays 0 for every
+/// sensor: the FMUs read 0 as "use std::random_device", which is what an
+/// unseeded run has always done.
+[[nodiscard]] inline int derived_seed(int run_seed, int sensor_index)
+{
+  if (run_seed == 0)
+  {
+    return 0;
+  }
+  std::uint64_t x =
+      static_cast<std::uint64_t>(run_seed) + 0x9E3779B97F4A7C15ULL * static_cast<std::uint64_t>(sensor_index + 1);
+  x ^= x >> 30U;
+  x *= 0xBF58476D1CE4E5B9ULL;
+  x ^= x >> 27U;
+  x *= 0x94D049BB133111EBULL;
+  x ^= x >> 31U;
+  // Keep it positive and clear of 0, which the FMUs read as "unseeded".
+  return static_cast<int>((x % 2147483646ULL) + 1ULL);
+}
 
 struct Options
 {
@@ -245,6 +275,23 @@ struct Options
   // receiver -- and every figure drawn from it -- stays the one this example
   // was verified with until the change is asked for.
   bool gps_correlated_errors = false;
+  // 0 = every sensor draws a fresh instrument, as an unseeded run always has.
+  //
+  // Any other value fixes every sensor's error stream: the sample a part produces
+  // at a given simulation time is then identical run to run (measured: 790 of 790
+  // shared IMU timestamps, byte for byte). It does *not* make the two-process run
+  // reproducible -- the flight computer polls the I2C parts and drains the IMU
+  // FIFO on its own wall clock, so which samples it catches still varies, and the
+  // logs differ in their first timestamp and their length. Statistics reproduce;
+  // a diff of the sensor logs does not.
+  int seed = 0;
+  // Overrides the derived GPS seed, because this page's GPS figures were
+  // published against particular values of it.
+  // The part's full-scale range. Aircraft rates fall inside one count at the
+  // launch-vehicle default, so an aircraft example should not really be flown
+  // on it; it stays the default only because the published figures were
+  // measured there. The flight computer must be given the same --imu-range.
+  hemerion::sensors::imu::ImuRange imu_range = hemerion::sensors::imu::ImuRange::k2000DpsPm40G;
   int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
 
   // The plant's environment (Aetherion >= 0.16.0). All zero is the calm,
@@ -316,7 +363,14 @@ void print_usage()
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
-               "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
+               "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
+               "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
+               "              on the wire, so both ends must be configured alike\n"
+               "  --seed      seed every sensor's error model: each part then produces the same\n"
+               "              sample at a given simulation time run to run. The flight computer's\n"
+               "              own polling still varies, so the logs are not diff-identical.\n"
+               "              (default 0 = each part is a fresh draw)\n"
+               "  --gps-seed  override just the receiver's seed (default: derived from --seed)\n"
                "  --wind      steady wind as north,east,down in m/s (default calm); the velocity of the air\n"
                "  --turbulence  MIL-F-8785C W20 wind speed at 20 ft in m/s: 0 = off (default), ~5 light,\n"
                "              ~15 moderate. Sets the Dryden sigmas and scale lengths for the trim altitude\n"
@@ -342,7 +396,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 27> kValueOptions = { {
+constexpr std::array<ValueOption, 29> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -363,6 +417,14 @@ constexpr std::array<ValueOption, 27> kValueOptions = { {
           throw std::invalid_argument("--gps-errors takes 'white' or 'correlated', not '" + model + "'");
         }
         o.gps_correlated_errors = (model == "correlated");
+      } },
+    { "--seed", [](Options& o, const char* v) { o.seed = std::stoi(v); } },
+    { "--imu-range",
+      [](Options& o, const char* v) {
+        if (!hemerion::sensors::imu::imu_range_from_name(v, o.imu_range))
+        {
+          throw std::invalid_argument("--imu-range takes 250, 500 or 2000 (deg/s)");
+        }
       } },
     { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
     { "--wind",
@@ -583,6 +645,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
       << "gps_error_model=" << receiver.name << "\n"
+      << "seed=" << options.seed << "\n"
+      << "imu_gyro_lsb_per_dps=" << hemerion::sensors::imu::imu_scale_for(options.imu_range).gyro_lsb_per_dps << "\n"
       << "gps_seed=" << options.gps_seed << "\n"
       << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
       << "gps_vertical_pos_noise_m=" << receiver.vertical_pos_noise_m << "\n"
@@ -846,6 +910,10 @@ int main(int argc, char** argv)
     // Not trim geometry, but sim->init() applies exactly one named parameter
     // set, so the sensor configuration rides along here.
     trim_point["imu::sample_rate_hz"] = options.imu_rate_hz;
+    // The part's sensitivity, from the one table both processes read.
+    const hemerion::sensors::imu::ImuScale imu_scale = hemerion::sensors::imu::imu_scale_for(options.imu_range);
+    trim_point["imu::accel_lsb_per_g"] = imu_scale.accel_lsb_per_g;
+    trim_point["imu::gyro_lsb_per_dps"] = imu_scale.gyro_lsb_per_dps;
     trim_point["radalt::sample_rate_hz"] = options.radalt_rate_hz;
     // Written explicitly even though these match the GPS FMU's own defaults:
     // whether the receiver keeps a fix through this flight is the scenario's
@@ -860,7 +928,12 @@ int main(int argc, char** argv)
     trim_point["gps::reacquisition_time_s"] = options.reacquisition_time_s;
     // The receiver's error model, in full: see GpsErrorModel.
     const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
-    trim_point["gps::seed"] = options.gps_seed;
+    // One stream per sensor, all derived from --seed; --gps-seed still wins for the receiver.
+    trim_point["gps::seed"] = (options.gps_seed != 0) ? options.gps_seed : derived_seed(options.seed, 0);
+    trim_point["imu::seed"] = derived_seed(options.seed, 1);
+    trim_point["baro::seed"] = derived_seed(options.seed, 2);
+    trim_point["mag::seed"] = derived_seed(options.seed, 3);
+    trim_point["radalt::seed"] = derived_seed(options.seed, 4);
     trim_point["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
     trim_point["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
     trim_point["gps::speed_noise_mps"] = receiver.speed_noise_mps;

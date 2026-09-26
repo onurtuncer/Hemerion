@@ -146,6 +146,11 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Bridge offset 1-sigma per axis, drawn once per run [uT]; this is what a SET/RESET pair "
                         "removes");
+    register_real("soft_iron_sigma", &soft_iron_sigma_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Soft-iron distortion, 1-sigma per matrix element, drawn once per run; unlike hard iron it "
+                        "turns with the vehicle, which is what makes a real calibration an ellipsoid fit");
     register_real("temperature_noise_c", &temperature_noise_c_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
@@ -182,6 +187,7 @@ public:
     noise_ut_ = kDefaultNoise.noise_ut;
     hard_iron_sigma_ut_ = kDefaultNoise.hard_iron_sigma_ut;
     bridge_offset_sigma_ut_ = kDefaultNoise.bridge_offset_sigma_ut;
+    soft_iron_sigma_ = kDefaultNoise.soft_iron_sigma;
     temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
     truth_x_ut_ = 0.0;
     truth_y_ut_ = 0.0;
@@ -261,6 +267,7 @@ private:
     config.noise_ut = static_cast<float>(noise_ut_);
     config.hard_iron_sigma_ut = static_cast<float>(hard_iron_sigma_ut_);
     config.bridge_offset_sigma_ut = static_cast<float>(bridge_offset_sigma_ut_);
+    config.soft_iron_sigma = static_cast<float>(soft_iron_sigma_);
     config.temperature_noise_c = static_cast<float>(temperature_noise_c_);
     measurement_model_ = (seed_ == 0) ? Mmc5983maMeasurementModel(config) :
                                         Mmc5983maMeasurementModel(config, static_cast<std::uint64_t>(seed_));
@@ -271,6 +278,7 @@ private:
   double noise_ut_ = kDefaultNoise.noise_ut;
   double hard_iron_sigma_ut_ = kDefaultNoise.hard_iron_sigma_ut;
   double bridge_offset_sigma_ut_ = kDefaultNoise.bridge_offset_sigma_ut;
+  double soft_iron_sigma_ = kDefaultNoise.soft_iron_sigma;
   double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
 
   Mmc5983maMeasurementModel measurement_model_;

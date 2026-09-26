@@ -75,6 +75,22 @@ struct Mmc5983maMeasurementConfig
   /// removes, and it is deliberately the same order as Earth's field.
   float bridge_offset_sigma_ut = 16.7F;
 
+  /// Soft-iron distortion, 1-sigma of each matrix element's departure from
+  /// the identity, drawn once per run [dimensionless].
+  ///
+  /// Where hard iron *adds* a field, soft iron *distorts* the one that is
+  /// there: ferrous structure concentrates and redirects flux, so the error
+  /// turns with the vehicle instead of riding along with it. That is what
+  /// makes a real magnetic calibration an ellipsoid fit rather than an offset
+  /// fit -- the measured locus of a rotating vehicle is an ellipsoid, and its
+  /// shape is this matrix while its centre is the hard iron. A driver that
+  /// solves only for the centre looks finished against a model without this
+  /// term and is wrong on hardware.
+  ///
+  /// 0.02 is a couple of percent, which is a clean installation. The matrix
+  /// is symmetric, as a physical soft-iron tensor is.
+  float soft_iron_sigma = 0.0F;
+
   /// Die temperature white noise, 1-sigma [degrees C]. Small against the
   /// part's 0.8 C output step, which dominates.
   float temperature_noise_c = 0.2F;
@@ -129,6 +145,26 @@ public:
       bridge_offset_.y = to_counts(offset(rng_));
       bridge_offset_.z = to_counts(offset(rng_));
     }
+    // Drawn last, so a configuration without soft iron reproduces the previous
+    // model's stream for a given seed exactly.
+    if (config_.soft_iron_sigma > 0.0F)
+    {
+      std::normal_distribution<float> element(0.0F, config_.soft_iron_sigma);
+      // Symmetric, as a physical soft-iron tensor is: the off-diagonal term
+      // coupling x into y is the same one coupling y into x.
+      for (int i = 0; i < 3; ++i)
+      {
+        for (int j = i; j < 3; ++j)
+        {
+          const float value = element(rng_);
+          soft_iron_[i][j] += value;
+          if (i != j)
+          {
+            soft_iron_[j][i] += value;
+          }
+        }
+      }
+    }
   }
 
   /// @brief Produces one field measurement's raw counts.
@@ -154,13 +190,24 @@ public:
     const double coil_ut =
         static_cast<double>(sensing.self_test_coil) * static_cast<double>(config_.self_test_field_ut);
 
+    // Soft iron distorts the ambient field before the bridges see it. The
+    // self-test coil is added afterwards: it is generated inside the part,
+    // on the far side of whatever ferrous structure surrounds it, so a
+    // distorted installation does not change what the coil produces.
+    const double distorted_x =
+        soft_iron_[0][0] * truth_x_ut + soft_iron_[0][1] * truth_y_ut + soft_iron_[0][2] * truth_z_ut;
+    const double distorted_y =
+        soft_iron_[1][0] * truth_x_ut + soft_iron_[1][1] * truth_y_ut + soft_iron_[1][2] * truth_z_ut;
+    const double distorted_z =
+        soft_iron_[2][0] * truth_x_ut + soft_iron_[2][1] * truth_y_ut + soft_iron_[2][2] * truth_z_ut;
+
     Mmc5983maFieldCounts counts;
     counts.x =
-        axis(truth_x_ut + coil_ut, hard_iron_ut_[0], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.x);
+        axis(distorted_x + coil_ut, hard_iron_ut_[0], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.x);
     counts.y =
-        axis(truth_y_ut + coil_ut, hard_iron_ut_[1], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.y);
+        axis(distorted_y + coil_ut, hard_iron_ut_[1], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.y);
     counts.z =
-        axis(truth_z_ut + coil_ut, hard_iron_ut_[2], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.z);
+        axis(distorted_z + coil_ut, hard_iron_ut_[2], polarity, sensing.automatic_set_reset ? 0 : bridge_offset_.z);
     return counts;
   }
 
@@ -180,6 +227,13 @@ public:
   /// bridge offset, no amount of SET/RESET removes it; it is here so a test
   /// can account for it rather than mistake it for a driver bug.
   [[nodiscard]] const float* hard_iron_ut() const { return hard_iron_ut_; }
+
+  /// @brief The soft-iron matrix this simulated installation applies.
+  ///
+  /// Identity when the term is disabled. Exposed for the same reason as the
+  /// hard iron: so a test can account for it rather than mistake it for a
+  /// driver bug.
+  [[nodiscard]] const float (&soft_iron() const)[3][3] { return soft_iron_; }
 
 private:
   [[nodiscard]] static std::int32_t to_counts(float microtesla)
@@ -219,6 +273,7 @@ private:
   std::mt19937_64 rng_;
   float hard_iron_ut_[3] = { 0.0F, 0.0F, 0.0F };
   Mmc5983maBridgeOffset bridge_offset_{};
+  float soft_iron_[3][3] = { { 1.0F, 0.0F, 0.0F }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 0.0F, 1.0F } };
 };
 
 }  // namespace hemerion::sensors::mag::mmc5983ma::fmu

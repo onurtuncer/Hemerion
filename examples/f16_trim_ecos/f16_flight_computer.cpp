@@ -116,6 +116,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -174,6 +175,8 @@ struct Options
   std::filesystem::path baro_csv_path = "results/baro_samples.csv";
   std::filesystem::path mag_csv_path = "results/mag_samples.csv";
   std::filesystem::path radalt_csv_path = "results/radalt_samples.csv";
+  // Must match the host's --imu-range; see where imu_scale is taken below.
+  hemerion::sensors::imu::ImuRange imu_range = hemerion::sensors::imu::ImuRange::k2000DpsPm40G;
   double fix_period_s = 0.1;     // co-sim communication step; maps fix index -> sim time for the CSV
   int print_every = 50;          // console line every N fixes (50 = every 5 s of sim time at 10 Hz)
   int imu_print_every = 1000;    // console line every N IMU samples (1000 = every 10 s at 100 Hz)
@@ -203,6 +206,8 @@ void print_usage()
                "               the FMU reads the same name from HEMERION_BMP390_FMU_I2C_BUS)\n"
                "  --mag-bus    shared-memory I2C bus the MMC5983MA FMU answers on (default\n"
                "               hemerion_mmc5983ma_i2c; must match HEMERION_MMC5983MA_FMU_I2C_BUS)\n"
+               "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000). Must match the\n"
+               "               host's --imu-range; sensitivity is not on the wire\n"
                "  --imu-wait-s how long to wait for those buses to appear, so either process may start first\n";
 }
 
@@ -216,7 +221,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 19> kValueOptions = { {
+constexpr std::array<ValueOption, 20> kValueOptions = { {
     { "--port", [](Options& o, const char* v) { o.gps_port = static_cast<std::uint16_t>(std::stoi(v)); } },
     { "--radalt-port", [](Options& o, const char* v) { o.radalt_port = static_cast<std::uint16_t>(std::stoi(v)); } },
     { "--imu-bus", [](Options& o, const char* v) { o.imu_bus = v; } },
@@ -229,6 +234,13 @@ constexpr std::array<ValueOption, 19> kValueOptions = { {
     { "--mag-csv", [](Options& o, const char* v) { o.mag_csv_path = v; } },
     { "--radalt-csv", [](Options& o, const char* v) { o.radalt_csv_path = v; } },
     { "--fix-period", [](Options& o, const char* v) { o.fix_period_s = std::stod(v); } },
+    { "--imu-range",
+      [](Options& o, const char* v) {
+        if (!hemerion::sensors::imu::imu_range_from_name(v, o.imu_range))
+        {
+          throw std::invalid_argument("--imu-range takes 250, 500 or 2000 (deg/s)");
+        }
+      } },
     { "--print-every", [](Options& o, const char* v) { o.print_every = std::stoi(v); } },
     { "--imu-print-every", [](Options& o, const char* v) { o.imu_print_every = std::stoi(v); } },
     { "--baro-print-every", [](Options& o, const char* v) { o.baro_print_every = std::stoi(v); } },
@@ -726,11 +738,13 @@ int main(int argc, char** argv)
   }
 
   GpsDriver gps_driver(GpsProtocol::kUbx);
-  // On real hardware the IMU driver knows the full-scale ranges because it
-  // configured the part's registers itself; here the "configuration" is the
-  // IMU FMU's default ImuNoiseConfig, so its scale is the one that converts
-  // these counts back to SI.
-  const hemerion::sensors::imu::ImuScale imu_scale = hemerion::sensors::imu::fmu::ImuNoiseConfig{}.scale;
+  // On real hardware the IMU driver knows the full-scale range because it
+  // programmed the part's register itself. Here the part is an FMU the
+  // co-simulation host configures, and sensitivity is not on the wire, so the
+  // range has to be given to both ends -- hence --imu-range here and on the
+  // host. Converting with the wrong one fails silently: the samples stay
+  // plausible and every rate is wrong by a constant factor.
+  const hemerion::sensors::imu::ImuScale imu_scale = hemerion::sensors::imu::imu_scale_for(options.imu_range);
 
   // Same argument for the radar altimeter's range register: the part's
   // sensitivity is the FMU's default RadAltNoiseConfig scale (100 LSB/m), and
