@@ -507,6 +507,55 @@ void test_sensor_clock_skew_and_jitter()
 
 }  // namespace
 
+/// The cost of a clock that is switched off: nothing.
+///
+/// The clock draws from the same RNG as the error model, so a draw taken here
+/// shifts every noise sample after it. That is why SensorClock's constructor
+/// guards its normal_distribution on a positive sigma rather than passing zero
+/// (which is undefined for that distribution anyway), and why stamp() guards
+/// the jitter draw the same way. Both defaults are zero, so this is what makes
+/// "the clock is off" mean "the stream is exactly what it was before the clock
+/// existed" rather than "the stream is statistically similar".
+void test_sensor_clock_off_draws_nothing()
+{
+  using hemerion::sensors::SensorClock;
+  using hemerion::sensors::SensorClockConfig;
+
+  // Construction must not consume the stream.
+  std::mt19937_64 untouched(4242);
+  std::mt19937_64 shared(4242);
+  SensorClock off(SensorClockConfig{}, shared);
+  CHECK(shared == untouched);
+
+  // Nor may stamping, however many samples go through it.
+  for (int k = 1; k <= 1000; ++k)
+  {
+    (void)off.stamp(static_cast<double>(k) * 0.01, shared);
+  }
+  CHECK(shared == untouched);
+
+  // The next draw off the shared stream is therefore the one the error model
+  // would have seen with no clock in the picture at all.
+  CHECK(shared() == untouched());
+
+  // The complement: a clock that is *on* does consume the stream, so the
+  // check above is testing a guard rather than restating that the RNG is
+  // unused. Skew is drawn once at construction; jitter once per stamp.
+  std::mt19937_64 skew_only(4242);
+  std::mt19937_64 reference(4242);
+  SensorClock skewed(SensorClockConfig{ 50.0F, 0.0F }, skew_only);
+  CHECK(!(skew_only == reference));
+  const std::mt19937_64 after_construction = skew_only;
+  (void)skewed.stamp(1.0, skew_only);
+  CHECK(skew_only == after_construction);  // no jitter configured, no draw
+
+  std::mt19937_64 jitter_only(4242);
+  SensorClock jittery(SensorClockConfig{ 0.0F, 1e-3F }, jitter_only);
+  const std::mt19937_64 before_stamp = jitter_only;
+  (void)jittery.stamp(1.0, jitter_only);
+  CHECK(!(jitter_only == before_stamp));
+}
+
 int main()
 {
   test_imu_seeding();
@@ -517,6 +566,7 @@ int main()
   test_radalt_seeding();
   test_radalt_beam_geometry();
   test_sensor_clock_skew_and_jitter();
+  test_sensor_clock_off_draws_nothing();
 
   std::puts("test_sensor_seeding: all checks passed");
   return 0;

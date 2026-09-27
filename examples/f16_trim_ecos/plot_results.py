@@ -123,6 +123,37 @@ COCOM_ALT_LIMIT_M = 18_000.0
 COCOM_SPEED_LIMIT_MS = 515.0
 
 
+
+# ---------------------------------------------------------------------------
+# The logs' time columns. Item 4b split the single `sim_time_s` the flight
+# computers used to write -- which meant the part's own clock for some sensors,
+# an assumed schedule for the GPS and the host's clock for the magnetometer --
+# into columns named for what they are. Figures that only want an x axis go on
+# asking for `sim_time_s` and get whichever of these the log carries; a figure
+# that compares a part's clock against the flight computer's asks for
+# `part_time_s` and `host_time_s` by name.
+# ---------------------------------------------------------------------------
+TIME_COLUMNS = ("sim_time_s", "part_time_s", "nominal_time_s", "imu_part_time_s")
+
+
+def time_column(fields) -> str:
+    """The name this log gives its primary time column."""
+    for name in TIME_COLUMNS:
+        if name in fields:
+            return name
+    raise KeyError(f"no time column among {TIME_COLUMNS} in {list(fields)}")
+
+
+def with_canonical_time(data: dict) -> dict:
+    """Adds `sim_time_s` as an alias of whatever time column the log carries."""
+    if "sim_time_s" not in data:
+        for name in TIME_COLUMNS:
+            if name in data:
+                data["sim_time_s"] = data[name]
+                break
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Readers
 # ---------------------------------------------------------------------------
@@ -177,7 +208,7 @@ def read_samples(path: Path) -> dict[str, list[float]]:
         rows = [r for r in rows if float(r["fix_type"]) > 0.0]
     elif "valid" in fields:
         rows = [r for r in rows if float(r["valid"]) > 0.0]
-    return {k: [float(r[k]) for r in rows] for k in fields}
+    return with_canonical_time({k: [float(r[k]) for r in rows] for k in fields})
 
 
 def read_gaps(path: Path) -> list[tuple[float, float]]:
@@ -200,7 +231,7 @@ def read_gaps(path: Path) -> list[tuple[float, float]]:
     if not rows:
         return []
 
-    times = [float(r["sim_time_s"]) for r in rows]
+    times = [float(r[time_column(fields)]) for r in rows]
     step = min((b - a for a, b in zip(times, times[1:])), default=0.1)
     intervals: list[tuple[float, float]] = []
     start: float | None = None
@@ -972,6 +1003,111 @@ def plot_imu_body_rates(truth, imu, out: Path, prefix: str, caption: str) -> str
     return save(fig, out, prefix, "imu_body_rates", caption)
 
 
+def plot_clock_divergence(baro, radalt, imu, config: dict[str, str],
+                          out: Path, prefix: str, caption: str) -> str:
+    """Each part's clock against the flight computer's, and its sample jitter.
+
+    The top panel is the quantity a filter has to absorb: ``part_time_s`` minus
+    ``host_time_s``, which is what the part says minus when the sample actually
+    turned up. Three parts give three straight lines of three different slopes,
+    because each drew its own rate error from the one sigma the run configured
+    -- so they separate from each other, not merely from the master's clock.
+    That separation is the reason the item exists: a filter fusing these streams
+    cannot assume a sample stamped 10.00 s by one part is contemporaneous with
+    one stamped 10.00 s by another.
+
+    Two cautions the panel is annotated with rather than hiding. The *absolute*
+    slope of each line also contains the host's own pacing error against
+    simulation time, which is common to all three parts and cancels in their
+    differences -- so the differences are the honest measure of skew, and the
+    figure quotes each part's drift relative to the IMU as well as its raw
+    slope. And a run that is not paced (``--rtf 1``) has no meaningful host
+    time axis at all, since the flight computer's clock is then racing
+    simulation time by whatever factor the co-simulation achieved.
+
+    The bottom panel is jitter: the spread of consecutive ``part_time_s``
+    differences around the part's nominal period. Differencing two independent
+    draws of a sigma gives sigma*sqrt(2), which is the line the annotation
+    predicts and the histogram is measured against.
+    """
+    fig, (ax_drift, ax_jitter) = new_figure(2, height=6.6, sharex=False)
+
+    series = [("IMU", imu, TRUTH), ("barometer", baro, BARO), ("radar altimeter", radalt, RADALT)]
+    slopes: dict[str, float] = {}
+    for label, data, color in series:
+        part = data.get("part_time_s") or []
+        host = data.get("host_time_s") or []
+        if len(part) < 2 or len(host) < 2:
+            continue
+        drift_ms = [(p - h) * 1e3 for p, h in zip(part, host)]
+        # The raw difference is scattered by *arrival* rather than by either
+        # clock: samples reach the flight computer in bursts, and every sample
+        # in one burst carries that burst's arrival stamp, so the difference
+        # sawtooths by the burst's own duration. That scatter is real, so it is
+        # drawn -- faintly. The drift underneath it is what the panel is about,
+        # so it is fitted rather than left to be picked out by eye.
+        ax_drift.plot(host, drift_ms, linestyle="none", marker=".", markersize=MARKER_IMU,
+                      alpha=0.16, color=color)
+        count = len(host)
+        mean_x = sum(host) / count
+        mean_y = sum(drift_ms) / count
+        variance = sum((x - mean_x) ** 2 for x in host)
+        if variance <= 0.0:
+            continue
+        slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(host, drift_ms)) / variance
+        ax_drift.plot([host[0], host[-1]],
+                      [mean_y + slope * (host[0] - mean_x), mean_y + slope * (host[-1] - mean_x)],
+                      color=color, linewidth=1.9, label=label)
+        slopes[label] = slope * 1e3  # ms per s -> ppm
+
+    if slopes:
+        reference = slopes.get("IMU")
+        lines = []
+        for label, ppm in slopes.items():
+            relative = "" if reference is None or label == "IMU" else f", {ppm - reference:+.0f} ppm vs IMU"
+            lines.append(f"{label}: {ppm:+.0f} ppm{relative}")
+        ax_drift.annotate("fitted drift of each part's clock against the host's:\n"
+                          + "\n".join(lines)
+                          + "\n\nscatter is burst arrival, not clock error: one datagram's\n"
+                            "samples all share that datagram's stamp. Raw slopes carry\n"
+                            "the host's own pacing error against simulation time;\n"
+                            "the differences between parts do not.",
+                          xy=(0.5, -0.30), xycoords="axes fraction", va="top", ha="center",
+                          fontsize=8, color=INK_2, bbox=ANNOTATION_CARD)
+    ax_drift.axhline(0.0, color=GRID, linewidth=1.0, zorder=0)
+    ax_drift.set_xlabel("flight computer clock [s]")
+    ax_drift.set_ylabel("part time - host time [ms]")
+    ax_drift.set_title("Every part keeps its own time, and they separate")
+    add_headroom(ax_drift, 0.34)
+    legend(ax_drift, loc="lower left", framed=True)
+
+    # Jitter: the IMU, which is the only part here with a cadence of its own
+    # (the barometer and the magnetometer are polled, so their intervals are
+    # the flight computer's schedule rather than the part's).
+    part = imu.get("part_time_s") or []
+    intervals_ms = [(b - a) * 1e3 for a, b in zip(part, part[1:])]
+    if intervals_ms:
+        ax_jitter.hist(intervals_ms, bins=60, color=TRUTH, alpha=0.75, edgecolor=SURFACE)
+        mean_ms = sum(intervals_ms) / len(intervals_ms)
+        spread_us = (sum((v - mean_ms) ** 2 for v in intervals_ms) / len(intervals_ms)) ** 0.5 * 1e3
+        jitter_s = float(config.get("sensor_clock_jitter_s", "0") or 0.0)
+        predicted_us = jitter_s * 2.0 ** 0.5 * 1e6
+        note = (f"mean interval {mean_ms:.5f} ms\n"
+                f"spread {spread_us:.1f} \u00b5s")
+        if predicted_us > 0.0:
+            note += (f"\npredicted \u03c3\u221a2 = {predicted_us:.1f} \u00b5s"
+                     f"  ({spread_us / predicted_us:.2f}\u00d7)")
+        ax_jitter.annotate(note, xy=(0.99, 0.95), xycoords="axes fraction", va="top", ha="right",
+                           fontsize=8, color=INK_2, bbox=ANNOTATION_CARD)
+        ax_jitter.axvline(mean_ms, color=INK_2, linewidth=1.2, linestyle="--", label="mean")
+        legend(ax_jitter, loc="upper left", framed=True)
+    ax_jitter.set_xlabel("IMU reported sample interval [ms]")
+    ax_jitter.set_ylabel("samples")
+    ax_jitter.set_title("Jitter does not accumulate: the spread is the same all run")
+
+    return save(fig, out, prefix, "clock_divergence", caption)
+
+
 def plot_sensor_envelopes(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
                           fix_epochs, radalt_epochs, out: Path, prefix: str, caption: str) -> str:
     """Each environment-dependent stack against the limit that bounds it.
@@ -1364,6 +1500,14 @@ def main() -> None:
     if imu["sim_time_s"]:
         written.append(plot_imu_specific_force(truth, imu, args.out, prefix, caption))
         written.append(plot_imu_body_rates(truth, imu, args.out, prefix, caption))
+
+    # Only when the run gave the parts a clock: at the default of 0,0 both
+    # panels would be a flat line at zero and one bar.
+    clock_on = (float(config.get("sensor_clock_skew_ppm", "0") or 0.0) != 0.0
+                or float(config.get("sensor_clock_jitter_s", "0") or 0.0) != 0.0)
+    if clock_on and imu.get("part_time_s"):
+        written.append(plot_clock_divergence(baro, radalt, imu, config, args.out, prefix, caption))
+
 
     # Fifty fixes is the least an autocorrelation says anything about; a
     # launch-vehicle envelope, or case 12, can leave none at all.

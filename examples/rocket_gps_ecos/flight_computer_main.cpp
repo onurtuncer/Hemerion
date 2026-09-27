@@ -400,11 +400,11 @@ private:
   std::size_t failed_transactions_ = 0;
 };
 
-void print_fix(long index, double sim_time_s, const GpsFix& fix)
+void print_fix(long index, double nominal_time_s, const GpsFix& fix)
 {
   std::printf("[fc] fix %5ld  t=%7.1f s  lat=%11.7f  lon=%12.7f  alt=%9.1f m  vel=%7.1f m/s  crs=%5.1f deg  sats=%u\n",
               index,
-              sim_time_s,
+              nominal_time_s,
               fix.latitude_deg,
               fix.longitude_deg,
               static_cast<double>(fix.altitude_m),
@@ -413,11 +413,11 @@ void print_fix(long index, double sim_time_s, const GpsFix& fix)
               static_cast<unsigned>(fix.num_satellites));
 }
 
-void print_imu_sample(long index, double sim_time_s, const ImuSample& sample)
+void print_imu_sample(long index, double part_time_s, const ImuSample& sample)
 {
   std::printf("[fc] imu %6ld  t=%7.1f s  f=[%8.2f %7.2f %7.2f] m/s2  w=[%8.4f %7.4f %7.4f] rad/s\n",
               index,
-              sim_time_s,
+              part_time_s,
               static_cast<double>(sample.accel_x),
               static_cast<double>(sample.accel_y),
               static_cast<double>(sample.accel_z),
@@ -590,7 +590,7 @@ int main(int argc, char** argv)
     std::cerr << "error: cannot open " << options.gps_csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
-  gps_csv << "fix_index,sim_time_s,latitude_deg,longitude_deg,altitude_m,ground_speed_mps,course_deg,"
+  gps_csv << "fix_index,nominal_time_s,host_time_s,latitude_deg,longitude_deg,altitude_m,ground_speed_mps,course_deg,"
              "horizontal_accuracy_m,vertical_accuracy_m,num_satellites,fix_type\n";
   // Ten significant digits: at 36 deg of latitude the stream's default six put
   // the fix on a 0.0001 deg (11 m) grid, which is seven times the noise the
@@ -605,7 +605,8 @@ int main(int argc, char** argv)
     std::cerr << "error: cannot open " << options.imu_csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
-  imu_csv << "sample_index,sim_time_s,accel_x_mps2,accel_y_mps2,accel_z_mps2,gyro_x_rad_s,gyro_y_rad_s,gyro_z_rad_s\n";
+  imu_csv << "sample_index,part_time_s,host_time_s,accel_x_mps2,accel_y_mps2,accel_z_mps2,gyro_x_rad_s,gyro_y_rad_s,"
+             "gyro_z_rad_s\n";
 
   std::ofstream baro_csv = open_csv(options.baro_csv_path);
   if (!baro_csv)
@@ -613,7 +614,7 @@ int main(int argc, char** argv)
     std::cerr << "error: cannot open " << options.baro_csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
-  baro_csv << "sample_index,sim_time_s,pressure_pa,temperature_c\n";
+  baro_csv << "sample_index,part_time_s,host_time_s,pressure_pa,temperature_c\n";
 
   std::ofstream mag_csv = open_csv(options.mag_csv_path);
   if (!mag_csv)
@@ -623,13 +624,13 @@ int main(int argc, char** argv)
   }
   // Two time columns, because this part forces the question the other two
   // answer for you. The BMP390 stamps its own conversions (SENSORTIME) and
-  // IMU frames carry the simulation clock in their payload; an MMC5983MA
-  // sample carries nothing, so `host_time_s` is this process's clock -- which
-  // equals simulation time only under --rtf 1 -- and `sim_time_s` is the
+  // IMU frames carry a timestamp on the part's own clock; an MMC5983MA sample
+  // carries nothing at all, so `host_time_s` is this process's clock -- which
+  // equals simulation time only under --rtf 1 -- and `imu_part_time_s` is the
   // flight computer aligning the sample to the time base it does have, the
   // most recent IMU payload timestamp. That is what real firmware does with
   // an unstamped sensor, and it is why the IMU is the time master here.
-  mag_csv << "sample_index,sim_time_s,host_time_s,mag_x_ut,mag_y_ut,mag_z_ut\n";
+  mag_csv << "sample_index,imu_part_time_s,host_time_s,mag_x_ut,mag_y_ut,mag_z_ut\n";
 
   {
     // The bridge offset beside the data it made valid, in the same
@@ -666,7 +667,7 @@ int main(int argc, char** argv)
   long mag_sample_count = 0;
   // The flight computer's own time base, taken from the IMU payload stamps
   // and used to place the magnetometer samples that carry none.
-  double imu_sim_time_s = 0.0;
+  double imu_part_time_s = 0.0;
   bool mag_gone = false;
   long checksum_errors = 0;
   long imu_checksum_errors = 0;
@@ -686,6 +687,15 @@ int main(int argc, char** argv)
 
   const auto wall_start = std::chrono::steady_clock::now();
   auto last_sensor_data = wall_start;
+
+  // Arrival time on the flight computer's own clock, in seconds from the start
+  // of the run. Every drain site below sets last_sensor_data before it
+  // processes what it drained, so this is when the datagram or burst holding
+  // the sample landed -- not when the part says the sample was taken, which is
+  // the part's own clock and drifts against this one.
+  const auto arrival_s = [&wall_start, &last_sensor_data] {
+    return std::chrono::duration<double>(last_sensor_data - wall_start).count();
+  };
   bool any_data = false;
 
   // The same per-byte feed the firmware's GPS task performs on UART RX data.
@@ -703,7 +713,10 @@ int main(int argc, char** argv)
         // index maps directly to co-simulation time -- including the epochs
         // the receiver reports with no solution, which is exactly why the
         // index and not the fix count is used here.
-        const double sim_time_s = static_cast<double>(fix_count) * options.fix_period_s;
+        // The epoch schedule, not a simulation clock and not the receiver's: a
+        // u-blox NAV-PVT carries no time this parser reads, so the index is all
+        // there is. host_time_s below is the real arrival stamp.
+        const double nominal_time_s = static_cast<double>(fix_count) * options.fix_period_s;
         if (fix.fix_type == GpsFixType::kNoFix)
         {
           // The dynamics envelope took the fix away. A real receiver keeps
@@ -717,12 +730,14 @@ int main(int argc, char** argv)
           // figure.
           if (first_outage_s < 0.0)
           {
-            first_outage_s = sim_time_s;
-            std::printf(
-                "[fc] fix %5ld  t=%7.1f s  no fix -- receiver outside its dynamics envelope\n", fix_count, sim_time_s);
+            first_outage_s = nominal_time_s;
+            std::printf("[fc] fix %5ld  t=%7.1f s  no fix -- receiver outside its dynamics envelope\n",
+                        fix_count,
+                        nominal_time_s);
           }
-          last_outage_s = sim_time_s;
-          gps_csv << fix_count << ',' << sim_time_s << ",,,,,,,," << static_cast<unsigned>(fix.num_satellites) << ','
+          last_outage_s = nominal_time_s;
+          gps_csv << fix_count << ',' << nominal_time_s << ',' << static_cast<double>(fix.timestamp_us) * 1e-6
+                  << ",,,,,,,," << static_cast<unsigned>(fix.num_satellites) << ','
                   << static_cast<unsigned>(fix.fix_type) << '\n';
         }
         else
@@ -732,12 +747,13 @@ int main(int argc, char** argv)
           max_speed_mps = std::max(max_speed_mps, fix.ground_speed_mps);
           if (valid_fix_count == 1 || fix_count % options.print_every == 0)
           {
-            print_fix(fix_count, sim_time_s, fix);
+            print_fix(fix_count, nominal_time_s, fix);
           }
-          gps_csv << fix_count << ',' << sim_time_s << ',' << fix.latitude_deg << ',' << fix.longitude_deg << ','
-                  << fix.altitude_m << ',' << fix.ground_speed_mps << ',' << fix.course_deg << ','
-                  << fix.horizontal_accuracy_m << ',' << fix.vertical_accuracy_m << ','
-                  << static_cast<unsigned>(fix.num_satellites) << ',' << static_cast<unsigned>(fix.fix_type) << '\n';
+          gps_csv << fix_count << ',' << nominal_time_s << ',' << static_cast<double>(fix.timestamp_us) * 1e-6 << ','
+                  << fix.latitude_deg << ',' << fix.longitude_deg << ',' << fix.altitude_m << ','
+                  << fix.ground_speed_mps << ',' << fix.course_deg << ',' << fix.horizontal_accuracy_m << ','
+                  << fix.vertical_accuracy_m << ',' << static_cast<unsigned>(fix.num_satellites) << ','
+                  << static_cast<unsigned>(fix.fix_type) << '\n';
         }
       }
       else if (result == GpsParseError::kChecksumMismatch)
@@ -796,9 +812,10 @@ int main(int argc, char** argv)
           continue;
         }
         ++imu_sample_count;
-        // IMU frames carry the simulation clock in their payload.
-        const double sim_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
-        imu_sim_time_s = sim_time_s;
+        // IMU frames carry the part's *own* clock in their payload -- not the
+        // simulation's, once clock_skew_sigma_ppm is non-zero.
+        const double part_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
+        imu_part_time_s = part_time_s;
         const double specific_force_mps2 = std::sqrt(static_cast<double>(sample.accel_x) * sample.accel_x +
                                                      static_cast<double>(sample.accel_y) * sample.accel_y +
                                                      static_cast<double>(sample.accel_z) * sample.accel_z);
@@ -807,11 +824,12 @@ int main(int argc, char** argv)
                                                  static_cast<double>(sample.gyro_z) * sample.gyro_z);
         max_specific_force_mps2 = std::max(max_specific_force_mps2, specific_force_mps2);
         max_body_rate_rad_s = std::max(max_body_rate_rad_s, body_rate_rad_s);
-        imu_csv << imu_sample_count << ',' << sim_time_s << ',' << sample.accel_x << ',' << sample.accel_y << ','
-                << sample.accel_z << ',' << sample.gyro_x << ',' << sample.gyro_y << ',' << sample.gyro_z << '\n';
+        imu_csv << imu_sample_count << ',' << part_time_s << ',' << arrival_s() << ',' << sample.accel_x << ','
+                << sample.accel_y << ',' << sample.accel_z << ',' << sample.gyro_x << ',' << sample.gyro_y << ','
+                << sample.gyro_z << '\n';
         if (imu_sample_count == 1 || imu_sample_count % options.imu_print_every == 0)
         {
-          print_imu_sample(imu_sample_count, sim_time_s, sample);
+          print_imu_sample(imu_sample_count, part_time_s, sample);
         }
       }
     }
@@ -847,17 +865,18 @@ int main(int argc, char** argv)
       last_sensor_data = std::chrono::steady_clock::now();
       any_data = true;
       ++baro_sample_count;
-      // SENSORTIME wraps every 512 s; this flight fits inside one wrap.
-      const double sim_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
+      // SENSORTIME wraps every 512 s; this flight fits inside one wrap. It is a
+      // counter on the die, so it runs on the part's clock, not the master's.
+      const double part_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
       min_pressure_pa = std::min(min_pressure_pa, static_cast<double>(sample.pressure_pa));
       min_temperature_c = std::min(min_temperature_c, static_cast<double>(sample.temperature_c));
-      baro_csv << baro_sample_count << ',' << sim_time_s << ',' << sample.pressure_pa << ',' << sample.temperature_c
-               << '\n';
+      baro_csv << baro_sample_count << ',' << part_time_s << ',' << arrival_s() << ',' << sample.pressure_pa << ','
+               << sample.temperature_c << '\n';
       if (baro_sample_count == 1 || baro_sample_count % options.baro_print_every == 0)
       {
         std::printf("[fc] baro %5ld  t=%7.1f s  p=%9.1f Pa  T=%6.2f C\n",
                     baro_sample_count,
-                    sim_time_s,
+                    part_time_s,
                     static_cast<double>(sample.pressure_pa),
                     static_cast<double>(sample.temperature_c));
       }
@@ -900,13 +919,13 @@ int main(int argc, char** argv)
                                             (static_cast<double>(sample.mag_z_ut) * sample.mag_z_ut));
       max_field_ut = std::max(max_field_ut, magnitude_ut);
       min_field_ut = std::min(min_field_ut, magnitude_ut);
-      mag_csv << mag_sample_count << ',' << imu_sim_time_s << ',' << host_time_s << ',' << sample.mag_x_ut << ','
+      mag_csv << mag_sample_count << ',' << imu_part_time_s << ',' << host_time_s << ',' << sample.mag_x_ut << ','
               << sample.mag_y_ut << ',' << sample.mag_z_ut << '\n';
       if (mag_sample_count == 1 || mag_sample_count % options.mag_print_every == 0)
       {
         std::printf("[fc] mag  %5ld  t=%7.1f s  b=(%+7.2f, %+7.2f, %+7.2f) uT  |b|=%6.2f uT\n",
                     mag_sample_count,
-                    imu_sim_time_s,
+                    imu_part_time_s,
                     static_cast<double>(sample.mag_x_ut),
                     static_cast<double>(sample.mag_y_ut),
                     static_cast<double>(sample.mag_z_ut),
