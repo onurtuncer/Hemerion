@@ -71,6 +71,7 @@
 /// implements do_step(); see cmake/generate_fmu.cmake for how the two halves
 /// are compiled and packaged into an .fmu archive.
 
+#include "Hemerion/sensor_clock.h"
 #include "Hemerion/baro/bmp390/fmu/bmp390_i2c_slave.h"
 #include "Hemerion/baro/bmp390/fmu/bmp390_measurement_model.h"
 
@@ -80,6 +81,7 @@
 #include <fmu4cpp/fmu_except.hpp>
 
 #include <cstdint>
+#include <random>
 #include <cstdio>
 
 namespace hemerion::sensors::baro::bmp390::fmu
@@ -159,6 +161,17 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
                         "run reproducible");
+    register_real("clock_skew_sigma_ppm", &clock_skew_sigma_ppm_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Oscillator rate error, 1-sigma, drawn once per run [ppm]. It accumulates, so it slides this "
+                        "part's stream against the other sensors' over a long flight, which is what a filter fusing "
+                        "them has to be robust to");
+    register_real("clock_jitter_sigma_s", &clock_jitter_sigma_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Per-sample timestamp jitter, 1-sigma [s]. No memory, so unlike skew it does not accumulate: "
+                        "it is the gap between when a sample was taken and when the part says it was");
     register_real("pressure_noise_pa", &pressure_noise_pa_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
@@ -203,6 +216,8 @@ public:
   void reset() override
   {
     seed_ = 0;
+    clock_skew_sigma_ppm_ = 0.0;
+    clock_jitter_sigma_s_ = 0.0;
     pressure_noise_pa_ = kDefaultNoise.pressure_noise_pa;
     temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
     pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
@@ -279,8 +294,10 @@ private:
                                                    ambient_temperature_c_ :
                                                    baro::fmu::BaroNoiseModel::isa_temperature_c(altitude_m_)) :
             measurement_model_.measure(altitude_m_);
-    slave_.latch_conversion(
-        conversion.uncomp_press, conversion.uncomp_temp, static_cast<std::uint64_t>(sample_time_s * 1e6));
+    // SENSORTIME is a counter on the die, so it is the part's clock that
+    // drives it -- the same stamp the other parts skew, under the name the
+    // datasheet gives it.
+    slave_.latch_conversion(conversion.uncomp_press, conversion.uncomp_temp, clock_.stamp(sample_time_s, clock_rng_));
 
     ++conversions_;
     if (!conversion.pressure_in_rating || !conversion.temperature_in_rating)
@@ -336,15 +353,26 @@ private:
     config.calibration = measurement_model_.calibration();
     measurement_model_ = (seed_ == 0) ? Bmp390MeasurementModel(config) :
                                         Bmp390MeasurementModel(config, static_cast<std::uint64_t>(seed_));
+    // The part's own clock. Seeded from the same number so one seed
+    // determines the whole instrument, but from its own stream, so turning
+    // the clock on does not move the error draws.
+    clock_rng_.seed((seed_ == 0) ? std::random_device{}() : static_cast<std::uint64_t>(seed_) ^ 0x5DEECE66DULL);
+    clock_ = SensorClock(
+        SensorClockConfig{ static_cast<float>(clock_skew_sigma_ppm_), static_cast<float>(clock_jitter_sigma_s_) },
+        clock_rng_);
   }
 
   // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
   int seed_ = 0;
+  double clock_skew_sigma_ppm_ = 0.0;
+  double clock_jitter_sigma_s_ = 0.0;
   double pressure_noise_pa_ = kDefaultNoise.pressure_noise_pa;
   double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
   double pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
   double temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
 
+  std::mt19937_64 clock_rng_{ 1 };
+  SensorClock clock_{ SensorClockConfig{}, clock_rng_ };
   Bmp390MeasurementModel measurement_model_;
   Bmp390I2cSlave slave_{ measurement_model_.calibration() };
   sim::i2c_shm::I2cPeripheralEndpoint<Bmp390I2cSlave> endpoint_{ slave_, kI2cBus };

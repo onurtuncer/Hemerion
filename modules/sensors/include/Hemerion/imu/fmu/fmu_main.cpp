@@ -75,9 +75,6 @@ namespace hemerion::sensors::imu::fmu
 namespace
 {
 
-using hemerion::sensors::SensorClock;
-using hemerion::sensors::SensorClockConfig;
-
 /// The error model's own defaults, so modelDescription.xml's start values and the model cannot
 /// drift apart: both read this.
 constexpr ImuNoiseConfig kDefaultNoise{};

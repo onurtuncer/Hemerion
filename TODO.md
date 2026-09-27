@@ -239,6 +239,13 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   there is no terrain. At the bank angles in 13.3/13.4 a ±20° beam reads slant range or loses
   the ground. **Add:** terrain (a constant elevation with a little roughness is enough to make
   the point), a bank-angle dropout, and a cos(roll)·cos(pitch) slant term on the host side.
+  **Done — 2026-09-27.** `beam_half_angle_rad` on the model, `roll_rad`/`pitch_rad` as FMI
+  inputs, slant range `h / (cos roll cos pitch)` and a no-return past the beam; `--terrain` on
+  the hosts subtracts ground elevation before the connection, keeping a property of the world
+  out of a model of a part. Banked 15 degrees a 1000 m height reads 1035.3 m, asserted in
+  `sensors.seeding` against the geometry rather than against a recorded value. The default beam
+  half-angle is 0, which ignores attitude exactly as the part did before. Documented in
+  `sensor_models.rst`.
 
 * **Sensor timing is exact and phase-locked.** `sensor_cadence.png` shows 100.00 / 40.00 /
   10.00 ms intervals with zero jitter, because every FMU steps on the master's clock. Real
@@ -246,6 +253,38 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   on arrival. **Add:** per-sensor clock skew and jitter in the FMUs, arrival-time stamping in the
   flight computer. This is what forces delayed-measurement handling in the filter, and it is
   the one item here that also changes the flight software.
+  **Done — 2026-09-27, both halves.** `SensorClock` (skew: a rate error drawn once per run, so
+  its effect accumulates; jitter: per-sample, no memory) on the three parts whose time anything
+  downstream can actually read — the IMU's and radar altimeter's frame timestamps and the
+  BMP390's `SENSORTIME`. `--sensor-clock <skew_ppm>,<jitter_s>` on all three hosts and into the
+  `.config` sidecar: one magnitude per run, a separate draw per part. And the flight computers
+  now stamp on arrival — every sensor log carries `host_time_s` beside the part's own
+  `part_time_s`, with the GPS's index-derived column renamed `nominal_time_s` for what it is.
+
+  **Two parts deliberately have no clock, and working out why was the substance of the item.**
+  The MMC5983MA has no time register at all, which is why its driver already took a `now_us()`
+  from the board. The GPS looked like it obviously should have one — the FMU fills a timestamp
+  — but `ubxEmitter` leaves `iTOW` zero on purpose and `GpsFix::timestamp_us` is by contract the
+  *caller's* clock, so nothing downstream can see the receiver's idea of time. Skewing it is not
+  inert, though: that field is what `GpsNoiseModel` and `GpsDynamicsModel` difference for their
+  dt, and with `--gps-errors correlated` a 2000 ppm clock moved 114 of 300 fixes by up to 11 mm
+  against the same seed. It was added, measured, and taken back out. Both parts' clock error is
+  real but observable only in *when data arrives*, which is what the arrival stamp now records.
+
+  Measured on the rocket example (`--sensor-clock 2000,0.0005 --seed 7`): the IMU drew +2833 ppm
+  of its 2000 ppm sigma, giving a reported sample interval of 10.0284 ms against 10.0000 ms
+  nominal, with an interval spread of 689.5 us against the sigma*sqrt(2) = 707 us that
+  differencing two independent 500 us jitters predicts. With the clock off the same run reports
+  10.000000 ms intervals and 300 of 300 GPS fixes identical — `sensors.seeding` guards that
+  bit-exactness at the unit level by asserting a zero-sigma clock consumes *nothing* from the
+  shared RNG, checked against the realistic regression (draw unconditionally, zero the result
+  when unconfigured) rather than only against the reported stamps.
+
+  **Still open here:** the emission *cadence* is still the master's step grid — a part 2000 ppm
+  fast says so in its stamps but does not thereby produce 2000 ppm more samples per second, which
+  would need sub-step resampling. And GPS NAV-PVT latency, deferred to this item from 1a, is now
+  unblocked: `host_time_s` is a real arrival stamp, so a delayed emission would finally be
+  visible. Neither is needed until the filter has states that care.
 
 * **Done since (2026-09-25/26).** Aetherion 0.16.0's environment is consumed (PR #40): `--wind`,
   `--turbulence`, `--atmosphere` on the F-16 hosts, the barometer driven by the plant's `out.P_Pa`,
@@ -268,10 +307,19 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   examples and should become one module header when that lands. The driver's calibration still
   solves only the hard-iron offset, so soft iron is modelled but not yet estimated.
 
-* **Where to start:** correlated GPS (Hemerion) and turbulence + wind (Aetherion) in parallel —
-  together they change what the EKF is tuned against more than everything else combined. Then
-  IMU bias walk and the barometer stopgap. The rest as the filter grows the states that need
-  them.
+* **What is left, as of 2026-09-27.** Everything this section originally called for is built
+  except the magnetic field model. In order of what it would change for a filter:
+
+  1. **WMM or IGRF in place of the centred dipole** (3b's remainder, above). The only item here
+     still capable of a systematic degrees-level heading error, and the only one blocked on
+     something other than effort: it needs an authoritative coefficient set.
+  2. **Soft-iron estimation in the driver's calibration.** Soft iron is modelled but the
+     calibration still solves only the hard-iron offset, so an in-flight calibration is still
+     easier than the real one.
+  3. **`geomagnetic_field.hpp` deduplicated** into a module header instead of a copy per example.
+     Housekeeping, but it is the file item 1 would edit.
+  4. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
+     rather than deferred, and neither matters until the filter carries states that care.
 
 ---
 
