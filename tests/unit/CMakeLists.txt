@@ -12,6 +12,13 @@
 # FMU was found, so their absence in CI is visible in the test count rather than scored as a pass.
 # ------------------------------------------------------------------------------
 
+# Host-only. The cross (test-swil) build compiles with -fno-exceptions, and examples/common/environment.hpp reports a
+# bad --wind or --atmosphere by throwing std::invalid_argument -- the option parser for a desktop co-simulation host,
+# which is not code that will ever run on the STM32H743. Same gate, and the same reason, as apps/can_actuator_link.
+if(CMAKE_CROSSCOMPILING)
+  return()
+endif()
+
 add_executable(test_hemerion_example_environment test_example_environment.cpp)
 target_include_directories(test_hemerion_example_environment PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
 target_link_libraries(test_hemerion_example_environment PRIVATE hemerion_test_support)

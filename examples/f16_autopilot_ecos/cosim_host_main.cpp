@@ -227,7 +227,7 @@ struct Options
   // The world under the aircraft, and the beam that looks at it.
   double terrain_elevation_m = 0.0;
   double radalt_beam_half_angle_deg = 0.0;  // 0 = ignore attitude, as the part did before
-  double realtime_factor = 0.0;  // 0 = run as fast as possible
+  double realtime_factor = 0.0;             // 0 = run as fast as possible
   // Receiver dynamics envelope -- identical to the trim example, and far
   // inside every limit on all four cases (the maneuvers stay subsonic at
   // ~3 km).

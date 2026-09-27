@@ -135,6 +135,23 @@ side is the same code that runs on the STM32:
                          style=dashed constraint=false color="#7a8a9a"]
    }
 
+Shared across the families
+==========================
+
+One piece is not per-family: the clock a simulated part keeps.
+
+Every sensor FMU used to stamp its samples with the master's own time, so the
+whole complement shared one perfect clock — a 100 Hz part produced samples
+exactly 10 000 µs apart, forever, in lockstep with a 25 Hz part and a 10 Hz
+one. No real complement is like that, and a filter that fuses the streams is
+being handed an alignment it will not get on hardware. ``SensorClock`` gives
+each part its own oscillator instead: a rate error drawn once per run, whose
+effect accumulates and so slides the streams against each other over a long
+flight, and a per-sample jitter that does not accumulate. Both default to zero,
+which is the perfect clock the FMUs have always had.
+
+.. doxygenfile:: Hemerion/sensor_clock.h
+
 Sensor families
 ===============
 

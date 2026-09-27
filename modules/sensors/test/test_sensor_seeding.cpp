@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <iostream>
 #include <numbers>
 #include <random>
 #include <utility>
@@ -65,7 +66,10 @@ namespace
 // type.
 [[noreturn]] void check_failed(const char* expression, const char* file, int line)
 {
-  std::fprintf(stderr, "%s:%d: check failed: %s\n", file, line, expression);
+  // An ostream rather than fprintf: the tidy configuration wants the printf
+  // family replaced, and std::cerr does that without depending on <print>
+  // being available in every toolchain this builds under.
+  std::cerr << file << ":" << line << ": check failed: " << expression << "\n";
   std::abort();
 }
 
@@ -217,10 +221,10 @@ void test_imu_bias_random_walk()
   still.gyro_bias_walk_rad_s_sqrt_s = 0.0F;
   ImuNoiseModel fixed_bias(still, /*seed=*/3);
   ImuTruthSample sample = truth;
-  const double before = static_cast<double>(fixed_bias.gyro_bias_rad_s()[0]);
+  const auto before = static_cast<double>(fixed_bias.gyro_bias_rad_s()[0]);
   for (int k = 1; k <= 500; ++k)
   {
-    sample.timestamp_us = static_cast<std::uint64_t>(k * 10000);
+    sample.timestamp_us = static_cast<std::uint64_t>(k) * 10000U;
     (void)fixed_bias.apply(sample);
   }
   CHECK(static_cast<double>(fixed_bias.gyro_bias_rad_s()[0]) == before);
@@ -462,7 +466,7 @@ void test_sensor_clock_skew_and_jitter()
   // instance's is constant.
   std::mt19937_64 skew_rng(7);
   SensorClock skewed(SensorClockConfig{ 50.0F, 0.0F }, skew_rng);
-  const double ppm = static_cast<double>(skewed.skew_ppm());
+  const auto ppm = static_cast<double>(skewed.skew_ppm());
   CHECK(ppm != 0.0);
   for (const double seconds : { 1.0, 10.0, 1000.0 })
   {

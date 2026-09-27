@@ -25,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -50,7 +51,10 @@ namespace
 // type.
 [[noreturn]] void check_failed(const char* expression, const char* file, int line)
 {
-  std::fprintf(stderr, "%s:%d: check failed: %s\n", file, line, expression);
+  // An ostream rather than fprintf: the tidy configuration wants the printf
+  // family replaced, and std::cerr does that without depending on <print>
+  // being available in every toolchain this builds under.
+  std::cerr << file << ":" << line << ": check failed: " << expression << "\n";
   std::abort();
 }
 
@@ -122,11 +126,11 @@ void test_dryden_scaling_and_floor()
 
 void test_parser_accepts_its_grammar()
 {
-  double three[3] = { 0.0, 0.0, 0.0 };
+  std::array<double, 3> three{};
   parse_csv_doubles("10,0,-2.5", three, "--wind", "north,east,down");
   CHECK(three[0] == 10.0 && three[1] == 0.0 && three[2] == -2.5);
 
-  double two[2] = { 0.0, 0.0 };
+  std::array<double, 2> two{};
   parse_csv_doubles("20,-1000", two, "--atmosphere", "deltaT_K,deltaP_sl_Pa");
   CHECK(two[0] == 20.0 && two[1] == -1000.0);
 
@@ -138,10 +142,10 @@ void test_parser_accepts_its_grammar()
 void test_parser_rejects_everything_else()
 {
   const auto rejects = [](const char* text, std::size_t fields) {
-    double buffer[3] = { 0.0, 0.0, 0.0 };
+    std::array<double, 3> buffer{};
     try
     {
-      parse_csv_doubles(text, std::span<double>(buffer, fields), "--wind", "north,east,down");
+      parse_csv_doubles(text, std::span<double>(buffer.data(), fields), "--wind", "north,east,down");
     }
     catch (const std::invalid_argument&)
     {
@@ -160,7 +164,7 @@ void test_parser_rejects_everything_else()
 
   // The message names the option and its grammar, so the user is told what to
   // type rather than which C function failed.
-  double buffer[2] = { 0.0, 0.0 };
+  std::array<double, 2> buffer{};
   try
   {
     parse_csv_doubles("nope", buffer, "--atmosphere", "deltaT_K,deltaP_sl_Pa");
