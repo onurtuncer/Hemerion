@@ -66,6 +66,49 @@ Packet emitter
 
 .. doxygenfile:: Hemerion/mag/fmu/mag_packet_emitter.h
 
+World Magnetic Model
+--------------------
+
+The real geomagnetic field to degree and order 12, replacing what a centred
+dipole can say about it. The difference is not a refinement: a dipole has
+almost no declination structure, and at Kitty Hawk it gives **+0.69°** where
+the field is **−10.99°**. That is harmless while a simulation is its own truth
+and becomes a fault the moment anything carries a declination table.
+
+The model is predictive and **expires**. WMM2025 is valid from 2025.0 to
+2030.0, and its secular variation is a straight line fitted over that window.
+``field_ned()`` refuses dates outside it rather than extrapolating quietly,
+because the failure it guards against — a vehicle flying on a silently stale
+field model — presents as a heading that is merely a bit wrong.
+
+Geodetic throughout, on the WGS-84 ellipsoid. The ellipsoidal correction was
+false precision beside a dipole's ~10% error and is not beside a model good to
+a fraction of a nanotesla.
+
+Validated against NOAA's own 100 reference values, not against itself: worst
+component error **0.0007 nT** across the set. That mattered — the first
+implementation agreed with itself perfectly and was out by tens of thousands of
+nanotesla, having applied the Schmidt normalisation after a recurrence written
+for unnormalised functions.
+
+.. doxygenfile:: Hemerion/mag/world_magnetic_model.h
+
+Coefficients
+~~~~~~~~~~~~
+
+Generated, never typed. ``vendor/wmm/WMM.COF`` is NOAA's own distribution,
+fetched once and committed with its checksum;
+``tools/generate_wmm_coefficients.py`` turns it into the table below, and
+``--check`` fails if the two have drifted. Ninety lines of numbers are exactly
+what no reviewer can verify by eye, and a single mistyped digit produces a
+field that is entirely plausible and wrong.
+
+The coefficients are a work of the U.S. Government and are in the public
+domain. Cite as: *NOAA NCEI Geomagnetic Modeling Team; British Geological
+Survey. 2024: World Magnetic Model 2025.* See ``vendor/wmm/README.md``.
+
+.. doxygenfile:: Hemerion/mag/wmm_coefficients.h
+
 Magnetic calibration
 --------------------
 

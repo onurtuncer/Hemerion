@@ -59,18 +59,27 @@ add_test(NAME sensors.gps_noise COMMAND test_hemerion_sensors_gps_noise)
 set_tests_properties(sensors.gps_noise PROPERTIES LABELS "unit")
 
 # Seed + config determine every sensor error model's output exactly -- the property the FMUs' `seed` parameters sell.
-# Header-only models, so nothing from the fmu/ subtrees is compiled in. The ellipsoid fit that recovers hard and soft
-# iron. Driven through the MMC5983MA's own measurement model rather than through a re-derivation here, so the test fails
-# if the two ever disagree about what the distortion is.
+# Header-only models, so nothing from the fmu/ subtrees is compiled in.
+add_executable(test_hemerion_sensors_seeding test_sensor_seeding.cpp)
+target_link_libraries(test_hemerion_sensors_seeding PRIVATE hemerion_sensors hemerion_test_support)
+add_test(NAME sensors.seeding COMMAND test_hemerion_sensors_seeding)
+set_tests_properties(sensors.seeding PROPERTIES LABELS "unit")
+
+# The ellipsoid fit that recovers hard and soft iron. Driven through the MMC5983MA's own measurement model rather than
+# through a re-derivation in the test, so it fails if the two ever disagree about what the distortion is.
 add_executable(test_hemerion_sensors_magnetic_calibration test_magnetic_calibration.cpp)
 target_link_libraries(test_hemerion_sensors_magnetic_calibration PRIVATE hemerion_sensors hemerion_test_support)
 add_test(NAME sensors.magnetic_calibration COMMAND test_hemerion_sensors_magnetic_calibration)
 set_tests_properties(sensors.magnetic_calibration PROPERTIES LABELS "unit")
 
-add_executable(test_hemerion_sensors_seeding test_sensor_seeding.cpp)
-target_link_libraries(test_hemerion_sensors_seeding PRIVATE hemerion_sensors hemerion_test_support)
-add_test(NAME sensors.seeding COMMAND test_hemerion_sensors_seeding)
-set_tests_properties(sensors.seeding PROPERTIES LABELS "unit")
+# The World Magnetic Model, checked against NOAA's own 100 reference values rather than against itself. The path is
+# passed in because those values are vendored third-party data, not a fixture this repository wrote.
+add_executable(test_hemerion_sensors_wmm test_world_magnetic_model.cpp)
+target_link_libraries(test_hemerion_sensors_wmm PRIVATE hemerion_sensors hemerion_test_support)
+target_compile_definitions(test_hemerion_sensors_wmm
+                           PRIVATE HEMERION_WMM_TEST_VALUES="${CMAKE_SOURCE_DIR}/vendor/wmm/WMM2025_TestValues.txt")
+add_test(NAME sensors.world_magnetic_model COMMAND test_hemerion_sensors_wmm)
+set_tests_properties(sensors.world_magnetic_model PROPERTIES LABELS "unit")
 
 # Round-trip test for the IMU FMU simulator (imu/fmu/). imu_packet_emitter.cpp is compiled directly into this test
 # binary rather than via hemerion_sensors, since the emitter is sim-only code gated behind HEMERION_BUILD_FMU in

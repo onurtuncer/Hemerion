@@ -1,0 +1,13 @@
+# Files clang-format must leave alone. Read natively by clang-format >= 18, so
+# an IDE or a pre-commit hook honours it too and not only .run-clang-format.
+#
+# Generated files, where formatting is the generator's business:
+#
+#   wmm_coefficients.h -- 90 lines of one Gauss coefficient each, emitted by
+#   tools/generate_wmm_coefficients.py from vendor/wmm/WMM.COF. clang-format
+#   packs the table onto 30 lines, which is prettier and makes a coefficient
+#   update unreviewable: the point of one term per line is that swapping in
+#   WMM2030 produces a diff a human can read. It also breaks the generator's
+#   --check mode, which compares the committed file byte for byte against what
+#   the .COF would produce.
+modules/sensors/include/Hemerion/mag/wmm_coefficients.h

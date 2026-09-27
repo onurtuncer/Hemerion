@@ -19,6 +19,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-14
 
+      # The WMM table is generated from vendor/wmm/WMM.COF and committed, so the build
+      # needs no Python -- which leaves exactly one failure mode, a committed table that
+      # no longer matches the .COF beside it. Ninety coefficients are what nobody would
+      # notice drifting by eye, so the check is here rather than left to review.
+      - name: Check the generated WMM coefficients match vendor/wmm/WMM.COF
+        run: python3 tools/generate_wmm_coefficients.py --check
+
       - name: Configure
         run: cmake --preset=test-native
         env:
