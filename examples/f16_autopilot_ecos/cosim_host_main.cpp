@@ -76,8 +76,8 @@
 /// density and airspeed, the way the standalone computes it.
 ///
 /// Everything else -- FMU preflight, the truth logger, run-config sidecar,
-/// the geomagnetic dipole -- matches examples/f16_trim_ecos, and the
-/// magnetic-field model is included from there rather than copied.
+/// the geomagnetic dipole -- matches examples/f16_trim_ecos, with the
+/// shared pieces living in examples/common/.
 
 #include "ecos/algorithm/fixed_step_algorithm.hpp"
 #include "ecos/logger/logger.hpp"
@@ -88,9 +88,10 @@
 // as examples/f16_trim_ecos/cosim_host_main.cpp.
 #include "util/unzipper.hpp"
 
-// The centered-dipole field model, shared with the sibling example rather
-// than copied: both examples fly the same aircraft from the same site, and a
-// third copy of the model would be a third place for it to drift.
+// The centered-dipole field model, from examples/common/: a model of the
+// world rather than of a scenario, so it belongs to no one example. It was
+// duplicated between two of them, and this file reached across an include
+// path into a third, until 2026-09-27.
 #include "geomagnetic_field.hpp"
 
 #include "Hemerion/imu/imu_types.h"
@@ -128,9 +129,9 @@ using hemerion::examples::kFeetToMetres;
 using hemerion::examples::kWhiteReceiver;
 using hemerion::examples::parse_csv_doubles;
 
-using hemerion::examples::f16_trim_ecos::FieldBody;
-using hemerion::examples::f16_trim_ecos::FieldNed;
-using hemerion::examples::f16_trim_ecos::GeomagneticDipole;
+using hemerion::examples::FieldBody;
+using hemerion::examples::FieldNed;
+using hemerion::examples::GeomagneticDipole;
 
 // Compile-time defaults injected by CMakeLists.txt; every one can be
 // overridden on the command line, so an empty default (FMU not found at

@@ -170,14 +170,10 @@ endif()
 add_executable(f16_autopilot_cosim cosim_host_main.cpp)
 target_link_libraries(f16_autopilot_cosim PRIVATE libecos)
 target_compile_features(f16_autopilot_cosim PRIVATE cxx_std_23)
-# Ecos' src/ for util/unzipper.hpp (the extraction preflight), and the sibling example for geomagnetic_field.hpp --
-# shared, not copied; see the header comment in cosim_host_main.cpp.
-target_include_directories(
-  f16_autopilot_cosim
-  PRIVATE "${CMAKE_SOURCE_DIR}/modules/sensors/include"
-          "${ecos_SOURCE_DIR}/src"
-          "${CMAKE_SOURCE_DIR}/examples/common"
-          "${CMAKE_CURRENT_SOURCE_DIR}/../f16_trim_ecos")
+# Ecos' src/ for util/unzipper.hpp (the extraction preflight), and examples/common/ for the shared host logic -- the
+# environment models and the geomagnetic field.
+target_include_directories(f16_autopilot_cosim PRIVATE "${CMAKE_SOURCE_DIR}/modules/sensors/include"
+                                                       "${ecos_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/examples/common")
 target_compile_definitions(
   f16_autopilot_cosim
   PRIVATE HEMERION_F16_FMU_PATH="${HEMERION_F16_PLANT_FMU}"

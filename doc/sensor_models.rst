@@ -844,6 +844,64 @@ simulator family relies on.
 FMI inputs: ``b_{x,y,z}_ut`` (body-frame field); parameter
 ``sample_rate_hz`` (default 100 Hz).
 
+Calibrating the installation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Modelling hard and soft iron is only half the point of modelling them; until
+2026-09-27 nothing in the tree could take either back out, so an in-flight
+calibration was a problem the simulation posed and never answered.
+
+``MagneticCalibration`` (``Hemerion/mag/magnetic_calibration.h``) answers it
+with an ellipsoid fit. Rotating through every attitude under a field of
+constant magnitude traces a sphere in truth; the distortion :math:`m = S B + h`
+maps that sphere to an ellipsoid, offset by the hard iron and sheared by the
+soft iron. Fit the ellipsoid, and the map that takes it back to a sphere is the
+calibration. The fit is streaming — each sample folds into a fixed 9×9 normal
+matrix, so a hundred thousand samples cost the same memory as ten — with no
+allocation and no exceptions, because it is meant to run on the flight computer
+during a calibration manoeuvre.
+
+**It is not** ``Mmc5983maDriver::calibrate_offset()``, which this page
+describes above and which is about something else entirely: that drives the
+part's SET/RESET pair and cancels the *bridge offset*, an artefact of the
+sensor die present with no vehicle around it. A part can be perfectly
+bridge-calibrated and still read double-digit degrees of heading error from
+the airframe it is bolted to.
+
+``sensors.magnetic_calibration`` closes the loop against the simulated part
+rather than against a re-derivation of the distortion in the test: samples pass
+through ``Mmc5983maMeasurementModel`` — its own drawn hard iron, its own drawn
+soft iron, its 18-bit quantiser — come back as register counts, and are decoded
+the way the driver decodes them before reaching the fit. On the seed that test
+uses, the part draws a hard iron of −1.4813 / +1.2116 / −2.2858 µT and the fit
+returns −1.4811 / +1.2115 / −2.2858. The worst per-axis residual after
+correction is **0.00346 µT, which is 0.57 of one quantiser count** — the answer
+is limited by the part's own resolution, not by the fit. Over a level 360°
+turn the heading error goes from **11.55° to 0.012°**.
+
+.. warning::
+
+   An ellipsoid fit cannot recover :math:`S` uniquely: for any rotation
+   :math:`R`, :math:`\|R S^{-1}(m-h)\| = \|S^{-1}(m-h)\|`, so the samples
+   fix the ellipsoid's shape and not its orientation in the body frame. What
+   comes back is the symmetric positive-definite square root. That is the
+   canonical choice and it is *exactly* right here, because the simulator's
+   soft iron is symmetric — which is also why the loop closes to a fraction of
+   a count. On hardware the residual rotation has to be resolved against
+   another reference, usually the IMU, and until that exists a heading built
+   on this correction can carry a constant rotation the fit cannot see.
+
+.. note::
+
+   Nothing in the examples calls it yet, and that is a property of the
+   scenarios rather than an omission: an ellipsoid fit needs attitude coverage,
+   and the NESC check-cases are trimmed flight. Case 11 holds one attitude for
+   200 s. Exercising this end to end needs a calibration manoeuvre — a scenario
+   that does not exist here — so what is covered is the estimator and its
+   refusals. It refuses rather than guesses: 720 samples spun about a single
+   axis, which trace a circle that infinitely many ellipsoids contain, come
+   back as ``kDegenerate`` with the correction left at identity.
+
 Sensor timing
 -------------
 

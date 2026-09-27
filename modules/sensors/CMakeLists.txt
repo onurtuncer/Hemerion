@@ -31,6 +31,7 @@ add_library(
   src/radalt/radalt_conversion.cpp
   src/radalt/radalt_packet.cpp
   src/mag/mag_conversion.cpp
+  src/mag/magnetic_calibration.cpp
   src/mag/mag_packet.cpp
   src/mag/mmc5983ma/mmc5983ma_driver.cpp
   src/gps/nmeaParser.cpp
