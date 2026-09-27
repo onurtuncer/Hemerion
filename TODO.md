@@ -307,6 +307,26 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   *bridge* offset at that, which is the part's own and not the vehicle's — so soft iron is modelled
   but nothing estimates it.
 
+  **Done — 2026-09-27.** `MagneticCalibration` (`Hemerion/mag/magnetic_calibration.h`) fits an
+  ellipsoid to field samples and recovers both terms: streaming accumulation into a fixed 9x9
+  normal matrix, Cholesky, then a Jacobi eigen-decomposition for the symmetric square root. No
+  allocation, no exceptions, compile-time loop bounds — it compiles for the STM32H743 in the
+  cross build, which is the point of putting it in `modules/sensors` rather than in a host tool.
+
+  `sensors.magnetic_calibration` drives it through `Mmc5983maMeasurementModel` rather than
+  re-deriving the distortion in the test, so it fails if the two ever disagree about what the
+  distortion is. On its seed the part draws a hard iron of -1.4813/+1.2116/-2.2858 uT and the fit
+  returns -1.4811/+1.2115/-2.2858; the worst per-axis residual after correction is 0.00346 uT,
+  which is 0.57 of one 18-bit quantiser count, so the answer is resolution-limited rather than
+  fit-limited. Over a level 360-degree turn the heading error goes from 11.55 to 0.012 degrees.
+
+  **Two things it does not do.** An ellipsoid fit cannot see the rotation in `S` — any `R S^-1`
+  fits the samples equally well — so it returns the symmetric square root, which is exact here
+  only because the simulator's soft iron is symmetric; on hardware the residual rotation needs the
+  IMU. And nothing in the examples calls it, because a fit needs attitude coverage and the NESC
+  check-cases are trimmed flight: case 11 holds one attitude for 200 s. Wiring it end to end needs
+  a calibration manoeuvre, which is a scenario that does not exist here.
+
   **Deduplicated — 2026-09-27.** `geomagnetic_field.hpp` now lives once, in `examples/common/`
   beside `environment.hpp`, as `hemerion::examples`. It is a model of the *world* rather than of a
   part or a scenario, which is the same reason terrain is the host's business and not the radar
@@ -326,12 +346,7 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   1. **WMM or IGRF in place of the centred dipole** (3b's remainder, above). The only item here
      still capable of a systematic degrees-level heading error. Now a single-file change, since the
      model was deduplicated; the coefficients are to come from NOAA NCEI rather than from memory.
-  2. **Magnetic calibration: hard *and* soft iron.** Worth stating precisely, because the existing
-     name misleads: `Mmc5983maDriver::calibrate_offset()` solves the *bridge* offset through the
-     SET/RESET pair, which is the part's own intrinsic offset, not the vehicle's magnetic
-     environment. There is no `soft_iron` anywhere in the driver. What is missing is a calibration
-     that fits an ellipsoid to sampled field vectors and recovers both.
-  3. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
+  2. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
      rather than deferred, and neither matters until the filter carries states that care.
 
 ---

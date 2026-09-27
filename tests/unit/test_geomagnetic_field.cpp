@@ -150,7 +150,8 @@ void test_to_body_is_a_rotation()
 
   // A 90-degree yaw swaps north into -y and east into +x, which is the
   // sign convention a heading estimate depends on.
-  const FieldBody yawed = GeomagneticDipole::to_body(FieldNed{ 20.0, 0.0, 0.0 }, std::numbers::pi / 2.0, 0.0, 0.0);
+  const FieldBody yawed = GeomagneticDipole::to_body(
+      FieldNed{ .north_ut = 20.0, .east_ut = 0.0, .down_ut = 0.0 }, std::numbers::pi / 2.0, 0.0, 0.0);
   CHECK(near(yawed.x_ut, 0.0, 1e-12));
   CHECK(near(yawed.y_ut, -20.0, 1e-12));
 }
