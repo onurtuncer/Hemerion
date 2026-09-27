@@ -104,9 +104,9 @@ using hemerion::examples::GpsErrorModel;
 using hemerion::examples::kCorrelatedReceiver;
 using hemerion::examples::kWhiteReceiver;
 
-using hemerion::examples::rocket_gps_ecos::FieldBody;
-using hemerion::examples::rocket_gps_ecos::FieldNed;
-using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
+using hemerion::examples::FieldBody;
+using hemerion::examples::FieldNed;
+using hemerion::examples::GeomagneticDipole;
 
 // Compile-time defaults injected by CMakeLists.txt; both can be overridden on
 // the command line, so an empty default (FMU not found at configure time) is

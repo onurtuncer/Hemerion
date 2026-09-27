@@ -8,9 +8,18 @@
 /// @brief The truth magnetic field the magnetometer FMU is driven with: a
 /// centered tilted dipole, plus the NED-to-body rotation.
 ///
-/// The rocket plant reports where it is (`out.lat_deg`, `out.lon_deg`,
-/// `out.alt_m`) and how it is pointing (`out.yaw_rad`, `out.pitch_rad`,
-/// `out.roll_rad`) but says nothing about the magnetic field it is flying
+/// Shared by every example that flies a magnetometer. It lives in
+/// `examples/common/` rather than beside one of them because it is a model of
+/// the *world*, not of a part or of a scenario -- the same reason terrain is
+/// the host's business and not the radar altimeter's. It was duplicated
+/// between the F-16 and rocket examples until 2026-09-27, with the autopilot
+/// example reaching across into the trim example's copy through an include
+/// path; the two copies had drifted only in their comments, one of which still
+/// described the wrong vehicle.
+///
+/// The plants report where they are (`out.lat_deg`, `out.lon_deg`,
+/// `out.alt_m`) and how they are pointing (`out.yaw_rad`, `out.pitch_rad`,
+/// `out.roll_rad`) but say nothing about the magnetic field they are flying
 /// through -- there is no `out.b_*` to connect. So the host computes it, the
 /// same way and for the same reason it computes specific force: an Ecos
 /// connection modifier sees one source variable, and this needs four.
@@ -24,31 +33,38 @@
 /// with `a` the IGRF reference radius, `B0` the mean equatorial surface
 /// field, and `m_hat` the dipole moment direction -- pointing geographic
 /// *south*, which is why a compass needle points north. That reproduces the
-/// two things this example actually needs: the field roughly doubles from
+/// two things these examples actually need: the field roughly doubles from
 /// equator to pole, and it falls off as 1/r^3.
 ///
-/// On check-case 11 both effects are small. The aircraft holds 10 013 ft, so
-/// the 1/r^3 term is a factor (a/(a+h))^3 = 0.9986 and never moves; and 200 s
-/// at 172 m/s covers about 34 km, which at 36 deg N shifts the vehicle
-/// roughly 0.2 deg in latitude. The field the magnetometer sees is therefore
-/// nearly constant in the *NED* frame, and what varies in the *body* frame is
-/// almost entirely attitude. That is exactly the regime in which a
-/// magnetometer is used as a heading reference, and it is why this scenario
-/// can check magnetic heading against GPS course at all -- on the rocket
-/// trajectory the field magnitude itself swings by 10% and the comparison
-/// means nothing.
+/// **The two trajectories exercise it very differently**, which is worth
+/// knowing before reading either example's magnetometer figures.
+///
+/// * On the F-16 check-cases both effects are nearly static. The aircraft
+///   holds ~10 000 ft, so the 1/r^3 term is a factor (a/(a+h))^3 = 0.9986 and
+///   never moves; a few hundred seconds of cruise shifts it a fraction of a
+///   degree in latitude. The field is therefore nearly constant in the *NED*
+///   frame and what varies in the *body* frame is almost entirely attitude.
+///   That is exactly the regime in which a magnetometer is used as a heading
+///   reference, and it is why those scenarios can check magnetic heading
+///   against GNSS course at all.
+/// * On the rocket the field itself is the variable: 236 km of altitude is a
+///   factor (a/(a+h))^3 = 0.897, so ~31 uT on the pad becomes ~28 uT at the
+///   top, and 2000 km downrange moves the vehicle against the tilted dipole
+///   axis by more than that. A heading comparison there means nothing; what
+///   the stream shows instead is the field magnitude changing.
 ///
 /// **What it costs.** A centered dipole is not a geographic reference. It
 /// gets total intensity within roughly 10% over most of the globe but the
 /// *inclination* can be off by tens of degrees where the real field departs
-/// most from a dipole. Kitty Hawk, at 36.0 N / 75.7 W, is well away from the
-/// worst of that -- mid-latitude North America is one of the regions a
-/// centered dipole describes reasonably -- but the model still carries no
-/// declination structure, so the difference between magnetic and true north
-/// it produces is the dipole's, not the WMM's. Treat what comes out of here
-/// as *a* plausible field, not as a prediction for that spot.
+/// most from a dipole -- and the rocket's pad, on the equator at the prime
+/// meridian, sits at the edge of exactly that region (the South Atlantic
+/// Anomaly). The model carries no declination structure at all, so the
+/// difference between magnetic and true north it produces is the dipole's,
+/// not the WMM's: about +0.69 degrees at Kitty Hawk where the real field's is
+/// about -11. Treat what comes out of here as *a* plausible field, not as a
+/// prediction for a spot.
 ///
-/// That is harmless for what this example does: the field is the simulation's
+/// That is harmless for what these examples do: the field is the simulation's
 /// own truth, the flight computer has no independent reference to disagree
 /// with it, and every byte between the two is exercised identically either
 /// way. It would *not* be harmless for testing a heading algorithm against a
@@ -60,7 +76,7 @@
 /// percent; the dipole approximation above dwarfs it by two orders of
 /// magnitude, so carrying WGS-84 here would be false precision.
 ///
-/// **Units follow the plant's ports rather than one house convention.**
+/// **Units follow the plants' ports rather than one house convention.**
 /// `field_ned` takes degrees because `out.lat_deg` and `out.lon_deg` are
 /// degrees (Aetherion >= 0.13.0); `to_body` takes radians because
 /// `out.yaw_rad` and its two siblings still are. Two entry points on one
@@ -76,7 +92,9 @@
 #include <numbers>
 #include <tuple>
 
-namespace hemerion::examples::f16_trim_ecos
+/// @namespace hemerion::examples
+/// @brief Logic shared between the co-simulation examples' hosts.
+namespace hemerion::examples
 {
 
 /// A magnetic field in the local geographic frame [microtesla].
@@ -114,7 +132,7 @@ public:
 
   /// @brief The field at a geodetic position, in local NED.
   ///
-  /// Degrees, matching the plant's `out.lat_deg`/`out.lon_deg`; see the file
+  /// Degrees, matching the plants' `out.lat_deg`/`out.lon_deg`; see the file
   /// comment on why this differs from `to_body`.
   ///
   /// @param latitude_deg  Geodetic latitude, used as geocentric (see file comment).
@@ -157,8 +175,8 @@ public:
   }
 
   /// @brief Rotates a NED field into body axes through a 3-2-1 (yaw, pitch,
-  /// roll) Euler sequence -- the convention the rocket FMU reports its
-  /// attitude in.
+  /// roll) Euler sequence -- the convention the plants report their attitude
+  /// in.
   [[nodiscard]] static FieldBody to_body(const FieldNed& field, double yaw_rad, double pitch_rad, double roll_rad)
   {
     const double cy = std::cos(yaw_rad);
@@ -204,4 +222,4 @@ private:
   }
 };
 
-}  // namespace hemerion::examples::f16_trim_ecos
+}  // namespace hemerion::examples

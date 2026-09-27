@@ -25,3 +25,12 @@ target_link_libraries(test_hemerion_example_environment PRIVATE hemerion_test_su
 
 add_test(NAME examples.environment COMMAND test_hemerion_example_environment)
 set_tests_properties(examples.environment PROPERTIES LABELS "unit")
+
+# The truth magnetic field the examples drive the magnetometer FMU with. Shared from examples/common/ since it stopped
+# being copied per example, which is also what made it testable in one place.
+add_executable(test_hemerion_geomagnetic_field test_geomagnetic_field.cpp)
+target_include_directories(test_hemerion_geomagnetic_field PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
+target_link_libraries(test_hemerion_geomagnetic_field PRIVATE hemerion_test_support)
+
+add_test(NAME examples.geomagnetic_field COMMAND test_hemerion_geomagnetic_field)
+set_tests_properties(examples.geomagnetic_field PROPERTIES LABELS "unit")
