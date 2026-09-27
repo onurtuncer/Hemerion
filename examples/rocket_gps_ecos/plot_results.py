@@ -101,6 +101,37 @@ def read_truth(path: Path) -> dict[str, list[float]]:
     return data
 
 
+
+# ---------------------------------------------------------------------------
+# The logs' time columns. Item 4b split the single `sim_time_s` the flight
+# computers used to write -- which meant the part's own clock for some sensors,
+# an assumed schedule for the GPS and the host's clock for the magnetometer --
+# into columns named for what they are. Figures that only want an x axis go on
+# asking for `sim_time_s` and get whichever of these the log carries; a figure
+# that compares a part's clock against the flight computer's asks for
+# `part_time_s` and `host_time_s` by name.
+# ---------------------------------------------------------------------------
+TIME_COLUMNS = ("sim_time_s", "part_time_s", "nominal_time_s", "imu_part_time_s")
+
+
+def time_column(fields) -> str:
+    """The name this log gives its primary time column."""
+    for name in TIME_COLUMNS:
+        if name in fields:
+            return name
+    raise KeyError(f"no time column among {TIME_COLUMNS} in {list(fields)}")
+
+
+def with_canonical_time(data: dict) -> dict:
+    """Adds `sim_time_s` as an alias of whatever time column the log carries."""
+    if "sim_time_s" not in data:
+        for name in TIME_COLUMNS:
+            if name in data:
+                data["sim_time_s"] = data[name]
+                break
+    return data
+
+
 def read_fixes(path: Path) -> dict[str, list[float]]:
     """Reads a flight-computer log, keeping only epochs that carry a fix.
 
@@ -117,7 +148,7 @@ def read_fixes(path: Path) -> dict[str, list[float]]:
     fields = reader.fieldnames
     if "fix_type" in fields:
         rows = [r for r in rows if float(r["fix_type"]) > 0.0]
-    return {k: [float(r[k]) for r in rows] for k in fields}
+    return with_canonical_time({k: [float(r[k]) for r in rows] for k in fields})
 
 
 def read_outages(path: Path) -> list[tuple[float, float]]:
@@ -138,7 +169,7 @@ def read_outages(path: Path) -> list[tuple[float, float]]:
     start: float | None = None
     previous = 0.0
     step = 0.1
-    times = [float(r["sim_time_s"]) for r in rows]
+    times = [float(r[time_column(reader.fieldnames or [])]) for r in rows]
     if len(times) > 1:
         step = min(b - a for a, b in zip(times, times[1:]))
     for row, t in zip(rows, times):

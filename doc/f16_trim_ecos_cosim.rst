@@ -652,6 +652,39 @@ for no reason at all.
    magnitude, which is what makes it land on 0.24° here and on 5.2° for the
    larger, cross-field draw this page shipped earlier.
 
+.. figure:: _static/f16_trim_ecos/case11_clock_divergence.png
+   :width: 100%
+   :alt: Three fitted lines of different slopes showing each part's clock drifting against the flight computer's, above a Gaussian histogram of IMU sample intervals
+
+   Each part on its own oscillator, run with
+   ``--sensor-clock 2000,0.0005 --rtf 1``. **2000 ppm is deliberately large** —
+   perhaps two orders of magnitude above a real part — so that 40 seconds is
+   enough to see; the mechanism is what the figure is about, not the
+   magnitude.
+
+   The three fitted lines have three different slopes because each part drew
+   its own rate error from the one sigma the run configured: the barometer
+   runs **5045 ppm** slower than the IMU and the radar altimeter **5783 ppm**
+   slower. That is the point of the item. A filter fusing these streams cannot
+   treat a sample the IMU stamps 10.00 s as contemporaneous with one the
+   barometer stamps 10.00 s, and before this existed it could, because every
+   part shared the master's clock exactly.
+
+   Two honesty notes the panel carries. The *scatter* is not clock error:
+   samples arrive in bursts and every sample in a burst carries that burst's
+   arrival stamp, so the raw difference sawtooths by the burst's duration —
+   which is itself a thing a real flight computer sees, and is why the drift is
+   fitted rather than eyeballed. And each raw slope also contains the host's
+   own pacing error against simulation time, which is common to all three parts
+   and cancels in their differences; measured against its nominal cadence
+   instead, the IMU's own skew on this run is **+2814 ppm**.
+
+   The lower panel is jitter, and shows how it differs in kind: the spread of
+   reported sample intervals is **686.4 µs** against the
+   :math:`\sigma\sqrt{2} = 707.1` µs that differencing two independent 500 µs
+   draws predicts, and it is the same at the end of the run as at the start
+   because jitter has no memory. Skew accumulates; jitter does not.
+
 Check-case 12: three stacks outside their envelopes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -771,8 +771,41 @@ never negative) and saturated at the 24-bit range register.
      - 100 LSB/m
      - register sensitivity, must match the driver's ``RadAltScale``
 
-FMI inputs: ``h_agl_m`` (truth height above ground); parameter
-``sample_rate_hz`` (default 25 Hz).
+FMI inputs: ``h_agl_m`` (truth height above ground, measured
+*vertically*); parameter ``sample_rate_hz`` (default 25 Hz).
+
+Beam geometry and terrain
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The part measures along a beam fixed to the airframe, not straight down. Over
+flat ground the range it reports is
+
+.. math::
+
+   r = \frac{h}{\cos\phi \, \cos\theta}
+
+for bank :math:`\phi` and pitch :math:`\theta` — always *longer* than the
+height, never shorter, and second order in the tilt, so it is negligible in
+cruise and not negligible in a turn. Banked 15°, a 1000 m height reads
+1035.3 m. Roll and pitch combine through the product of their cosines rather
+than by adding, which is why they are one term and not two.
+
+Past ``beam_half_angle_rad`` the ground leaves the footprint and the part
+reports ``kRadAltStatusNoReturn`` — the same report as out of range, because
+the firmware cannot distinguish the two cases either. A typical installation is
+20–40° (0.35–0.70 rad). The default is **0, which disables the geometry
+entirely** and returns the height as given, exactly as the part did before this
+existed.
+
+Terrain is deliberately *not* here. Slant range and dropout are properties of
+the part given an attitude, so they belong to the model; ground elevation is a
+property of the world, so the host subtracts it before the connection
+(``--terrain``), as it does for the magnetic field and for the same reason. The
+examples model one elevation with no relief, because inventing a height field
+would be inventing data.
+
+FMI inputs gain ``roll_rad`` and ``pitch_rad``; parameter
+``beam_half_angle_deg`` (degrees on the FMI boundary, radians in the model).
 
 Magnetometer model
 ------------------
@@ -810,6 +843,134 @@ simulator family relies on.
 
 FMI inputs: ``b_{x,y,z}_ut`` (body-frame field); parameter
 ``sample_rate_hz`` (default 100 Hz).
+
+Sensor timing
+-------------
+
+:file: ``modules/sensors/include/Hemerion/sensor_clock.h``
+
+Every sensor FMU used to stamp its samples with the master's clock, so the
+whole complement shared one perfect timebase: a 100 Hz part produced samples
+exactly 10 000 µs apart, forever, in lockstep with a 25 Hz part and a 10 Hz
+one. No real complement is like that, and a filter tuned against it is being
+handed an alignment it will not get on hardware.
+
+``SensorClock`` gives a part its own oscillator. The two errors are different
+in kind, which is why they are separate parameters:
+
+.. list-table:: ``SensorClockConfig``
+   :header-rows: 1
+   :widths: 30 14 56
+
+   * - Parameter
+     - Default
+     - Meaning
+   * - ``skew_sigma_ppm``
+     - 0
+     - Oscillator **rate** error, drawn once per run and constant after.
+       Its effect *accumulates*: at 50 ppm a part is 50 µs adrift after a
+       second and 180 ms after an hour. This is what makes two streams slide
+       against each other over a long flight.
+   * - ``jitter_sigma_s``
+     - 0
+     - Per-sample error with **no memory**. It does not accumulate; it is the
+       gap between when a sample was taken and when the part says it was.
+
+Both default to zero, and a zero sigma draws *nothing* from the model's RNG —
+not a discarded draw, none at all. That is what makes "the clock is off" mean
+"the stream is exactly what it was before the clock existed" rather than
+"statistically similar", and ``sensors.seeding`` asserts it against the
+realistic regression (draw unconditionally, zero the result when unconfigured)
+rather than only against the reported stamps.
+
+Which parts have a clock, and why not all of them
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A clock is only worth modelling where something downstream can *read* the
+part's idea of time. Three parts qualify:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 30 48
+
+   * - Part
+     - What carries its time
+     - Treatment
+   * - IMU
+     - the sample's frame timestamp
+     - Skewed and jittered.
+   * - Radar altimeter
+     - the frame timestamp
+     - Likewise.
+   * - BMP390
+     - ``SENSORTIME``
+     - A counter on the die that the driver reads to learn when a conversion
+       happened — the same thing under the datasheet's name, so it gets the
+       same treatment.
+
+Two do not, and the reason is the same for both: **nothing on the part
+timestamps a measurement.** The MMC5983MA has no ``SENSORTIME`` counterpart,
+which is why its driver takes a ``now_us()`` from the board. The GPS receiver
+is subtler and worth stating, because the obvious move is wrong: the FMU does
+fill a timestamp, but ``ubxEmitter`` leaves ``iTOW`` and the calendar fields
+zero on purpose (the on-target parser never reads them), and
+``GpsFix::timestamp_us`` is documented as the *caller's* clock. So skewing the
+receiver's stamp would be invisible to every consumer — while *not* being
+inert, because that field is what ``GpsNoiseModel`` and ``GpsDynamicsModel``
+difference to get their :math:`\Delta t`. Measured: with
+``--gps-errors correlated`` and a 2000 ppm clock, 114 of 300 fixes moved (by up
+to 11 mm) against the same seed. Zero observable effect in exchange for a
+silent change to the noise model is the wrong trade, so the receiver has no
+clock of its own.
+
+For both parts the clock error is real but only observable in *when data
+arrives*, which is the flight computer's business rather than the FMU's.
+
+Arrival stamping in the flight computer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A real flight computer stamps a sample when it drains it, because the part's
+claim about when the sample was taken is on the part's clock and drifts against
+the computer's. The example logs record both, in columns named for what they
+are:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Column
+     - Meaning
+   * - ``part_time_s``
+     - When the part says the sample was taken, on its own oscillator. IMU,
+       radar altimeter and barometer logs.
+   * - ``host_time_s``
+     - When the flight computer drained it, on the flight computer's own
+       clock. Every log. Samples arriving in one burst share it, as they share
+       one interrupt on real hardware.
+   * - ``nominal_time_s``
+     - GPS only: the epoch schedule the log assumes, since the receiver
+       reports no time of its own. Named for what it is rather than called a
+       simulation time.
+
+Where the driver API already carries an arrival stamp — ``GpsFix`` and the
+MMC5983MA's ``now_us()``, both the caller's clock by contract — that stamp is
+what the log records, rather than a second one taken beside it.
+
+The gap between the two columns is what delayed-measurement handling exists to
+absorb. On the rocket example with ``--sensor-clock 2000,0.0005 --seed 7``, the
+IMU drew **+2833 ppm** of its 2000 ppm sigma and its reported sample interval
+became **10.0284 ms** against a nominal 10.0000 ms, with an interval spread of
+**689.5 µs** against the :math:`\sigma\sqrt{2} = 707` µs that differencing two
+independent 500 µs jitters predicts. With the clock off the same run reports
+10.000000 ms intervals and 300 of 300 GPS fixes identical.
+
+.. note::
+
+   Both halves are modelled, but the *emission cadence* is still the master's
+   step grid: the clock skews the time a part reports, not the rate at which
+   the co-simulation hands it steps. A part 2000 ppm fast says so in its
+   stamps; it does not thereby produce 2000 ppm more samples per second. Doing
+   that properly needs sub-step resampling, and nothing yet asks for it.
 
 The Hemerion sensor wire protocol
 ---------------------------------

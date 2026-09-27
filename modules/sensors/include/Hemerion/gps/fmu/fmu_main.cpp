@@ -265,6 +265,12 @@ protected:
 
     // A real receiver reports the solution for the epoch it has just closed,
     // so the fix is stamped at the end of the communication step.
+    // The master's clock, not a clock of the receiver's own: nothing
+    // downstream can see the receiver's idea of time (ubxEmitter leaves iTOW
+    // zero on purpose), while this field *is* what the noise and dynamics
+    // models difference for their dt -- so skewing it would perturb the error
+    // draws and show nothing. The receiver's clock error is observable only in
+    // when a fix arrives, which is the flight computer's stamp.
     truth_.timestamp_us = static_cast<std::uint64_t>((currentTime() + dt) * 1e6);
     truth_.altitude_m = static_cast<float>(altitude_m_);
     truth_.v_down_mps = static_cast<float>(v_down_mps_);

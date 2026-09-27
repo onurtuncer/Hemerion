@@ -288,6 +288,10 @@ struct Options
   // FIFO on its own wall clock, so which samples it catches still varies, and the
   // logs differ in their first timestamp and their length. Statistics reproduce;
   // a diff of the sensor logs does not.
+  // Each part's own oscillator. 0,0 is the single perfect clock the FMUs shared
+  // before this existed; see --sensor-clock.
+  double sensor_clock_skew_ppm = 0.0;
+  double sensor_clock_jitter_s = 0.0;
   int seed = 0;
   // Overrides the derived GPS seed, because this page's GPS figures were
   // published against particular values of it.
@@ -374,6 +378,11 @@ void print_usage()
                "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
                "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
                "              on the wire, so both ends must be configured alike\n"
+               "  --sensor-clock  <skew_ppm>,<jitter_s>: give each sensor its own oscillator (default 0,0,\n"
+               "              one perfect clock shared by every part). skew is a rate error drawn once\n"
+               "              per part and accumulates; jitter is per-sample and does not. Each part\n"
+               "              draws its own from --seed, so one magnitude gives several different\n"
+               "              clocks -- which is the point\n"
                "  --seed      seed every sensor's error model: each part then produces the same\n"
                "              sample at a given simulation time run to run. The flight computer's\n"
                "              own polling still varies, so the logs are not diff-identical.\n"
@@ -404,7 +413,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 31> kValueOptions = { {
+constexpr std::array<ValueOption, 32> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -427,6 +436,13 @@ constexpr std::array<ValueOption, 31> kValueOptions = { {
         o.gps_correlated_errors = (model == "correlated");
       } },
     { "--seed", [](Options& o, const char* v) { o.seed = std::stoi(v); } },
+    { "--sensor-clock",
+      [](Options& o, const char* v) {
+        std::array<double, 2> clock{};
+        parse_csv_doubles(v, clock, "--sensor-clock", "skew_ppm,jitter_s, e.g. 50,200e-6");
+        o.sensor_clock_skew_ppm = clock[0];
+        o.sensor_clock_jitter_s = clock[1];
+      } },
     { "--terrain", [](Options& o, const char* v) { o.terrain_elevation_m = std::stod(v); } },
     { "--radalt-beam", [](Options& o, const char* v) { o.radalt_beam_half_angle_deg = std::stod(v); } },
     { "--imu-range",
@@ -656,6 +672,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
+      << "sensor_clock_skew_ppm=" << options.sensor_clock_skew_ppm << "\n"
+      << "sensor_clock_jitter_s=" << options.sensor_clock_jitter_s << "\n"
       << "terrain_elevation_m=" << options.terrain_elevation_m << "\n"
       << "radalt_beam_half_angle_deg=" << options.radalt_beam_half_angle_deg << "\n"
       << "imu_gyro_lsb_per_dps=" << hemerion::sensors::imu::imu_scale_for(options.imu_range).gyro_lsb_per_dps << "\n"
@@ -958,6 +976,18 @@ int main(int argc, char** argv)
     trim_point["baro::seed"] = derived_seed(options.seed, 2);
     trim_point["mag::seed"] = derived_seed(options.seed, 3);
     trim_point["radalt::seed"] = derived_seed(options.seed, 4);
+    // Each part's own oscillator, same magnitude and a different draw per part
+    // (each FMU seeds its clock from its own seed). The magnetometer is absent
+    // because the MMC5983MA has no time register to skew, and so is the
+    // receiver: nothing downstream reads a GPS time of its own either. Both
+    // show their clock error in when data arrives -- see host_time_s in the
+    // flight computer's logs.
+    trim_point["imu::clock_skew_sigma_ppm"] = options.sensor_clock_skew_ppm;
+    trim_point["imu::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
+    trim_point["baro::clock_skew_sigma_ppm"] = options.sensor_clock_skew_ppm;
+    trim_point["baro::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
+    trim_point["radalt::clock_skew_sigma_ppm"] = options.sensor_clock_skew_ppm;
+    trim_point["radalt::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
     trim_point["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
     trim_point["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
     trim_point["gps::speed_noise_mps"] = receiver.speed_noise_mps;

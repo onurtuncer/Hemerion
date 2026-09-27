@@ -286,24 +286,37 @@ Outputs land in `results/`:
 * `rocket_truth.csv` — Ecos `csv_writer` log of the rocket's outputs (altitude, position, NED velocity, body
   rates, Mach, dynamic pressure, thrust, mass, staging flag) plus the specific force the IMU FMU received, at
   every communication point.
+Every sensor log carries **two** time columns, because a part's idea of when it took a sample and the flight
+computer's idea of when it received one are different clocks. `part_time_s` is what the part reports, on its own
+oscillator (see `--sensor-clock`); `host_time_s` is when the flight computer drained the sample, on its own
+monotonic clock, which equals simulation time only under `--rtf 1`. The gap between them is what
+delayed-measurement handling in a filter has to absorb. Two parts report no time of their own — see their
+bullets below — and for those the first column says so in its name.
+
 * `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not. Epochs that carried a
   solution get position, speed/course, receiver-reported accuracies and satellite count; epochs the dynamics
-  envelope invalidated get **empty** position fields, keeping only the index, time and `fix_type`. A real
+  envelope invalidated get **empty** position fields, keeping only the index, both times and `fix_type`. Its first column is `nominal_time_s`, not
+  `part_time_s`: the receiver reports no time of its own (`ubxEmitter` leaves `iTOW` zero, and the
+  on-target parser never reads it), so that column is the epoch schedule the log assumes. `host_time_s` is
+  the stamp `GpsDriver::feed()` already put on the fix. A real
   receiver does put numbers in those fields during a dropout and the parser does decode them, but they are
   not measurements of anything, so they are not logged as if they were.
 * `rocket_truth.csv` — written by the co-simulation host rather than Ecos' `csv_writer`, at full
   double precision. Six decimal places of a *radian* is 6.4 m of ground position, which would swamp the 1.5 m
   the GPS noise model injects and make the decoded-fix error figure a picture of the log's own rounding.
 * `imu_samples.csv` — every IMU sample the flight software decoded, already converted back to SI units by
-  `convert_raw_to_si()`: specific force and angular rate per axis, timestamped from the frame payload.
+  `convert_raw_to_si()`: specific force and angular rate per axis. `part_time_s` comes from the frame payload, which is the part's
+  own clock rather than the simulation's once `--sensor-clock` is non-zero.
 * `baro_samples.csv` — every BMP390 conversion the flight software read and compensated: pressure [Pa] and
-  temperature [°C], timestamped from the part's own `SENSORTIME` counter read in the same burst as the data
-  registers (32768 Hz, wraps every 512 s — this flight fits inside one wrap).
-* `mag_samples.csv` — every MMC5983MA measurement, in microtesla, with **two** time columns. This part has no
-  clock: nothing on it stamps a measurement, so `host_time_s` is the flight computer's own monotonic clock
-  (which equals simulation time only under `--rtf 1`) and `sim_time_s` is the flight computer placing the
-  sample on the time base it does have — the most recent IMU payload timestamp. That is what real firmware
-  does with an unstamped sensor, and it is why the IMU is the time master here.
+  temperature [°C]. `part_time_s` comes from the part's own `SENSORTIME` counter, read in the same burst as
+  the data registers (32768 Hz, wraps every 512 s — this flight fits inside one wrap). It is a counter on
+  the die, so it runs on the part's clock.
+* `mag_samples.csv` — every MMC5983MA measurement, in microtesla. This part has no clock register at all:
+  nothing on it stamps a measurement, which is why its driver takes a `now_us()` from the board and why it
+  gets no `--sensor-clock` parameters. So `host_time_s` is that driver's own stamp, and the first column is
+  `imu_part_time_s` — the flight computer placing the sample on the time base it does have, the most recent
+  IMU payload timestamp. That is what real firmware does with an unstamped sensor, and it is why the IMU is
+  the time master here.
 * `mag_samples.config` — the bridge offset the SET/RESET pair cancelled at bring-up, beside the data it made
   valid. Without it a reader cannot tell a run whose calibration worked from a part that happened to have a
   small offset, and `plot_results.py` could not draw the uncalibrated counterfactual.

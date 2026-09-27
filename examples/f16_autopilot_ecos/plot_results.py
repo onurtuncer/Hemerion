@@ -112,6 +112,37 @@ def read_truth(path: Path) -> dict[str, list[float]]:
     return data
 
 
+
+# ---------------------------------------------------------------------------
+# The logs' time columns. Item 4b split the single `sim_time_s` the flight
+# computers used to write -- which meant the part's own clock for some sensors,
+# an assumed schedule for the GPS and the host's clock for the magnetometer --
+# into columns named for what they are. Figures that only want an x axis go on
+# asking for `sim_time_s` and get whichever of these the log carries; a figure
+# that compares a part's clock against the flight computer's asks for
+# `part_time_s` and `host_time_s` by name.
+# ---------------------------------------------------------------------------
+TIME_COLUMNS = ("sim_time_s", "part_time_s", "nominal_time_s", "imu_part_time_s")
+
+
+def time_column(fields) -> str:
+    """The name this log gives its primary time column."""
+    for name in TIME_COLUMNS:
+        if name in fields:
+            return name
+    raise KeyError(f"no time column among {TIME_COLUMNS} in {list(fields)}")
+
+
+def with_canonical_time(data: dict) -> dict:
+    """Adds `sim_time_s` as an alias of whatever time column the log carries."""
+    if "sim_time_s" not in data:
+        for name in TIME_COLUMNS:
+            if name in data:
+                data["sim_time_s"] = data[name]
+                break
+    return data
+
+
 def read_samples(path: Path) -> dict[str, list[float]]:
     """Reads a flight-computer log, dropping rows that carry no measurement."""
     if not path.exists():
@@ -130,7 +161,7 @@ def read_samples(path: Path) -> dict[str, list[float]]:
         rows = [r for r in rows if float(r["fix_type"]) > 0.0]
     elif "valid" in fields:
         rows = [r for r in rows if float(r["valid"]) > 0.0]
-    out = {k: [float(r[k]) for r in rows] for k in fields}
+    out = with_canonical_time({k: [float(r[k]) for r in rows] for k in fields})
     out.setdefault("sim_time_s", [])
     return out
 
