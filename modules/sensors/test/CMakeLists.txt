@@ -58,6 +58,13 @@ target_link_libraries(test_hemerion_sensors_gps_noise PRIVATE hemerion_sensors h
 add_test(NAME sensors.gps_noise COMMAND test_hemerion_sensors_gps_noise)
 set_tests_properties(sensors.gps_noise PROPERTIES LABELS "unit")
 
+# Seed + config determine every sensor error model's output exactly -- the property the FMUs' `seed` parameters sell.
+# Header-only models, so nothing from the fmu/ subtrees is compiled in.
+add_executable(test_hemerion_sensors_seeding test_sensor_seeding.cpp)
+target_link_libraries(test_hemerion_sensors_seeding PRIVATE hemerion_sensors hemerion_test_support)
+add_test(NAME sensors.seeding COMMAND test_hemerion_sensors_seeding)
+set_tests_properties(sensors.seeding PROPERTIES LABELS "unit")
+
 # Round-trip test for the IMU FMU simulator (imu/fmu/). imu_packet_emitter.cpp is compiled directly into this test
 # binary rather than via hemerion_sensors, since the emitter is sim-only code gated behind HEMERION_BUILD_FMU in
 # imu/fmu/CMakeLists.txt and must not be linked into cross-compiled firmware.

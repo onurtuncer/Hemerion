@@ -31,6 +31,7 @@
 /// sensor-agnostic and lives in the same module, so duplicating it here would
 /// only invite drift.
 
+#include "Hemerion/sensor_clock.h"
 #include "Hemerion/gps/fmu/udpSender.hpp"
 #include "Hemerion/radalt/fmu/radalt_noise_model.h"
 #include "Hemerion/radalt/fmu/radalt_packet_emitter.h"
@@ -40,6 +41,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <optional>
 
 namespace hemerion::sensors::radalt::fmu
@@ -47,6 +49,13 @@ namespace hemerion::sensors::radalt::fmu
 
 namespace
 {
+
+using hemerion::sensors::SensorClock;
+using hemerion::sensors::SensorClockConfig;
+
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr RadAltNoiseConfig kDefaultNoise{};
 
 using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
@@ -71,12 +80,62 @@ public:
     // no-return status instead of a range word, exactly as a real part loses ground track.
     register_real("h_agl_m", &truth_.height_agl_m)
         .setCausality(causality_t::INPUT)
-        .setDescription("True height above ground level along the radar beam [m]");
+        .setDescription("True height above ground level, measured vertically [m]; the part converts it to the "
+                        "slant range its beam sees, given roll and pitch");
+    register_real("roll_rad", &truth_.roll_rad)
+        .setCausality(causality_t::INPUT)
+        .setDescription("Bank angle [rad]; with a non-zero beam_half_angle_deg it lengthens the measured range "
+                        "and, past the beam, takes the ground out of the footprint");
+    register_real("pitch_rad", &truth_.pitch_rad)
+        .setCausality(causality_t::INPUT)
+        .setDescription("Pitch angle [rad]; same effect as roll");
 
     register_real("sample_rate_hz", &sample_rate_hz_)
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::TUNABLE)
         .setDescription("Sensor output data rate [Hz]; each step emits round(step * rate) frames, at least one");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("clock_skew_sigma_ppm", &clock_skew_sigma_ppm_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Oscillator rate error, 1-sigma, drawn once per run [ppm]. It accumulates, so it slides this "
+                        "part's stream against the other sensors' over a long flight, which is what a filter fusing "
+                        "them has to be robust to");
+    register_real("clock_jitter_sigma_s", &clock_jitter_sigma_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Per-sample timestamp jitter, 1-sigma [s]. No memory, so unlike skew it does not accumulate: "
+                        "it is the gap between when a sample was taken and when the part says it was");
+    register_real("beam_half_angle_deg", &beam_half_angle_deg_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Antenna beam half-angle [degrees]; 0 (default) ignores attitude entirely, as the part "
+                        "did before. Past this tilt the ground leaves the footprint and the part reports no "
+                        "return");
+    register_real("range_noise_m", &range_noise_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Range white noise, 1-sigma [m]");
+    register_real("range_bias_sigma_m", &range_bias_sigma_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Turn-on range bias 1-sigma, drawn once per run [m]");
+    register_real("max_range_m", &max_range_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Maximum tracking range [m]; beyond it the emitted frames carry a no-return status");
+    register_real("range_lsb_per_m", &range_lsb_per_m_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Range register sensitivity [LSB per m]; the consuming driver must convert with the same "
+                        "value");
   }
 
   /// Opens the UDP socket. Deliberately not done in the constructor: the
@@ -84,6 +143,7 @@ public:
   /// to enumerate its variables, and that must not touch the network.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     sender_ = UdpSender::create_from_env(kUdpHostVariable, kUdpPortVariable, kDefaultUdpHost, kDefaultUdpPort);
     if (!sender_.has_value())
     {
@@ -98,6 +158,14 @@ public:
   /// reset does not swap out.
   void reset() override
   {
+    seed_ = 0;
+    clock_skew_sigma_ppm_ = 0.0;
+    clock_jitter_sigma_s_ = 0.0;
+    beam_half_angle_deg_ = 0.0;
+    range_noise_m_ = kDefaultNoise.range_noise_m;
+    range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
+    max_range_m_ = kDefaultNoise.max_range_m;
+    range_lsb_per_m_ = kDefaultNoise.scale.range_lsb_per_m;
     truth_ = RadAltTruthSample{};
     sample_rate_hz_ = kDefaultSampleRateHz;
     sender_.reset();
@@ -121,7 +189,7 @@ protected:
     for (long k = 1; k <= count; ++k)
     {
       const double sample_time_s = currentTime() + static_cast<double>(k) * sample_period_s;
-      truth_.timestamp_us = static_cast<std::uint64_t>(sample_time_s * 1e6);
+      truth_.timestamp_us = clock_.stamp(sample_time_s, clock_rng_);
       const RadAltPacketEmitter::Frame frame = RadAltPacketEmitter::encode_raw_sample(noise_model_.apply(truth_));
       if (!sender_->send(frame.data(), frame.size()))
       {
@@ -135,6 +203,39 @@ protected:
   }
 
 private:
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    RadAltNoiseConfig config;
+    config.beam_half_angle_rad = static_cast<float>(beam_half_angle_deg_ * 3.14159265358979323846 / 180.0);
+    config.range_noise_m = static_cast<float>(range_noise_m_);
+    config.range_bias_sigma_m = static_cast<float>(range_bias_sigma_m_);
+    config.max_range_m = static_cast<float>(max_range_m_);
+    config.scale.range_lsb_per_m = static_cast<float>(range_lsb_per_m_);
+    noise_model_ =
+        (seed_ == 0) ? RadAltNoiseModel(config) : RadAltNoiseModel(config, static_cast<std::uint64_t>(seed_));
+    // The part's own clock. Seeded from the same number so one seed
+    // determines the whole instrument, but from its own stream, so turning
+    // the clock on does not move the error draws.
+    clock_rng_.seed((seed_ == 0) ? std::random_device{}() : static_cast<std::uint64_t>(seed_) ^ 0x5DEECE66DULL);
+    clock_ = SensorClock(
+        SensorClockConfig{ static_cast<float>(clock_skew_sigma_ppm_), static_cast<float>(clock_jitter_sigma_s_) },
+        clock_rng_);
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double clock_skew_sigma_ppm_ = 0.0;
+  double clock_jitter_sigma_s_ = 0.0;
+  double beam_half_angle_deg_ = 0.0;
+  double range_noise_m_ = kDefaultNoise.range_noise_m;
+  double range_bias_sigma_m_ = kDefaultNoise.range_bias_sigma_m;
+  double max_range_m_ = kDefaultNoise.max_range_m;
+  double range_lsb_per_m_ = kDefaultNoise.scale.range_lsb_per_m;
+
+  std::mt19937_64 clock_rng_{ 1 };
+  SensorClock clock_{ SensorClockConfig{}, clock_rng_ };
   RadAltNoiseModel noise_model_;
   std::optional<UdpSender> sender_;
   RadAltTruthSample truth_;

@@ -518,6 +518,8 @@ Check-case 11: the cross-sensor reference
    counts, and the phugoid is plainly there, riding visibly through the
    discrete levels.
 
+.. _f16_trim_body_rates:
+
 .. figure:: _static/f16_trim_ecos/case11_imu_body_rates.png
    :width: 100%
    :alt: Decoded gyro samples lying on discrete horizontal bands roughly 0.001 rad/s apart, with the three truth rate traces running flat through the middle band
@@ -558,6 +560,97 @@ Check-case 11: the cross-sensor reference
    ``sim_02`` reaches t = 200 s; a verifier that compares nothing but the times
    every reference covers leaves the last 20 s silently unchecked and still
    prints OK.
+
+The environment, and what it changes
+------------------------------------
+
+Everything above is flown in dead calm air on a standard day. That is the
+check-case as published, and it is what every figure on this page is measured
+on — but it is not an atmosphere any aircraft has ever flown through, and
+three of this page's own findings are artefacts of it.
+
+Aetherion 0.16.0 gave the plant an environment: steady wind, Dryden turbulence
+and an ISA offset, all opt-in and all defaulting to the calm standard day.
+This example writes them from three flags, and the barometer takes the plant's
+own static pressure (``out.P_Pa``) rather than inverting the standard
+atmosphere from altitude, so a non-standard day reaches the sensor rather than
+stopping at the airframe:
+
+.. code-block:: console
+
+   $ ./f16_trim_cosim --seed 11 --turbulence 8 --turbulence-seed 1
+   $ ./f16_trim_cosim --seed 11 --atmosphere 20,0 --wind 0,10,0
+
+``--seed`` is what makes the three runs below comparable. Every sensor's error
+stream is then a function of that one number, so the calm and turbulent runs
+carry the *same* barometer turn-on bias (+3.58 m on both) and the difference
+between their figures is the air, not the draw. Before the sensor FMUs took a
+seed, two runs of the same scenario differed by metres of indicated altitude
+for no reason at all.
+
+.. figure:: _static/f16_trim_ecos/case11_turbulent_body_rates.png
+   :width: 100%
+   :alt: Decoded gyro samples tracking a dense, spiky roll-rate trace peaking near 0.05 rad/s, with truth traces running through them rather than through a single quantisation band
+
+   The same figure as :ref:`the calm one above <f16_trim_body_rates>`, in
+   light-to-moderate turbulence (MIL-F-8785C ``W20`` = 8 m/s). The calm flyout
+   puts every body rate inside **0.7 gyroscope counts**; this one peaks at
+   **47.4**, and the decoded stream becomes a measurement of the aircraft
+   instead of a picture of its own quantiser.
+
+   That is the finding this page reported — "a filter cannot integrate these
+   rates into an attitude, the signal is below the sensor's resolution" —
+   turned over by a factor of sixty-seven, and it was always a statement about
+   the *air* rather than about the part. A real aircraft in real air sees rate
+   content like this continuously; a filter tuned against the calm case would
+   be tuned against a vehicle that does not exist.
+
+   The part is unchanged and so is the seed: only ``--turbulence 8`` differs.
+   The remaining lever is the range the part is programmed to, which is the
+   next section.
+
+.. figure:: _static/f16_trim_ecos/case11_hotday_altitude.png
+   :width: 100%
+   :alt: Four altitude traces where the barometer sits 200 m below truth while GPS and radar height stay on it, and a residual panel showing a flat -195 m offset
+
+   A hot day: ISA + 20 K, nothing else changed. The barometer reads **195 m
+   low** for the whole flight while GNSS and the radar altimeter sit on truth.
+
+   Nothing is broken. Pressure altitude is not geometric altitude, and on a
+   warm day the two differ by hundreds of feet — which is precisely why a
+   barometer is *fused* with GNSS rather than trusted, and why the altitude
+   figure further up, where all four agreed to a metre, was quietly answering
+   an easier question than the one a filter faces. The plant re-trims at
+   α = 2.834° against 2.639° in the same condition on a standard day, because
+   the air really is thinner.
+
+   This is also the change that needed the barometer wired to ``out.P_Pa``:
+   with the part inverting the ISA from altitude it would have read the
+   standard day's pressure while the aircraft flew through a warmer one,
+   and this figure would show nothing at all.
+
+.. figure:: _static/f16_trim_ecos/case11_crosswind_heading.png
+   :width: 100%
+   :alt: GPS course sitting about two degrees above truth yaw across the whole flight, with magnetic heading tracking yaw closely
+
+   A 10 m/s crosswind. GNSS course now sits **+2.28°** from truth yaw, where
+   in calm air it sat on it to 0.02°: the aircraft is crabbing, and course
+   over ground is no longer where the nose points. The geometry checks —
+   10 m/s of air across a 45° heading is 7.07 m/s of crosswind on 172 m/s of
+   airspeed, or 2.36°.
+
+   That gap is a state a filter can estimate, and in calm air it does not
+   exist to be estimated. The magnetometer, meanwhile, still reports yaw:
+   this figure's two residual traces are now measuring *different physical
+   things*, which the calm version could not show because they coincided.
+
+   The magnetometer's own residual is small here (+0.24°) for a reason worth
+   naming: with ``--seed 11`` the hard iron drawn for this run is
+   +0.78 / −0.78 / −2.08 µT, which lies nearly along the local field, and an
+   offset parallel to the field costs almost no heading. The annotation's
+   prediction is first order in the offset's *components* rather than its
+   magnitude, which is what makes it land on 0.24° here and on 5.2° for the
+   larger, cross-field draw this page shipped earlier.
 
 Check-case 12: three stacks outside their envelopes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

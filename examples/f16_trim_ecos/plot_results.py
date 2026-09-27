@@ -305,7 +305,24 @@ def config_caption(config: dict[str, str]) -> str:
     # The error model is what separates two runs whose every other figure is
     # identical; a sidecar from before it existed is the white receiver.
     errors = "GPS errors " + config.get("gps_error_model", "white")
-    parts = [condition, receiver, errors] + ([pacing] if pacing else [])
+
+    # Likewise the plant's environment. Named only when it is not the calm
+    # standard day: every published figure predating Aetherion 0.16.0 was
+    # flown in that, and a sidecar without these keys means exactly it.
+    environment = []
+    wind = tuple(float(config.get(f"wind_{axis}_mps", 0.0)) for axis in ("north", "east", "down"))
+    if any(wind):
+        environment.append(f"wind {wind[0]:g}/{wind[1]:g}/{wind[2]:g} m/s NED")
+    w20 = float(config.get("turbulence_w20_mps", 0.0))
+    if w20 > 0.0:
+        environment.append(f"turbulence W20 {w20:g} m/s (seed {config.get('turbulence_seed', '?')})")
+    delta_t = float(config.get("atmosphere_deltaT_K", 0.0))
+    delta_p = float(config.get("atmosphere_deltaP_sl_Pa", 0.0))
+    if delta_t or delta_p:
+        environment.append(f"ISA{delta_t:+g} K, sea level {delta_p:+g} Pa")
+    air = ", ".join(environment) if environment else "calm standard day"
+
+    parts = [condition, receiver, errors, air] + ([pacing] if pacing else [])
     return " | ".join(parts)
 
 
@@ -368,9 +385,30 @@ def add_headroom(ax, fraction: float = 0.32) -> None:
 
 
 def stamp(fig, caption: str) -> None:
-    """Puts the run's provenance at the foot of a figure, out of the data's way."""
-    fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
-    fig.text(0.5, 0.012, caption, ha="center", va="bottom", fontsize=7.5, color=INK_2)
+    """Puts the run's provenance at the foot of a figure, out of the data's way.
+
+    Wrapped rather than shrunk: the caption grew a clause per configurable
+    subsystem -- flight condition, receiver, error model, environment, pacing
+    -- and a one-line stamp now runs off both ends of an 8-inch figure. It is
+    split on the " | " separators it is already built from, so a clause is
+    never broken across lines.
+    """
+    limit = 118
+    lines, current = [], ""
+    for clause in caption.split(" | "):
+        candidate = clause if not current else f"{current} | {clause}"
+        if len(candidate) > limit and current:
+            lines.append(current)
+            current = clause
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+
+    # Each line needs its own slice of the figure back from the axes.
+    fig.tight_layout(rect=(0.0, 0.035 + 0.022 * len(lines), 1.0, 1.0))
+    for index, line in enumerate(reversed(lines)):
+        fig.text(0.5, 0.012 + 0.022 * index, line, ha="center", va="bottom", fontsize=7.5, color=INK_2)
 
 
 def shade_gaps(ax, intervals: list[tuple[float, float]], label: str | None) -> None:
@@ -774,16 +812,44 @@ def plot_heading_consistency(truth, fixes, mag, gps_gaps, out: Path, prefix: str
             deltas = [value - interpolate(truth["time"], truth[f"b_{component}_ut"], t)
                       for t, value in zip(mag["sim_time_s"], mag[f"mag_{component}_ut"])]
             offsets.append(sum(deltas) / len(deltas))
+        # First order, not a magnitude bound. Heading comes from
+        # atan2(-Yh, Xh), so an offset perturbs it by
+        # (Yh dXh - Xh dYh) / (Xh^2 + Yh^2): the *direction* of the offset
+        # relative to the field matters, and an offset lying along the field
+        # costs almost no heading at all. Using |offset| instead gives an
+        # upper bound that happens to be close when the offset is roughly
+        # across the field and badly wrong when it is along it -- measured on
+        # two runs, the bound read 5.5 deg against 5.3 observed on one and
+        # 2.9 against 0.24 on the other, while this expression gives 5.2 and
+        # 0.24.
         horizontal_ut = math.hypot(*dipole_field_ned(truth["lat_deg"][0], truth["lon_deg"][0],
                                                      truth["alt_m"][0])[:2])
-        predicted_deg = math.degrees(math.atan2(math.hypot(offsets[0], offsets[1]), horizontal_ut))
+        errors_deg = []
+        for t in mag["sim_time_s"]:
+            roll = interpolate(truth["time"], truth["roll_rad"], t)
+            pitch = interpolate(truth["time"], truth["pitch_rad"], t)
+
+            def horizontal(bx, by, bz, roll=roll, pitch=pitch):
+                x = bx * math.cos(pitch) + by * math.sin(roll) * math.sin(pitch) + bz * math.cos(roll) * math.sin(pitch)
+                y = by * math.cos(roll) - bz * math.sin(roll)
+                return x, y
+
+            bx = interpolate(truth["time"], truth["b_x_ut"], t)
+            by = interpolate(truth["time"], truth["b_y_ut"], t)
+            bz = interpolate(truth["time"], truth["b_z_ut"], t)
+            x_h, y_h = horizontal(bx, by, bz)
+            x_off, y_off = horizontal(bx + offsets[0], by + offsets[1], bz + offsets[2])
+            denominator = x_h * x_h + y_h * y_h
+            if denominator > 0.0:
+                errors_deg.append(math.degrees((y_h * (x_off - x_h) - x_h * (y_off - y_h)) / denominator))
+        predicted_deg = (sum(errors_deg) / len(errors_deg)) if errors_deg else 0.0
         residuals = [wrap_180(h - interpolate(truth["time"], truth_yaw, t))
                      for t, h in zip(mag["sim_time_s"], mag_heading)]
         observed_deg = sum(residuals) / len(residuals)
         ax_err.annotate(
             f"hard iron measured from this run: {offsets[0]:+.2f} / {offsets[1]:+.2f} / {offsets[2]:+.2f} µT\n"
-            f"predicts {predicted_deg:.2f}° of heading error against a {horizontal_ut:.1f} µT "
-            f"horizontal field; observed {abs(observed_deg):.2f}°",
+            f"predicts {predicted_deg:+.2f}° of heading error against a {horizontal_ut:.1f} µT "
+            f"horizontal field; observed {observed_deg:+.2f}°",
             xy=(0.99, 0.06), xycoords="axes fraction", ha="right", fontsize=8, color=INK_2,
             bbox=ANNOTATION_CARD)
 
@@ -861,21 +927,23 @@ def plot_imu_specific_force(truth, imu, out: Path, prefix: str, caption: str) ->
 
 
 def plot_imu_body_rates(truth, imu, out: Path, prefix: str, caption: str) -> str:
-    """Body rates: a phugoid that fits inside one gyroscope count.
+    """Body rates against the gyroscope's own resolution.
 
-    This figure looks broken and is not. The decoded samples lie on discrete
-    horizontal bands because the gyroscope is a 16-bit part at +/-2000 deg/s,
-    and on an open-loop trim flyout every body rate the aircraft actually has
-    is *smaller than one of those counts*. The truth traces run through the
-    middle of the zero band; the banding above and below it is the model's
-    noise being quantised, not motion.
+    On a calm flyout this figure looks broken and is not: the decoded samples
+    lie on discrete horizontal bands because the gyroscope is a 16-bit part at
+    +/-2000 deg/s, and every body rate the aircraft actually has is *smaller
+    than one of those counts*. The truth traces run through the middle of the
+    zero band and the banding around it is the noise model being quantised,
+    not motion. What that rules out is dead reckoning: a filter cannot
+    integrate rates that lie below the sensor's resolution, so heading has to
+    come from the magnetometer and the receiver instead.
 
-    It is worth a figure of its own because of what it implies downstream. A
-    filter cannot integrate these rates into an attitude on this flight -- the
-    signal is below the sensor's resolution, so dead reckoning has nothing to
-    work with, and the heading must come from the magnetometer and the
-    receiver instead. That is the case for the cross-sensor figures, made by
-    the sensor that fails to make it.
+    Give the plant an atmosphere (Aetherion >= 0.16.0, this example's
+    ``--turbulence``) and the same figure says the opposite: light-to-moderate
+    turbulence puts tens of counts of roll rate on the gyro, and the decoded
+    stream becomes a measurement of the aircraft rather than of its own
+    quantiser. Which of the two a given run shows is a fact about that run, so
+    the title is computed from the peak rate in counts rather than asserted.
     """
     fig, (ax,) = new_figure(1, height=4.6)
     for axis, color, label in (("x", TRUTH, "X"), ("y", GPS, "Y"), ("z", BARO, "Z")):
@@ -895,7 +963,10 @@ def plot_imu_body_rates(truth, imu, out: Path, prefix: str, caption: str) -> str
                     bbox=ANNOTATION_CARD)
     ax.set_xlabel("simulation time [s]")
     ax.set_ylabel("body angular rate [rad/s]")
-    ax.set_title("Body rates: the phugoid lives inside one gyroscope count")
+    peak_counts = (max(max(abs(v) for v in truth[name]) for name in ("p_rad_s", "q_rad_s", "r_rad_s")) / step
+                   if step > 0.0 else 0.0)
+    ax.set_title("Body rates: the motion lives inside one gyroscope count" if peak_counts < 1.0
+                 else f"Body rates: the gyroscope resolves this flight, at up to {peak_counts:.0f} counts")
     add_headroom(ax, 0.30)
     legend(ax, loc="upper left", framed=True)
     return save(fig, out, prefix, "imu_body_rates", caption)

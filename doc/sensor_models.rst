@@ -160,32 +160,73 @@ where
 
 * :math:`b` is a **turn-on bias**, drawn *once per run* at model
   construction (per axis/channel) — the run-to-run constant offset a real
-  part exhibits after power-up;
+  part exhibits after power-up. On the IMU it can also *wander*: a non-zero
+  ``*_bias_walk_*`` drives it as a random walk whose increment is
+  :math:`\sigma\sqrt{\Delta t}`, so the drift after a given elapsed time does
+  not depend on how often the part was sampled. A constant bias converges
+  once in a filter and stops mattering, which is not what a bias state is
+  for;
 * :math:`w[k]` is **white measurement noise**, drawn per sample;
 * :math:`S` is the register sensitivity (LSB per physical unit), configured
   identically to what the consuming driver passes to
   ``convert_raw_to_si()`` — scale is *not* part of the wire format, exactly
-  as on real silicon;
+  as on real silicon. ``ImuRange`` names the pairings (250, 500 or
+  2000 deg/s) so the two ends of a co-simulation cannot disagree about it:
+  the examples take ``--imu-range`` on both the host and the flight computer,
+  and a mismatch is silent and wrong by a constant factor. At ±2000 deg/s one
+  count is 0.061 deg/s and every body rate on the calm F-16 flyout falls
+  inside it; at ±250 it is 0.0076 deg/s;
 * :math:`\operatorname{sat}(\cdot)` saturates at the register's full-scale
   range (int16 for IMU/mag, 24-bit words for baro/radalt) the way real
   silicon clips, rather than wrapping.
 
 Setting any :math:`\sigma` to zero disables that term cleanly (the models
 never construct a ``std::normal_distribution`` with zero stddev, which would
-be undefined behavior).
+be undefined behavior), and a disabled term draws nothing at all — which is
+what lets every one of these be added without moving an existing seeded run.
+
+Two further IMU errors are invisible at rest and proportional to the signal: a
+per-axis **scale-factor** error and a small-angle **misalignment** between the
+triad and the airframe, both drawn once per run. They show up only under
+manoeuvre, which is where the 13.x closed-loop cases exercise a filter. The
+magnetometer likewise adds **soft iron** — a symmetric matrix distorting the
+ambient field, as against the hard iron that adds to it. The distinction is
+the driver's problem, not the model's: hard iron alone makes an in-flight
+calibration a three-parameter offset fit, while soft iron is what makes a real
+one an ellipsoid fit, so a driver solving only for the centre looks finished
+against a model without this term and fails on hardware.
 
 **Reproducibility.** Every model constructor takes an RNG seed, defaulting
 to a nondeterministic ``std::random_device`` draw. Pass a fixed seed for
 bit-identical runs; the turn-on biases are drawn from that same stream at
-construction, so seed + config fully determine the output sequence. The GPS
-FMU exposes its seed as a parameter (``seed``, and the examples'
-``--gps-seed``); the other FMUs do not yet, and every run of them is a fresh
-part.
+construction, so seed + config fully determine the output sequence.
+
+**Every** sensor FMU exposes that seed and its error terms as FMI parameters:
+``seed`` (0 = nondeterministic) plus one fixed real per sigma, read once when
+initialisation mode is exited, with start values equal to the model's own
+defaults. The examples' ``--seed`` sets all of them from one number, deriving
+a distinct stream per part so they are reproducible without being correlated.
+
+What that buys is worth stating exactly: the sample a part produces at a given
+simulation time becomes identical run to run. It does *not* make a two-process
+co-simulation diff-identical, because the flight computer polls the I2C parts
+and drains the IMU FIFO on its own wall clock, so which samples it catches
+still varies. Statistics reproduce; a ``diff`` of the sensor logs does not.
 
 GPS receiver model
 ------------------
 
 :file: ``modules/sensors/include/Hemerion/gps/fmu/gpsNoiseModel.hpp``
+
+The **barometer** takes the ambient it is actually in, rather than inverting
+the standard atmosphere from an altitude: writing ``p_Pa`` (and optionally
+``T_degC``) switches the BMP390 FMU off the ISA path for the rest of the run,
+and all three examples connect the plant's own ``out.P_Pa`` and ``out.T_K``.
+On a standard day this is a small correction — the plants integrate US1976
+while the part inverted ICAO ISA, and the two differ by 13 Pa at 3 km, a
+systematic 1.46 m of indicated altitude. On a non-standard day it is the whole
+difference between a barometer that reads the book and one that reads the air:
+:ref:`f16_trim_ecos_cosim` shows a 195 m offset on ISA + 20 K.
 
 ``GpsNoiseModel`` perturbs the truth trajectory at the *fix* level — a
 receiver outputs a navigation solution, not register counts — producing a
@@ -295,7 +336,7 @@ flight — and a master that sets none of them gets the previous receiver.
    * - horizontal position
      - 0.3 m
      - 1.5 m, :math:`\tau` = 100 s
-     - total 1.53 m per axis — within 2 % of the default's 1.5 m
+     - total 1.53 m per axis — 2 % over the default's 1.5 m
    * - vertical position
      - 0.6 m
      - 3.0 m, :math:`\tau` = 100 s
@@ -303,18 +344,23 @@ flight — and a master that sets none of them gets the previous receiver.
    * - speed over ground
      - 0.05 m/s
      - 0.1 m/s, :math:`\tau` = 10 s
-     - total 0.11 m/s
+     - total 0.112 m/s — 12 % over the default, the loosest of the four
    * - course
      - 0.3°
      - 1.0°, :math:`\tau` = 10 s
-     - total 1.04°
+     - total 1.044° — 4 % over the default
    * - ``accuracy_scale``
      - 0.7
      -
      - ``hAcc`` reads 1.07 m for a 1.53 m error
 
-The preset keeps every channel's *total* 1-sigma where the default had it, so
-nothing on a results page moves by magnitude; what changes is the spectrum.
+The preset keeps each *position* channel's total 1-sigma within 2 % of where
+the default had it, so nothing on a results page moves by magnitude — position
+is what they all plot. What changes is the spectrum. (The velocity channels
+are looser, 4 % and 12 % over; rounding them to hit a total exactly would mean
+quoting receiver characteristics chosen to flatter an arithmetic claim rather
+than to be plausible. ``examples.environment`` in ``tests/unit`` asserts the
+bound that is actually true, per channel.)
 Ninety-six per cent of the horizontal variance now lives in the slow term,
 which is what the F-16 trim page's GPS error figure measures directly
 (:ref:`f16_trim_ecos_cosim`). The values are spelled out in each example's

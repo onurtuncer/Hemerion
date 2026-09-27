@@ -53,6 +53,7 @@
 /// implements do_step(); see cmake/generate_fmu.cmake for how the two halves
 /// are compiled and packaged into an .fmu archive.
 
+#include "Hemerion/sensor_clock.h"
 #include "Hemerion/imu/fmu/imu_noise_model.h"
 #include "Hemerion/imu/fmu/imu_packet_emitter.h"
 #include "Hemerion/imu/fmu/imu_spi_slave.h"
@@ -65,6 +66,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <thread>
 
 namespace hemerion::sensors::imu::fmu
@@ -72,6 +74,13 @@ namespace hemerion::sensors::imu::fmu
 
 namespace
 {
+
+using hemerion::sensors::SensorClock;
+using hemerion::sensors::SensorClockConfig;
+
+/// The error model's own defaults, so modelDescription.xml's start values and the model cannot
+/// drift apart: both read this.
+constexpr ImuNoiseConfig kDefaultNoise{};
 
 using fmu4cpp::causality_t;
 using fmu4cpp::variability_t;
@@ -125,6 +134,71 @@ public:
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::TUNABLE)
         .setDescription("Sensor output data rate [Hz]; each step buffers round(step * rate) samples, at least one");
+    // The error model, as fixed parameters: a part's noise does not change in flight, so these are read
+    // once in exit_initialisation_mode() and the model is rebuilt from them. Start values are the model's
+    // own defaults, so a master that sets none of them gets the part this FMU has always been.
+    register_integer("seed", &seed_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the "
+                        "run reproducible");
+    register_real("clock_skew_sigma_ppm", &clock_skew_sigma_ppm_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Oscillator rate error, 1-sigma, drawn once per run [ppm]. It accumulates, so it slides this "
+                        "part's stream against the other sensors' over a long flight, which is what a filter fusing "
+                        "them has to be robust to");
+    register_real("clock_jitter_sigma_s", &clock_jitter_sigma_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Per-sample timestamp jitter, 1-sigma [s]. No memory, so unlike skew it does not accumulate: "
+                        "it is the gap between when a sample was taken and when the part says it was");
+    register_real("accel_noise_mps2", &accel_noise_mps2_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer white noise, 1-sigma per axis [m/s^2]");
+    register_real("gyro_noise_rad_s", &gyro_noise_rad_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope white noise, 1-sigma per axis [rad/s]");
+    register_real("accel_bias_sigma_mps2", &accel_bias_sigma_mps2_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer turn-on bias 1-sigma per axis, drawn once per run [m/s^2]");
+    register_real("gyro_bias_sigma_rad_s", &gyro_bias_sigma_rad_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope turn-on bias 1-sigma per axis, drawn once per run [rad/s]");
+    register_real("accel_bias_walk_mps2_sqrt_s", &accel_bias_walk_mps2_sqrt_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer bias random walk [m/s^2 per sqrt(s)]; 0 leaves the turn-on bias constant");
+    register_real("gyro_bias_walk_rad_s_sqrt_s", &gyro_bias_walk_rad_s_sqrt_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope bias random walk [rad/s per sqrt(s)]; a 10 deg/h/sqrt(h) part is about 8.1e-6");
+    register_real("accel_scale_sigma", &accel_scale_sigma_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer scale-factor error, 1-sigma per axis, drawn once per run [fraction]");
+    register_real("gyro_scale_sigma", &gyro_scale_sigma_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope scale-factor error, 1-sigma per axis, drawn once per run [fraction]");
+    register_real("misalignment_sigma_rad", &misalignment_sigma_rad_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Axis misalignment, 1-sigma per angle, drawn once per run [rad]; 0.001 is about 0.06 deg");
+    register_real("accel_lsb_per_g", &accel_lsb_per_g_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer register sensitivity [LSB per g]; the consuming driver must convert with the "
+                        "same value, exactly as on real silicon -- scale is not part of the wire format");
+    register_real("gyro_lsb_per_dps", &gyro_lsb_per_dps_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope register sensitivity [LSB per degree/s]; the consuming driver must convert with the "
+                        "same value");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -133,6 +207,7 @@ public:
   /// shared-memory objects or spawn threads.
   void exit_initialisation_mode() override
   {
+    apply_noise_config();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to create the SPI bus '" + endpoint_.bus_name() +
@@ -161,6 +236,20 @@ public:
   /// reset does not swap out.
   void reset() override
   {
+    seed_ = 0;
+    clock_skew_sigma_ppm_ = 0.0;
+    clock_jitter_sigma_s_ = 0.0;
+    accel_noise_mps2_ = kDefaultNoise.accel_noise_mps2;
+    gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
+    accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
+    gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
+    accel_bias_walk_mps2_sqrt_s_ = kDefaultNoise.accel_bias_walk_mps2_sqrt_s;
+    gyro_bias_walk_rad_s_sqrt_s_ = kDefaultNoise.gyro_bias_walk_rad_s_sqrt_s;
+    accel_scale_sigma_ = kDefaultNoise.accel_scale_sigma;
+    gyro_scale_sigma_ = kDefaultNoise.gyro_scale_sigma;
+    misalignment_sigma_rad_ = kDefaultNoise.misalignment_sigma_rad;
+    accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
+    gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
     truth_ = ImuTruthSample{};
     sample_rate_hz_ = kDefaultSampleRateHz;
     slave_.reset();
@@ -186,7 +275,7 @@ protected:
     for (long k = 1; k <= count; ++k)
     {
       const double sample_time_s = currentTime() + static_cast<double>(k) * sample_period_s;
-      truth_.timestamp_us = static_cast<std::uint64_t>(sample_time_s * 1e6);
+      truth_.timestamp_us = clock_.stamp(sample_time_s, clock_rng_);
       const ImuPacketEmitter::Frame frame = ImuPacketEmitter::encode_raw_sample(noise_model_.apply(truth_));
       if (!slave_.push_frame(frame.data(), frame.size()) && !reported_overflow_)
       {
@@ -207,6 +296,50 @@ protected:
   }
 
 private:
+  /// Rebuilds the error model from the fixed parameters, once per initialisation, so a seeded run is
+  /// reproducible from its first step and a reset-and-reinitialise repeats it.
+  void apply_noise_config()
+  {
+    ImuNoiseConfig config;
+    config.accel_noise_mps2 = static_cast<float>(accel_noise_mps2_);
+    config.gyro_noise_rad_s = static_cast<float>(gyro_noise_rad_s_);
+    config.accel_bias_sigma_mps2 = static_cast<float>(accel_bias_sigma_mps2_);
+    config.gyro_bias_sigma_rad_s = static_cast<float>(gyro_bias_sigma_rad_s_);
+    config.accel_bias_walk_mps2_sqrt_s = static_cast<float>(accel_bias_walk_mps2_sqrt_s_);
+    config.gyro_bias_walk_rad_s_sqrt_s = static_cast<float>(gyro_bias_walk_rad_s_sqrt_s_);
+    config.accel_scale_sigma = static_cast<float>(accel_scale_sigma_);
+    config.gyro_scale_sigma = static_cast<float>(gyro_scale_sigma_);
+    config.misalignment_sigma_rad = static_cast<float>(misalignment_sigma_rad_);
+    config.scale.accel_lsb_per_g = static_cast<float>(accel_lsb_per_g_);
+    config.scale.gyro_lsb_per_dps = static_cast<float>(gyro_lsb_per_dps_);
+    noise_model_ = (seed_ == 0) ? ImuNoiseModel(config) : ImuNoiseModel(config, static_cast<std::uint64_t>(seed_));
+    // The part's own clock. Seeded from the same number so one seed
+    // determines the whole instrument, but from its own stream, so turning
+    // the clock on does not move the error draws.
+    clock_rng_.seed((seed_ == 0) ? std::random_device{}() : static_cast<std::uint64_t>(seed_) ^ 0x5DEECE66DULL);
+    clock_ = SensorClock(
+        SensorClockConfig{ static_cast<float>(clock_skew_sigma_ppm_), static_cast<float>(clock_jitter_sigma_s_) },
+        clock_rng_);
+  }
+
+  // Error-model parameters, FMI-typed and narrowed once in apply_noise_config().
+  int seed_ = 0;
+  double clock_skew_sigma_ppm_ = 0.0;
+  double clock_jitter_sigma_s_ = 0.0;
+  double accel_noise_mps2_ = kDefaultNoise.accel_noise_mps2;
+  double gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
+  double accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
+  double gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
+  double accel_bias_walk_mps2_sqrt_s_ = kDefaultNoise.accel_bias_walk_mps2_sqrt_s;
+  double gyro_bias_walk_rad_s_sqrt_s_ = kDefaultNoise.gyro_bias_walk_rad_s_sqrt_s;
+  double accel_scale_sigma_ = kDefaultNoise.accel_scale_sigma;
+  double gyro_scale_sigma_ = kDefaultNoise.gyro_scale_sigma;
+  double misalignment_sigma_rad_ = kDefaultNoise.misalignment_sigma_rad;
+  double accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
+  double gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
+
+  std::mt19937_64 clock_rng_{ 1 };
+  SensorClock clock_{ SensorClockConfig{}, clock_rng_ };
   ImuNoiseModel noise_model_;
   ImuSpiSlave slave_;
   sim::spi_shm::SpiPeripheralEndpoint<ImuSpiSlave> endpoint_{ slave_, kSpiBus };

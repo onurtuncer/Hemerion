@@ -76,6 +76,8 @@
 
 #include "geomagnetic_field.hpp"
 
+#include "environment.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -97,6 +99,11 @@
 
 namespace
 {
+
+using hemerion::examples::GpsErrorModel;
+using hemerion::examples::kCorrelatedReceiver;
+using hemerion::examples::kWhiteReceiver;
+
 using hemerion::examples::rocket_gps_ecos::FieldBody;
 using hemerion::examples::rocket_gps_ecos::FieldNed;
 using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
@@ -120,39 +127,33 @@ using hemerion::examples::rocket_gps_ecos::GeomagneticDipole;
 #define HEMERION_MMC5983MA_FMU_PATH ""
 #endif
 
-/// The GPS FMU's error-model parameters as one record, so the Ecos parameter
-/// set and the run's .config sidecar cannot disagree about what the receiver
-/// was -- and plot_results.py can draw the autocorrelation a run *should*
-/// show from the sidecar alone.
-struct GpsErrorModel
+/// @brief A distinct, reproducible seed per sensor from one run seed.
+///
+/// Seeding every part with the same number would hand the barometer and the
+/// radar altimeter the same first draw -- a correlation between independent
+/// parts that no real hardware has, and a coincidence a figure should never
+/// rest on. A cheap integer hash (splitmix64's finaliser) decorrelates them
+/// while keeping the whole run a function of the one number the user typed.
+///
+/// A run seed of 0 means "draw a fresh instrument", and stays 0 for every
+/// sensor: the FMUs read 0 as "use std::random_device", which is what an
+/// unseeded run has always done.
+[[nodiscard]] inline int derived_seed(int run_seed, int sensor_index)
 {
-  const char* name;
-  double horizontal_pos_noise_m;
-  double vertical_pos_noise_m;
-  double speed_noise_mps;
-  double course_noise_deg;
-  double horizontal_pos_correlated_m;
-  double vertical_pos_correlated_m;
-  double position_correlation_time_s;
-  double speed_correlated_mps;
-  double course_correlated_deg;
-  double velocity_correlation_time_s;
-  double accuracy_scale;
-};
-
-/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
-/// the parameter set explicitly even though the FMU would default to them, so
-/// the sidecar is always a complete record.
-constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
-
-/// The realistic receiver. The total 1-sigma per channel is within 2 % of the
-/// default's -- nothing on a page changes by magnitude -- but most of it now
-/// lives in a slow Gauss-Markov term (tau 100 s on position, 10 s on
-/// velocity), and hAcc/vAcc report 70 % of the truth, as a receiver's own
-/// estimate tends to. Spelled out here rather than as an FMU-side preset so
-/// the example reads end to end; the values are tabulated in
-/// doc/sensor_models.rst.
-constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0, 100.0, 0.1, 1.0, 10.0, 0.7 };
+  if (run_seed == 0)
+  {
+    return 0;
+  }
+  std::uint64_t x =
+      static_cast<std::uint64_t>(run_seed) + 0x9E3779B97F4A7C15ULL * static_cast<std::uint64_t>(sensor_index + 1);
+  x ^= x >> 30U;
+  x *= 0xBF58476D1CE4E5B9ULL;
+  x ^= x >> 27U;
+  x *= 0x94D049BB133111EBULL;
+  x ^= x >> 31U;
+  // Keep it positive and clear of 0, which the FMUs read as "unseeded".
+  return static_cast<int>((x % 2147483646ULL) + 1ULL);
+}
 
 struct Options
 {
@@ -200,6 +201,18 @@ struct Options
   // receiver -- and every figure drawn from it -- stays the one this example
   // was verified with until the change is asked for.
   bool gps_correlated_errors = false;
+  // 0 = every sensor draws a fresh instrument, as an unseeded run always has.
+  //
+  // Any other value fixes every sensor's error stream: the sample a part produces
+  // at a given simulation time is then identical run to run (measured: 790 of 790
+  // shared IMU timestamps, byte for byte). It does *not* make the two-process run
+  // reproducible -- the flight computer polls the I2C parts and drains the IMU
+  // FIFO on its own wall clock, so which samples it catches still varies, and the
+  // logs differ in their first timestamp and their length. Statistics reproduce;
+  // a diff of the sensor logs does not.
+  int seed = 0;
+  // Overrides the derived GPS seed, because this page's GPS figures were
+  // published against particular values of it.
   int gps_seed = 0;  // 0 = nondeterministic; any other value reproduces the receiver's errors
 };
 
@@ -230,7 +243,11 @@ void print_usage()
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
-               "  --gps-seed  error-model RNG seed (default 0 = nondeterministic)\n"
+               "  --seed      seed every sensor's error model: each part then produces the same\n"
+               "              sample at a given simulation time run to run. The flight computer's\n"
+               "              own polling still varies, so the logs are not diff-identical.\n"
+               "              (default 0 = each part is a fresh draw)\n"
+               "  --gps-seed  override just the receiver's seed (default: derived from --seed)\n"
                "  --stg2-ignition  absolute time stage 2 lights [s] (default 131.8 = NASA Scenario 17; the\n"
                "              FMU's own default of 0 means 'immediately after staging', which is a different\n"
                "              flight profile and does not reproduce the reference trajectory)\n"
@@ -251,7 +268,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 18> kValueOptions = { {
+constexpr std::array<ValueOption, 19> kValueOptions = { {
     { "--rocket", [](Options& o, const char* v) { o.rocket_fmu = v; } },
     { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
@@ -269,6 +286,7 @@ constexpr std::array<ValueOption, 18> kValueOptions = { {
         }
         o.gps_correlated_errors = (model == "correlated");
       } },
+    { "--seed", [](Options& o, const char* v) { o.seed = std::stoi(v); } },
     { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
     { "--stg2-ignition", [](Options& o, const char* v) { o.stg2_ignition_s = std::stod(v); } },
     { "--lat0", [](Options& o, const char* v) { o.lat0_deg = std::stod(v); } },
@@ -444,6 +462,7 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "cocom_limits_enabled=" << (options.cocom_limits ? 1 : 0) << "\n"
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
       << "gps_error_model=" << receiver.name << "\n"
+      << "seed=" << options.seed << "\n"
       << "gps_seed=" << options.gps_seed << "\n"
       << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
       << "gps_vertical_pos_noise_m=" << receiver.vertical_pos_noise_m << "\n"
@@ -641,12 +660,19 @@ int main(int argc, char** argv)
     // else about its behaviour -- rate included -- is register state the
     // flight computer programs over I2C.
     ss.make_connection<double>("rocket::out.alt_m", "baro::h_m");
+    // And the air it is actually in. The part inverts the ISA from h_m when
+    // nothing writes p_Pa, which is only right on a standard day; the plant
+    // integrates its own atmosphere and publishes it, so on a non-standard
+    // day (Aetherion's atm.deltaT_K / atm.deltaP_sl_Pa) the barometer reads
+    // the day the aircraft is flying through rather than the book's.
+    ss.make_connection<double>("rocket::out.P_Pa", "baro::p_Pa");
+    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
+    ss.make_connection<double>("rocket::out.T_K", "baro::T_degC", kelvin2celsius);
 
     // The magnetometer's die temperature: ambient air, near enough for a part
     // whose temperature channel quantizes at 0.8 C. The field itself has no
     // rocket output to connect -- it is computed in the stepping loop below,
     // for the same reason specific force is.
-    const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
     ss.make_connection<double>("rocket::out.T_K", "mag::temperature_c", kelvin2celsius);
 
     // NASA TM-2015-218675 Scenario 17's initial conditions: equatorial pad on
@@ -679,7 +705,11 @@ int main(int argc, char** argv)
     launch_site["gps::reacquisition_time_s"] = options.reacquisition_time_s;
     // The receiver's error model, in full: see GpsErrorModel.
     const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
-    launch_site["gps::seed"] = options.gps_seed;
+    // One stream per sensor, all derived from --seed; --gps-seed still wins for the receiver.
+    launch_site["gps::seed"] = (options.gps_seed != 0) ? options.gps_seed : derived_seed(options.seed, 0);
+    launch_site["imu::seed"] = derived_seed(options.seed, 1);
+    launch_site["baro::seed"] = derived_seed(options.seed, 2);
+    launch_site["mag::seed"] = derived_seed(options.seed, 3);
     launch_site["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
     launch_site["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
     launch_site["gps::speed_noise_mps"] = receiver.speed_noise_mps;
