@@ -72,6 +72,13 @@ target_link_libraries(test_hemerion_sensors_magnetic_calibration PRIVATE hemerio
 add_test(NAME sensors.magnetic_calibration COMMAND test_hemerion_sensors_magnetic_calibration)
 set_tests_properties(sensors.magnetic_calibration PROPERTIES LABELS "unit")
 
+# The receiver's processing latency. Header-only, and deliberately not in fmu_main.cpp: "the frame for epoch k is
+# delivered during epoch k+n" is an off-by-one-step claim that wants an assertion rather than a co-simulation.
+add_executable(test_hemerion_sensors_gps_latency test_gps_latency_line.cpp)
+target_link_libraries(test_hemerion_sensors_gps_latency PRIVATE hemerion_sensors hemerion_test_support)
+add_test(NAME sensors.gps_latency COMMAND test_hemerion_sensors_gps_latency)
+set_tests_properties(sensors.gps_latency PROPERTIES LABELS "unit")
+
 # The World Magnetic Model, checked against NOAA's own 100 reference values rather than against itself. The path is
 # passed in because those values are vendored third-party data, not a fixture this repository wrote.
 add_executable(test_hemerion_sensors_wmm test_world_magnetic_model.cpp)
