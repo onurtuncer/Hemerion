@@ -376,6 +376,49 @@ complete, verified wiring of this FMU against a 6-DoF plant.
 
 .. _gps_dynamics_envelope:
 
+Receiver latency
+~~~~~~~~~~~~~~~~
+
+A GNSS receiver does not emit the solution for an epoch at that epoch. It
+closes the epoch, runs its own filter, formats the message and clocks it out of
+a UART; by the time the first byte reaches the flight computer the position it
+describes is 50 to 200 ms old. The receiver is not concealing this — a real one
+publishes its own time of validity — but a consumer that treats the fix as
+current is fusing a measurement of where the vehicle *was* with an IMU telling
+it where the vehicle *is*.
+
+At the F-16 examples' trim speed of 172 m/s, **100 ms is 17 m** of position
+error along the velocity vector: an order of magnitude above the receiver's own
+noise, entirely systematic, and invisible to any amount of averaging. It is
+what delayed-measurement handling in a filter exists for.
+
+``--gps-latency`` (default 0) sets it. The implementation is a queue, not an
+offset on a timestamp: a *correct* solution for epoch :math:`k` is delivered
+during epoch :math:`k+n`, which is a different thing from a receiver that
+reports a stale time, and it is the version that shows up at the flight
+computer as a late **arrival**.
+
+.. note::
+
+   This item was deferred from the correlated-GPS work with the note that
+   "fixes are stamped by index, so a delayed emission is invisible until
+   arrival stamping exists". That turned out to be exactly right, and measuring
+   it proved the point twice over. Against ``nominal_time_s`` the latency
+   cancels — that column is derived from the arrival *index*, which shifts by
+   the same amount the delay does. Against ``host_time_s`` it is visible, but
+   only once that clock is calibrated onto simulation time, because the flight
+   computer's clock starts when the flight computer does and has no fixed
+   relationship to the master's.
+
+   The calibration is the one a filter would do: the IMU log carries both
+   clocks, so a fit over its samples maps one onto the other. Measured that way
+   on check-case 11 at ``--rtf 1``, the fix content lags its own arrival by
+   **0.04 s with no latency configured** — the co-simulation's own
+   one-communication-step connection delay — and by **0.25 s at
+   ``--gps-latency 0.2``**. The difference is **+0.21 s** against 0.20
+   configured, one step of a 10 Hz stream's quantisation, and exactly **two**
+   fixes are held back at cut-off, which is :math:`\lceil 0.2 / 0.1 \rceil`.
+
 Receiver dynamics envelope
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

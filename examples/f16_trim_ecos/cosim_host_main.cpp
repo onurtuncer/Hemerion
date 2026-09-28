@@ -297,6 +297,9 @@ struct Options
   // Date the World Magnetic Model is evaluated at. The epoch by default: its
   // coefficients are exact there and a fixed date keeps a run reproducible.
   double mag_date_year = hemerion::sensors::mag::WorldMagneticModel::kValidFromYear;
+  // How long after closing an epoch the receiver delivers its solution. 0 is
+  // the instantaneous receiver this example had before; see --gps-latency.
+  double gps_latency_s = 0.0;
   int seed = 0;
   // Overrides the derived GPS seed, because this page's GPS figures were
   // published against particular values of it.
@@ -383,6 +386,11 @@ void print_usage()
                "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
                "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
                "              on the wire, so both ends must be configured alike\n"
+               "  --gps-latency  receiver processing latency [s] (default 0). A real receiver\n"
+               "              delivers an epoch's solution 50-200 ms after closing it; at the\n"
+               "              trim speed that is 9-34 m of position error along the velocity\n"
+               "              vector, systematic and unaveragable. It is what delayed-measurement\n"
+               "              handling in a filter exists for\n"
                "  --mag-date  date for the World Magnetic Model [decimal year] (default 2025.0, the\n"
                "              model epoch, where its coefficients are exact and a run stays\n"
                "              reproducible). Must lie in [2025.0, 2030.0]: the model is predictive\n"
@@ -422,7 +430,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 33> kValueOptions = { {
+constexpr std::array<ValueOption, 34> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -473,6 +481,15 @@ constexpr std::array<ValueOption, 33> kValueOptions = { {
         }
       } },
     { "--gps-seed", [](Options& o, const char* v) { o.gps_seed = std::stoi(v); } },
+    { "--gps-latency",
+      [](Options& o, const char* v) {
+        o.gps_latency_s = std::stod(v);
+        if (o.gps_latency_s < 0.0)
+        {
+          throw std::invalid_argument("--gps-latency cannot be negative: a receiver delivers a "
+                                      "solution after the epoch it describes, not before");
+        }
+      } },
     { "--wind",
       [](Options& o, const char* v) {
         // north,east,down in m/s -- the velocity *of the air*, NED, which is
@@ -709,6 +726,7 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
       << "mag_date_year=" << options.mag_date_year << "\n"
+      << "gps_latency_s=" << options.gps_latency_s << "\n"
       << "mag_declination_deg=" << field_declination_deg << "\n"
       << "mag_inclination_deg=" << field_inclination_deg << "\n"
       << "mag_intensity_ut=" << field_intensity_ut << "\n"
@@ -1038,6 +1056,7 @@ int main(int argc, char** argv)
     trim_point["gps::speed_correlated_mps"] = receiver.speed_correlated_mps;
     trim_point["gps::course_correlated_deg"] = receiver.course_correlated_deg;
     trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
+    trim_point["gps::latency_s"] = options.gps_latency_s;
     trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
 
     // The plant's environment. Written unconditionally, because every one of
