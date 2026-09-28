@@ -382,8 +382,30 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
 * **What is left, as of 2026-09-28.** Everything this section originally called for is built and
   in use by the examples. What remains was deferred rather than called for:
 
-  1. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
-     rather than deferred, and neither matters until the filter carries states that care.
+  1. **Sub-step emission cadence.** A part 2000 ppm fast says so in its stamps but does not
+     thereby produce 2000 ppm more samples per second; doing that properly needs sub-step
+     resampling, and nothing yet asks for it. GPS latency, which shared this entry, is done — see
+     below.
+  **Done — 2026-09-28.** `GpsLatencyLine` (`gps/fmu/gpsLatencyLine.hpp`) holds the receiver's
+  output back by `--gps-latency` (default 0, which releases immediately and reproduces the old
+  behaviour frame for frame). A queue rather than a timestamp offset: a correct solution for epoch
+  k delivered during epoch k+n is what a receiver does, and a stale *reported* time is not.
+
+  The deferral note from item 1a was exactly right — "fixes are stamped by index, so a delayed
+  emission is invisible until arrival stamping exists" — and measuring it proved the point twice.
+  Against `nominal_time_s` the latency cancels, because that column comes from the arrival index,
+  which shifts by the same amount. Against `host_time_s` it is visible only after calibrating that
+  clock onto simulation time, since the flight computer's clock starts when the flight computer
+  does. The calibration is the one a filter would do: the IMU log carries both clocks, so a fit
+  over its samples maps one to the other.
+
+  Measured on check-case 11 at `--rtf 1`: the fix content lags its own arrival by 0.04 s with no
+  latency (the co-simulation's own one-step connection delay) and 0.25 s at `--gps-latency 0.2` —
+  a difference of +0.21 s against 0.20 configured, one step of a 10 Hz stream's quantisation — and
+  exactly two fixes are held at cut-off, which is ceil(0.2 / 0.1). `sensors.gps_latency` asserts the
+  delay line's own behaviour, including that zero latency is the identity and that a step longer
+  than the latency delivers *every* due frame rather than dropping the older ones (which would model
+  a receiver that discards solutions rather than delaying them).
 
 ---
 
