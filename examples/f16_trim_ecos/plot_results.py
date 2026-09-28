@@ -509,48 +509,40 @@ def isa_altitude_m(pressure_pa: float) -> float:
     return _ISA_H_TROPO - (_ISA_R * _ISA_T_TROPO / _ISA_G) * math.log(pressure_pa / _ISA_P_TROPO)
 
 
-# The centred tilted dipole the host drives the magnetometer FMU with, ported
-# from geomagnetic_field.hpp. It is here for one number: the declination at the
-# trim point, which is what turns a magnetic heading into a comparison against
-# GPS course. Taking it from the same model the truth field came from is the
-# point -- a WMM declination would be a *better* number for Kitty Hawk and the
-# wrong one for this figure, because the field the part measured is this
-# model's, not the WMM's, and the residual would then carry the model
-# difference rather than the sensor chain's error.
-_DIPOLE_REFERENCE_RADIUS_M = 6_371_200.0
-_DIPOLE_EQUATORIAL_FIELD_UT = 31.2
-_DIPOLE_POLE_LAT_DEG = 80.65
-_DIPOLE_POLE_LON_DEG = -72.68
+def config_declination_deg(config: dict[str, str]) -> float:
+    """The declination the host evaluated, from the run's own .config sidecar.
+
+    Read rather than recomputed. This script used to carry a port of the dipole
+    for exactly this number, which was correct while the host drove a dipole and
+    silently wrong the moment it did not -- the figure showed 11.4 degrees of
+    heading error that was two implementations disagreeing, not a sensor chain
+    doing anything. Re-implementing the WMM here would be 90 coefficients in a
+    second language, which is what vendoring NOAA's file exists to prevent.
+
+    A run predating the sidecar entry gets 0.0, which reproduces the old
+    behaviour for a dipole flight (its declination was +0.69 degrees at Kitty
+    Hawk) closely enough to plot, and the caption's numbers come from the
+    sidecar anyway.
+    """
+    try:
+        return float(config.get("mag_declination_deg", "0") or 0.0)
+    except ValueError:
+        return 0.0
 
 
-def dipole_field_ned(lat_deg: float, lon_deg: float, alt_m: float) -> tuple[float, float, float]:
-    radius = _DIPOLE_REFERENCE_RADIUS_M + alt_m
-    scale = _DIPOLE_EQUATORIAL_FIELD_UT * (_DIPOLE_REFERENCE_RADIUS_M / radius) ** 3
+def config_horizontal_ut(config: dict[str, str]) -> float:
+    """Horizontal field intensity H [uT], from the run's own sidecar.
 
-    lat, lon = math.radians(lat_deg), math.radians(lon_deg)
-    cos_lat, sin_lat = math.cos(lat), math.sin(lat)
-    cos_lon, sin_lon = math.cos(lon), math.sin(lon)
-    rx, ry, rz = cos_lat * cos_lon, cos_lat * sin_lon, sin_lat
-
-    pole_lat, pole_lon = math.radians(_DIPOLE_POLE_LAT_DEG), math.radians(_DIPOLE_POLE_LON_DEG)
-    mx = -math.cos(pole_lat) * math.cos(pole_lon)
-    my = -math.cos(pole_lat) * math.sin(pole_lon)
-    mz = -math.sin(pole_lat)
-
-    m_dot_r = mx * rx + my * ry + mz * rz
-    bx = scale * (3.0 * rx * m_dot_r - mx)
-    by = scale * (3.0 * ry * m_dot_r - my)
-    bz = scale * (3.0 * rz * m_dot_r - mz)
-
-    north = -sin_lat * cos_lon * bx - sin_lat * sin_lon * by + cos_lat * bz
-    east = -sin_lon * bx + cos_lon * by
-    down = -cos_lat * cos_lon * bx - cos_lat * sin_lon * by - sin_lat * bz
-    return north, east, down
-
-
-def declination_deg(lat_deg: float, lon_deg: float, alt_m: float) -> float:
-    north, east, _ = dipole_field_ned(lat_deg, lon_deg, alt_m)
-    return math.degrees(math.atan2(east, north))
+    H = F cos(I), both recorded by the host when it evaluated the field. Like
+    the declination beside it, read rather than recomputed -- the script no
+    longer carries a field model of its own.
+    """
+    try:
+        intensity = float(config.get("mag_intensity_ut", "0") or 0.0)
+        inclination = float(config.get("mag_inclination_deg", "0") or 0.0)
+    except ValueError:
+        return 0.0
+    return intensity * math.cos(math.radians(inclination))
 
 
 def wrap_180(angle_deg: float) -> float:
@@ -748,14 +740,15 @@ def plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
     return save(fig, out, prefix, "altitude_consistency", caption)
 
 
-def plot_heading_consistency(truth, fixes, mag, gps_gaps, out: Path, prefix: str, caption: str) -> str:
+def plot_heading_consistency(truth, fixes, mag, gps_gaps, config: dict[str, str], out: Path,
+                             prefix: str, caption: str) -> str:
     """Magnetic heading against GNSS course against truth yaw.
 
     The second half of the cross-sensor claim, and the harder half: a
     magnetometer measures a field in body axes, so recovering a heading from
     it needs the aircraft's own tilt and the local declination. Both are taken
-    from the simulation here — truth roll and pitch, and the declination of
-    the same centred dipole the host drove the FMU with — because the question
+    from the simulation here — truth roll and pitch, and the declination the
+    host recorded from the field model it drove the FMU with — because the question
     this figure answers is whether the *sensor chain* (18-bit registers, I2C
     transactions, bridge-offset calibration, unit conversion) preserves
     heading, not whether an attitude filter can be built. The residual is the
@@ -804,12 +797,12 @@ def plot_heading_consistency(truth, fixes, mag, gps_gaps, out: Path, prefix: str
             lon = interpolate(truth["time"], truth["lon_deg"], t)
             alt = interpolate(truth["time"], truth["alt_m"], t)
             magnetic = math.degrees(math.atan2(-by_h, bx_h))
-            mag_heading.append(wrap_360(magnetic + declination_deg(lat, lon, alt)))
+            mag_heading.append(wrap_360(magnetic + config_declination_deg(config)))
         ax.plot(mag["sim_time_s"], mag_heading, linestyle="none", marker=".",
                 markersize=MARKER_SENSOR, alpha=0.65, color=BARO,
                 label="magnetic heading (MMC5983MA, tilt- and declination-corrected)")
-        declination = declination_deg(truth["lat_deg"][0], truth["lon_deg"][0], truth["alt_m"][0])
-        ax.annotate(f"dipole declination at the trim point: {declination:+.2f}°",
+        declination = config_declination_deg(config)
+        ax.annotate(f"{config.get('mag_model', 'WMM2025')} declination at the trim point: {declination:+.2f}°",
                     xy=(0.99, 0.05), xycoords="axes fraction", ha="right", fontsize=8, color=INK_2)
 
     ax.set_ylabel("heading [deg]")
@@ -853,8 +846,7 @@ def plot_heading_consistency(truth, fixes, mag, gps_gaps, out: Path, prefix: str
         # two runs, the bound read 5.5 deg against 5.3 observed on one and
         # 2.9 against 0.24 on the other, while this expression gives 5.2 and
         # 0.24.
-        horizontal_ut = math.hypot(*dipole_field_ned(truth["lat_deg"][0], truth["lon_deg"][0],
-                                                     truth["alt_m"][0])[:2])
+        horizontal_ut = config_horizontal_ut(config)
         errors_deg = []
         for t in mag["sim_time_s"]:
             roll = interpolate(truth["time"], truth["roll_rad"], t)
@@ -1493,7 +1485,7 @@ def main() -> None:
         plot_ground_track(truth, fixes, gps_gaps, args.out, prefix, caption),
         plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
                                   args.out, prefix, caption),
-        plot_heading_consistency(truth, fixes, mag, gps_gaps, args.out, prefix, caption),
+        plot_heading_consistency(truth, fixes, mag, gps_gaps, config, args.out, prefix, caption),
         plot_sensor_envelopes(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
                               fix_epochs, radalt_epochs, args.out, prefix, caption),
     ]

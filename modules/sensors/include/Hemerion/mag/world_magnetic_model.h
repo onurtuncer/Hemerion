@@ -94,6 +94,28 @@ struct WmmField
   [[nodiscard]] std::array<double, 3> to_microtesla() const;
 };
 
+/// A magnetic field in body axes [nanotesla] -- what a magnetometer bolted to
+/// the airframe is immersed in, and what a filter predicting its reading needs.
+struct WmmFieldBody
+{
+  double x_nt = 0.0;  ///< Body X, forward.
+  double y_nt = 0.0;  ///< Body Y, right.
+  double z_nt = 0.0;  ///< Body Z, down.
+
+  /// @brief The same field in the sensor stack's working unit [uT].
+  [[nodiscard]] std::array<double, 3> to_microtesla() const;
+};
+
+/// @brief Rotates a geodetic-frame field into body axes through a 3-2-1
+/// (yaw, pitch, roll) Euler sequence -- the convention Aetherion's plants
+/// report their attitude in.
+///
+/// @param field     Field in the local geodetic frame.
+/// @param yaw_rad   Yaw [rad].
+/// @param pitch_rad Pitch [rad].
+/// @param roll_rad  Roll [rad].
+[[nodiscard]] WmmFieldBody to_body(const WmmField& field, double yaw_rad, double pitch_rad, double roll_rad);
+
 /// @brief Evaluates the World Magnetic Model.
 ///
 /// Stateless and cheap enough to call per step; there is nothing to construct

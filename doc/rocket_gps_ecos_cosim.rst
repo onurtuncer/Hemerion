@@ -355,11 +355,12 @@ Three consequences worth knowing when reading a run:
 * **The truth field is host-computed** — the only truth signal in this example
   that still is. It depends on where the vehicle is *and* how it is pointing,
   four plant outputs, and an Ecos connection modifier sees one source variable.
-  ``geomagnetic_field.hpp`` maps ``lat``/``lon``/``alt`` through a centered
-  tilted dipole and rotates the result into body axes with the plant's
-  ``yaw``/``pitch``/``roll``. It is a dipole, not the WMM — the header is
-  explicit about what that costs, particularly at Scenario 17's equatorial
-  Atlantic pad.
+  ``WorldMagneticModel`` maps ``lat``/``lon``/``alt``/date through WMM2025 and
+  the host rotates the result into body axes with the plant's
+  ``yaw``/``pitch``/``roll``. It was a centred dipole until 2026-09-28, which
+  mattered most at exactly this pad: on the equator at the prime meridian, at
+  the edge of the region a dipole describes worst. The dipole put the down
+  component near **+3 µT**; the real field's is **−16.0 µT**, the other way.
 * **The die temperature is wired, the sample rate is not.** ``rocket::out.T_K``
   feeds ``mag::temperature_c`` through a connection modifier, so the part
   reports ambient at its 0.8 °C resolution. The measurement rate is a register
@@ -877,15 +878,15 @@ PNG detached from its caption has no other way to tell you which it is.
 
 .. figure:: _static/rocket_gps_ecos/mag_magnitude.png
    :width: 100%
-   :alt: Two panels — total field intensity falling from 31 to 27.5 microtesla over the flight, and the direction error a skipped calibration would have caused, rising from 60 to 66 degrees
+   :alt: Two panels — total field intensity falling from about 32 to 28 microtesla over the flight, and the direction error a skipped calibration would have caused, rising from 48 to 57 degrees
 
    Top: total intensity, the near-rotation-invariant quantity, so this panel
-   is about the flight rather than the attitude — the field weakens as the
-   vehicle climbs (1/r³ over 236 km) and shifts as it flies 2000 km east
-   relative to the tilted dipole axis.
+   is about the flight rather than the attitude — **31.8 µT on the pad to
+   28.2 µT at 236 km**, weakening as the vehicle climbs and shifting as it
+   flies 2000 km east across the real field's structure.
 
    Bottom: what skipping the SET/RESET calibration would have cost, drawn
-   from the same samples with the measured bridge offset added back — **28–29°
+   from the same samples with the measured bridge offset added back — **48–57°
    on this run**, and tens of degrees on any run, since the offset is redrawn
    each time from the datasheet's ±0.5 gauss tolerance. The first version of
    this figure plotted the uncalibrated

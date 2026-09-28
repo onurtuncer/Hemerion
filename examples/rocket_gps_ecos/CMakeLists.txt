@@ -172,7 +172,7 @@ if(HEMERION_TWO_STAGE_ROCKET_FMU)
 endif()
 
 add_executable(rocket_gps_cosim cosim_host_main.cpp)
-target_link_libraries(rocket_gps_cosim PRIVATE libecos)
+target_link_libraries(rocket_gps_cosim PRIVATE libecos hemerion_sensors)
 target_compile_features(rocket_gps_cosim PRIVATE cxx_std_23)
 # Ecos keeps src/ off its public include path. cosim_host_main.cpp reaches into it for util/unzipper.hpp so its
 # FMU-extraction preflight runs the same code Ecos will rather than a reimplementation that could drift -- see the

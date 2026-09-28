@@ -21,17 +21,21 @@
 // Plain asserts + exit code, matching the other sensors tests.
 // ------------------------------------------------------------------------------
 #include <cstdlib>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <numbers>
 #include <sstream>
 #include <string>
 
 #include "Hemerion/mag/world_magnetic_model.h"
 
+using hemerion::sensors::mag::to_body;
 using hemerion::sensors::mag::WmmError;
 using hemerion::sensors::mag::WmmField;
+using hemerion::sensors::mag::WmmFieldBody;
 using hemerion::sensors::mag::WorldMagneticModel;
 
 #define CHECK(condition) check((condition), #condition, __FILE__, __LINE__)
@@ -221,6 +225,74 @@ void test_altitude_weakens_the_field()
   CHECK(previous > 20000.0);  // still a real field at the top, not a rounding artefact
 }
 
+/// to_body is a rotation, and the sign conventions a heading depends on.
+///
+/// These assertions came from the dipole's test, which was deleted when the
+/// examples stopped using it -- and the rotation moved here without them, which
+/// is the kind of gap that leaves a function every example depends on with no
+/// test at all. A wrong rotation preserves the field's *magnitude*, so the one
+/// plot that would seem to check it does not.
+void test_to_body_is_a_rotation()
+{
+  WmmField field;
+  CHECK(WorldMagneticModel::field_ned(36.0, -75.7, 3052.0, 2026.0, field) == WmmError::kNone);
+
+  // Level and pointing north: body axes are the geodetic ones.
+  const WmmFieldBody level = to_body(field, 0.0, 0.0, 0.0);
+  CHECK(near(level.x_nt, field.north_nt, 1e-9));
+  CHECK(near(level.y_nt, field.east_nt, 1e-9));
+  CHECK(near(level.z_nt, field.down_nt, 1e-9));
+
+  // Length is preserved whatever the attitude -- that is what makes it a
+  // rotation rather than a transformation that happens to look like one.
+  const double expected = field.intensity_nt();
+  for (const double yaw : { 0.3, 1.9, -2.7 })
+  {
+    for (const double pitch : { 0.0, 0.4, -0.5 })
+    {
+      for (const double roll : { 0.0, 1.1, -0.8 })
+      {
+        const WmmFieldBody body = to_body(field, yaw, pitch, roll);
+        const double length = std::sqrt((body.x_nt * body.x_nt) + (body.y_nt * body.y_nt) + (body.z_nt * body.z_nt));
+        CHECK(near(length, expected, 1e-6));
+      }
+    }
+  }
+
+  // A 90-degree yaw takes a northward field onto body -Y. This is the sign
+  // convention a heading estimate rests on, and getting it backwards puts a
+  // heading 180 degrees out while leaving every magnitude untouched.
+  WmmField north_only;
+  north_only.north_nt = 20000.0;
+  const WmmFieldBody yawed = to_body(north_only, std::numbers::pi / 2.0, 0.0, 0.0);
+  CHECK(near(yawed.x_nt, 0.0, 1e-9));
+  CHECK(near(yawed.y_nt, -20000.0, 1e-9));
+  CHECK(near(yawed.z_nt, 0.0, 1e-9));
+
+  // Pitch and roll act on the axes they should. Nose up 90 degrees takes body
+  // Z from pointing down to pointing north, so a northward field lands on
+  // +Z; rolling right 90 degrees takes body Y from east to down, so a
+  // downward field lands on +Y. (The first expectation here was written as
+  // -Z and the test said otherwise, which is the test doing its job: the
+  // sign is not guessable from the name of the axis.)
+  const WmmFieldBody pitched = to_body(north_only, 0.0, std::numbers::pi / 2.0, 0.0);
+  CHECK(near(pitched.z_nt, 20000.0, 1e-9));
+  CHECK(near(pitched.x_nt, 0.0, 1e-9));
+  WmmField down_only;
+  down_only.down_nt = 20000.0;
+  const WmmFieldBody rolled = to_body(down_only, 0.0, 0.0, std::numbers::pi / 2.0);
+  CHECK(near(rolled.y_nt, 20000.0, 1e-9));
+
+  // And the unit conversion the hosts write through.
+  const std::array<double, 3> microtesla = level.to_microtesla();
+  CHECK(near(microtesla[0], field.north_nt * 1e-3, 1e-12));
+  CHECK(near(microtesla[1], field.east_nt * 1e-3, 1e-12));
+  CHECK(near(microtesla[2], field.down_nt * 1e-3, 1e-12));
+
+  const std::array<double, 3> ned_microtesla = field.to_microtesla();
+  CHECK(near(ned_microtesla[2], field.down_nt * 1e-3, 1e-12));
+}
+
 }  // namespace
 
 int main()
@@ -230,6 +302,7 @@ int main()
   test_position_guards();
   test_declination_where_the_examples_fly();
   test_altitude_weakens_the_field();
+  test_to_body_is_a_rotation();
 
   std::puts("test_world_magnetic_model: all checks passed");
   return 0;
