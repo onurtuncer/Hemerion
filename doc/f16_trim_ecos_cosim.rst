@@ -134,10 +134,10 @@ tracking range, so the approximation never matters there.
 **The magnetic field is host-computed, not an Ecos connection.** The field a
 magnetometer sees depends on where the vehicle is *and* how it is pointing —
 four plant outputs — and an Ecos connection modifier sees only its single
-source variable. So the host computes a centred-dipole field after every step
+source variable. So the host computes the field after every step
 and writes ``mag::b_{x,y,z}_ut`` directly, giving the same
 one-communication-step transport delay a connection would.
-``geomagnetic_field.hpp`` is explicit about the model being a dipole rather
+``world_magnetic_model.h`` is explicit about what the model does and does not
 than the WMM and what that costs at this site.
 
 **The magnetometer's die temperature is ambient air** (``out.T_K`` through a
@@ -438,16 +438,21 @@ Check-case 11: the cross-sensor reference
 
 .. figure:: _static/f16_trim_ecos/case11_heading_consistency.png
    :width: 100%
-   :alt: Upper panel, three heading traces — truth yaw drifting 45 to 43.8 degrees, GPS course scattered about it, magnetic heading offset five degrees above; lower panel, the residuals, with the magnetometer's a tight band at +5.3 degrees
+   :alt: Upper panel, three heading traces — truth yaw near 45 degrees with GPS course scattered about it and magnetic heading sitting just below both; lower panel, the residuals, with the magnetometer's a tight band a fifth of a degree below zero
 
    The second half of the cross-sensor claim, and the harder half. Recovering
    a heading from a magnetometer needs the aircraft's own tilt and the local
    declination; both are taken from the simulation here — truth roll and
-   pitch, and the declination of the same centred dipole the host drove the
-   FMU with — because the question is whether the *sensor chain* preserves
-   heading, not whether an attitude filter can be built.
+   pitch, and the declination the host recorded when it evaluated the field —
+   because the question is whether the *sensor chain* preserves heading, not
+   whether an attitude filter can be built.
 
-   **The magnetometer is 5.3° off, and it is supposed to be.** The MMC5983MA
+   That declination is **−10.99°**, WMM2025 at the trim point. Until
+   2026-09-28 it was **+0.69°**, because the host drove a centred dipole, which
+   has almost no declination structure. The figure is the same shape either
+   way; what changed is that it is now a statement about Kitty Hawk.
+
+   **The magnetometer is off by a bias, and it is supposed to be.** The MMC5983MA
    model draws a hard-iron offset once per run, 1 µT 1-sigma per axis, on top
    of the bridge offset. The bridge offset is what a SET/RESET pair cancels,
    and the driver's bring-up calibration duly removes it — the residual here is
@@ -455,11 +460,20 @@ Check-case 11: the cross-sensor reference
    installation adds rather than an electrical null error.
 
    The figure measures that offset from the run rather than asserting it. The
-   mean of (decoded − truth field) is **−1.93 / −0.86 / −0.28 µT**, which
-   against this site's 21.9 µT horizontal field predicts **5.50°** of heading
-   error; the observed residual is **5.33°**. Those two numbers agreeing is
-   the check that the tilt compensation above is right, and the reason the
-   remaining 0.17° can be read as geometry rather than as a decoding fault.
+   mean of (decoded − truth field) is **+0.79 / −0.79 / −2.08 µT**, which
+   against this site's 22.6 µT horizontal field predicts **−0.32°** of heading
+   error; the observed residual is **−0.23°**. Those two numbers agreeing is
+   the check that the tilt compensation above is right.
+
+   The error is small *for this draw*, and that is worth reading carefully
+   rather than as good news: the heading cost of a hard iron depends on its
+   direction relative to the horizontal field, not on its size. This one lies
+   nearly along the field. A draw across it, from the same 1 µT-per-axis
+   distribution, costs degrees — this page shipped one that cost 5.2°. The
+   prediction above is first order in the offset's *components* for exactly
+   that reason; using its magnitude instead gives an upper bound that is close
+   when the offset happens to lie across the field and badly wrong when it does
+   not.
 
    The consequence for ``modules/gnc`` is the whole point: raw magnetic
    heading is not a heading reference. The bias is constant, observable, and
@@ -644,12 +658,12 @@ for no reason at all.
    this figure's two residual traces are now measuring *different physical
    things*, which the calm version could not show because they coincided.
 
-   The magnetometer's own residual is small here (+0.24°) for a reason worth
+   The magnetometer's own residual is small here (−0.21°) for a reason worth
    naming: with ``--seed 11`` the hard iron drawn for this run is
-   +0.78 / −0.78 / −2.08 µT, which lies nearly along the local field, and an
+   +0.78 / −0.79 / −2.07 µT, which lies nearly along the local field, and an
    offset parallel to the field costs almost no heading. The annotation's
    prediction is first order in the offset's *components* rather than its
-   magnitude, which is what makes it land on 0.24° here and on 5.2° for the
+   magnitude, which is what makes it land on −0.21° here and on 5.2° for the
    larger, cross-field draw this page shipped earlier.
 
 .. figure:: _static/f16_trim_ecos/case11_clock_divergence.png

@@ -307,7 +307,22 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   *bridge* offset at that, which is the part's own and not the vehicle's — so soft iron is modelled
   but nothing estimates it.
 
-  **Done — 2026-09-27.** `WorldMagneticModel` (`Hemerion/mag/world_magnetic_model.h`) evaluates
+  **Examples switched over — 2026-09-28.** All three hosts drive the magnetometer with WMM2025 at
+  `--mag-date` (default 2025.0, the epoch: reproducible, no secular extrapolation). The dipole and
+  its test are deleted. Four committed figures moved, and the swap surfaced two captions that had
+  *already* drifted from the figures above them — the F-16 heading caption quoted a hard iron and a
+  5.33 degree residual that its own figure had not shown since it was last regenerated, and the
+  rocket magnitude caption said 28-29 degrees where its alt text said 60 to 66.
+
+  It also removed a second implementation. `plot_results.py` carried a Python port of the dipole for
+  one number, the declination that turns a tilt-corrected magnetic heading into a true one. Once the
+  host drove a different model that port became silently wrong and the figure showed 11.4 degrees of
+  heading error that was two implementations disagreeing. The host now writes the declination,
+  inclination and intensity it evaluated into the `.config` sidecar and the analysis reads them, so
+  there is one field model, in one language. Porting the WMM to Python instead would have meant 90
+  coefficients in a second place, which is what vendoring the `.COF` exists to prevent.
+
+    **Done — 2026-09-27.** `WorldMagneticModel` (`Hemerion/mag/world_magnetic_model.h`) evaluates
   WMM2025 to degree and order 12 on the WGS-84 ellipsoid. No allocation, no exceptions,
   compile-time loop bounds; it compiles in the cross build, because a filter carrying a
   declination correction needs it on the flight computer.
@@ -364,14 +379,10 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   *meant* to break: the +0.69° Kitty Hawk declination the docs quote as wrong, pinned so that
   swapping in real coefficients fails loudly rather than leaving three doc passages stale.
 
-* **What is left, as of 2026-09-27.** Everything this section originally called for is built
-  except the magnetic field model. In order of what it would change for a filter:
+* **What is left, as of 2026-09-28.** Everything this section originally called for is built and
+  in use by the examples. What remains was deferred rather than called for:
 
-  1. **Switch the examples to the WMM.** The model is built and validated (above); the examples
-     still drive their magnetometer with the dipole. The swap itself is small; what makes it its
-     own piece of work is that it moves every magnetometer figure on both co-simulation pages and
-     the captions that quote them.
-  2. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
+  1. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
      rather than deferred, and neither matters until the filter carries states that care.
 
 ---

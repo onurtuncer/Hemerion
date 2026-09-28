@@ -113,6 +113,27 @@ double WmmField::inclination_deg() const { return std::atan2(down_nt, horizontal
 
 std::array<double, 3> WmmField::to_microtesla() const { return { north_nt * 1e-3, east_nt * 1e-3, down_nt * 1e-3 }; }
 
+std::array<double, 3> WmmFieldBody::to_microtesla() const { return { x_nt * 1e-3, y_nt * 1e-3, z_nt * 1e-3 }; }
+
+WmmFieldBody to_body(const WmmField& field, double yaw_rad, double pitch_rad, double roll_rad)
+{
+  const double cy = std::cos(yaw_rad);
+  const double sy = std::sin(yaw_rad);
+  const double cp = std::cos(pitch_rad);
+  const double sp = std::sin(pitch_rad);
+  const double cr = std::cos(roll_rad);
+  const double sr = std::sin(roll_rad);
+
+  // C_bn, rows = body axes expressed in geodetic components.
+  WmmFieldBody body;
+  body.x_nt = (cp * cy * field.north_nt) + (cp * sy * field.east_nt) + (-sp * field.down_nt);
+  body.y_nt = (((sr * sp * cy) - (cr * sy)) * field.north_nt) + (((sr * sp * sy) + (cr * cy)) * field.east_nt) +
+              (sr * cp * field.down_nt);
+  body.z_nt = (((cr * sp * cy) + (sr * sy)) * field.north_nt) + (((cr * sp * sy) - (sr * cy)) * field.east_nt) +
+              (cr * cp * field.down_nt);
+  return body;
+}
+
 bool WorldMagneticModel::covers(double decimal_year)
 {
   return std::isfinite(decimal_year) && decimal_year >= kValidFromYear && decimal_year <= kValidUntilYear;

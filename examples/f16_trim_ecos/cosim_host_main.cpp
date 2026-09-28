@@ -119,7 +119,7 @@
 // header the build fails loudly rather than the check silently rotting.
 #include "util/unzipper.hpp"
 
-#include "geomagnetic_field.hpp"
+#include "Hemerion/mag/world_magnetic_model.h"
 
 #include "Hemerion/imu/imu_types.h"
 
@@ -157,9 +157,11 @@ using hemerion::examples::kFeetToMetres;
 using hemerion::examples::kWhiteReceiver;
 using hemerion::examples::parse_csv_doubles;
 
-using hemerion::examples::FieldBody;
-using hemerion::examples::FieldNed;
-using hemerion::examples::GeomagneticDipole;
+using hemerion::sensors::mag::to_body;
+using hemerion::sensors::mag::WmmError;
+using hemerion::sensors::mag::WmmField;
+using hemerion::sensors::mag::WmmFieldBody;
+using hemerion::sensors::mag::WorldMagneticModel;
 
 // Compile-time defaults injected by CMakeLists.txt; both can be overridden on
 // the command line, so an empty default (FMU not found at configure time) is
@@ -292,6 +294,9 @@ struct Options
   // before this existed; see --sensor-clock.
   double sensor_clock_skew_ppm = 0.0;
   double sensor_clock_jitter_s = 0.0;
+  // Date the World Magnetic Model is evaluated at. The epoch by default: its
+  // coefficients are exact there and a fixed date keeps a run reproducible.
+  double mag_date_year = hemerion::sensors::mag::WorldMagneticModel::kValidFromYear;
   int seed = 0;
   // Overrides the derived GPS seed, because this page's GPS figures were
   // published against particular values of it.
@@ -378,6 +383,10 @@ void print_usage()
                "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
                "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
                "              on the wire, so both ends must be configured alike\n"
+               "  --mag-date  date for the World Magnetic Model [decimal year] (default 2025.0, the\n"
+               "              model epoch, where its coefficients are exact and a run stays\n"
+               "              reproducible). Must lie in [2025.0, 2030.0]: the model is predictive\n"
+               "              and is refused outside its window rather than extrapolated\n"
                "  --sensor-clock  <skew_ppm>,<jitter_s>: give each sensor its own oscillator (default 0,0,\n"
                "              one perfect clock shared by every part). skew is a rate error drawn once\n"
                "              per part and accumulates; jitter is per-sample and does not. Each part\n"
@@ -413,7 +422,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 32> kValueOptions = { {
+constexpr std::array<ValueOption, 33> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -436,6 +445,17 @@ constexpr std::array<ValueOption, 32> kValueOptions = { {
         o.gps_correlated_errors = (model == "correlated");
       } },
     { "--seed", [](Options& o, const char* v) { o.seed = std::stoi(v); } },
+    { "--mag-date",
+      [](Options& o, const char* v) {
+        o.mag_date_year = std::stod(v);
+        // Rejected here rather than 200 steps in: the model refuses dates
+        // outside its window, so a bad one is a user error with a message.
+        if (!WorldMagneticModel::covers(o.mag_date_year))
+        {
+          throw std::invalid_argument("--mag-date must lie in the field model\'s validity "
+                                      "window [2025.0, 2030.0]; it is predictive, not extrapolated");
+        }
+      } },
     { "--sensor-clock",
       [](Options& o, const char* v) {
         std::array<double, 2> clock{};
@@ -664,6 +684,22 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
     std::cerr << "warning: cannot write " << config_path.string() << "; figures will be unlabelled\n";
     return;
   }
+  // The field the run is driven with, recorded so the analysis reads what the
+  // model produced instead of carrying a second copy of it. A figure that turns
+  // a magnetic heading into a true one needs this declination; computing it
+  // twice, in two languages, is how the two quietly stop agreeing.
+  double field_declination_deg = 0.0;
+  double field_inclination_deg = 0.0;
+  double field_intensity_ut = 0.0;
+  WmmField initial_field;
+  if (WorldMagneticModel::field_ned(
+          options.lat0_deg, options.lon0_deg, options.alt0_ft * kFeetToMetres, options.mag_date_year, initial_field) ==
+      WmmError::kNone)
+  {
+    field_declination_deg = initial_field.declination_deg();
+    field_inclination_deg = initial_field.inclination_deg();
+    field_intensity_ut = initial_field.intensity_nt() * 1e-3;
+  }
   // Written in full so a figure can be checked against the model that made it.
   const GpsErrorModel& receiver = options.gps_correlated_errors ? kCorrelatedReceiver : kWhiteReceiver;
   out << "check_case=" << options.check_case << "\n"
@@ -672,6 +708,10 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "reacquisition_time_s=" << options.reacquisition_time_s << "\n"
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
+      << "mag_date_year=" << options.mag_date_year << "\n"
+      << "mag_declination_deg=" << field_declination_deg << "\n"
+      << "mag_inclination_deg=" << field_inclination_deg << "\n"
+      << "mag_intensity_ut=" << field_intensity_ut << "\n"
       << "sensor_clock_skew_ppm=" << options.sensor_clock_skew_ppm << "\n"
       << "sensor_clock_jitter_s=" << options.sensor_clock_jitter_s << "\n"
       << "terrain_elevation_m=" << options.terrain_elevation_m << "\n"
@@ -1089,10 +1129,11 @@ int main(int argc, char** argv)
     // Ecos connection modifier sees only its single source variable. So the
     // host computes the field after every step and writes the magnetometer's
     // inputs directly, giving the same one-communication-step transport delay
-    // a connection would. GeomagneticDipole owns the model;
-    // geomagnetic_field.hpp is explicit about it being a centered dipole
-    // rather than the WMM, and about what that costs at this particular launch
-    // site.
+    // a connection would. WorldMagneticModel owns the model: WMM2025 to degree
+    // and order 12, from NOAA's own coefficients, evaluated at --mag-date. The
+    // declination it produces is written into the .config sidecar so the
+    // analysis reads what this evaluated rather than carrying a second copy of
+    // the model -- which is how the two quietly stop agreeing.
     auto* latitude = sim->get_real_property("f16::out.lat_deg");
     auto* longitude = sim->get_real_property("f16::out.lon_deg");
     auto* yaw = sim->get_real_property("f16::out.yaw_rad");
@@ -1147,7 +1188,11 @@ int main(int argc, char** argv)
 
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time
-    truth_log.write_row(sim->iterations(), sim->time());           // the state at t = 0, before any stepping
+    // Carried across steps so a refusal holds the last good field rather than
+    // zeroing the part's input; see the write below.
+    WmmFieldBody last_field_body;
+    bool reported_field_gap = false;
+    truth_log.write_row(sim->iterations(), sim->time());  // the state at t = 0, before any stepping
     while (sim->time() < options.stop_s)
     {
       sim->step();
@@ -1155,13 +1200,25 @@ int main(int argc, char** argv)
       // Where the vehicle is and how it is pointing, turned into the body-frame
       // field the part is immersed in. Written after the step, so it carries the
       // same one-communication-step transport delay every Ecos connection does.
-      const FieldNed field_ned =
-          GeomagneticDipole::field_ned(latitude->get_value(), longitude->get_value(), altitude->get_value());
-      const FieldBody field_body =
-          GeomagneticDipole::to_body(field_ned, yaw->get_value(), pitch->get_value(), roll->get_value());
-      mag_bx->set_value(field_body.x_ut);
-      mag_by->set_value(field_body.y_ut);
-      mag_bz->set_value(field_body.z_ut);
+      WmmField field_ned;
+      if (WorldMagneticModel::field_ned(
+              latitude->get_value(), longitude->get_value(), altitude->get_value(), options.mag_date_year, field_ned) ==
+          WmmError::kNone)
+      {
+        last_field_body = to_body(field_ned, yaw->get_value(), pitch->get_value(), roll->get_value());
+      }
+      else if (!reported_field_gap)
+      {
+        // Only reachable at a geographic pole, which none of these trajectories
+        // visits. Holding the last good field beats writing a zero one into the
+        // part as though it had measured that.
+        std::cerr << "[cosim] warning: the field model refused this position; holding the last value\n";
+        reported_field_gap = true;
+      }
+      const auto field_body_ut = last_field_body.to_microtesla();
+      mag_bx->set_value(field_body_ut[0]);
+      mag_by->set_value(field_body_ut[1]);
+      mag_bz->set_value(field_body_ut[2]);
       // After the specific-force write, so the logged imu:: inputs are the ones
       // the FMU will sample on the next step -- matching what csv_writer
       // recorded as a post-step listener.

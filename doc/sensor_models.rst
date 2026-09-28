@@ -851,8 +851,8 @@ The examples drive the magnetometer FMU with a truth field the host computes,
 because the plants publish no ``out.b_*`` to connect. Two models exist for it
 and they are not interchangeable.
 
-``GeomagneticDipole`` (``examples/common/geomagnetic_field.hpp``) is a centred
-tilted dipole. It reproduces the two coarse facts a field has — roughly
+The examples drove a centred tilted dipole until 2026-09-28. It reproduced
+the two coarse facts a field has — roughly
 doubling from magnetic equator to pole, falling off as :math:`1/r^3` — and it
 gets **declination** badly wrong, because a centred dipole has almost no
 declination structure at all.
@@ -912,11 +912,17 @@ where the geodetic rotation vanishes and nothing else could have masked it.
 
 .. note::
 
-   The examples still fly the dipole. Swapping them over changes every
-   magnetometer figure on both co-simulation pages — heading residuals, field
-   magnitudes, the captions quoting them — so it is a separate step from
-   landing the model, and ``examples.geomagnetic_field`` still pins the
-   dipole's +0.69° declination until it happens.
+   The examples switched over on 2026-09-28 and the dipole is gone from the
+   tree. The swap moved four committed figures and surfaced two captions that
+   had already drifted from the figures above them. It also removed a *second*
+   implementation: ``plot_results.py`` carried a Python port of the dipole for
+   one number — the declination that turns a tilt-corrected magnetic heading
+   into a true one — and once the host drove a different model that port
+   silently became the wrong number, showing 11.4° of heading error that was
+   two implementations disagreeing rather than a sensor chain doing anything.
+   The host now records the declination it evaluated in the run's ``.config``
+   sidecar and the analysis reads it, so there is one field model in one
+   language.
 
 Calibrating the installation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

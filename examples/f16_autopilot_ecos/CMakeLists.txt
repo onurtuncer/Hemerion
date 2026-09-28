@@ -168,7 +168,7 @@ if(HEMERION_F16_AUTOPILOT_FMU)
 endif()
 
 add_executable(f16_autopilot_cosim cosim_host_main.cpp)
-target_link_libraries(f16_autopilot_cosim PRIVATE libecos)
+target_link_libraries(f16_autopilot_cosim PRIVATE libecos hemerion_sensors)
 target_compile_features(f16_autopilot_cosim PRIVATE cxx_std_23)
 # Ecos' src/ for util/unzipper.hpp (the extraction preflight), and examples/common/ for the shared host logic -- the
 # environment models and the geomagnetic field.
