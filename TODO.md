@@ -307,6 +307,30 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   *bridge* offset at that, which is the part's own and not the vehicle's — so soft iron is modelled
   but nothing estimates it.
 
+  **Done — 2026-09-27.** `WorldMagneticModel` (`Hemerion/mag/world_magnetic_model.h`) evaluates
+  WMM2025 to degree and order 12 on the WGS-84 ellipsoid. No allocation, no exceptions,
+  compile-time loop bounds; it compiles in the cross build, because a filter carrying a
+  declination correction needs it on the flight computer.
+
+  The coefficients were fetched, not typed: `vendor/wmm/WMM.COF` is NOAA's own distribution,
+  committed with its SHA-256 and provenance, and `tools/generate_wmm_coefficients.py` is the only
+  thing that reads it — `--check` fails if the generated table has drifted, and catches a
+  single-digit change. The model is predictive and expires: 2025.0 to 2030.0, refused outside
+  rather than extrapolated.
+
+  `sensors.world_magnetic_model` checks it against NOAA's own 100 reference values rather than
+  against itself, and that earned its keep twice. The first implementation agreed with itself
+  perfectly and was out by tens of thousands of nT, having applied the Schmidt normalisation after
+  a recurrence written for unnormalised functions; the second bug, a sign on the northward
+  component, appeared as an exact negation at the equatorial reference points where the geodetic
+  rotation vanishes. Worst component error now 0.0007 nT across the set. At Kitty Hawk it gives
+  -10.985 degrees of declination, which is the "about -11" three doc passages had been quoting as
+  the real value long before this code existed — an independent check on the implementation.
+
+  **Still open:** the examples have not switched to it. They fly the dipole, and swapping them
+  changes every magnetometer figure on both co-simulation pages, so it is its own piece of work.
+  `examples.geomagnetic_field` still pins the dipole's +0.69 degrees until then.
+
   **Done — 2026-09-27.** `MagneticCalibration` (`Hemerion/mag/magnetic_calibration.h`) fits an
   ellipsoid to field samples and recovers both terms: streaming accumulation into a fixed 9x9
   normal matrix, Cholesky, then a Jacobi eigen-decomposition for the symmetric square root. No
@@ -343,9 +367,10 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
 * **What is left, as of 2026-09-27.** Everything this section originally called for is built
   except the magnetic field model. In order of what it would change for a filter:
 
-  1. **WMM or IGRF in place of the centred dipole** (3b's remainder, above). The only item here
-     still capable of a systematic degrees-level heading error. Now a single-file change, since the
-     model was deduplicated; the coefficients are to come from NOAA NCEI rather than from memory.
+  1. **Switch the examples to the WMM.** The model is built and validated (above); the examples
+     still drive their magnetometer with the dipole. The swap itself is small; what makes it its
+     own piece of work is that it moves every magnetometer figure on both co-simulation pages and
+     the captions that quote them.
   2. **Sub-step emission cadence and GPS latency** (4b's remainder, above). Both now unblocked
      rather than deferred, and neither matters until the filter carries states that care.
 

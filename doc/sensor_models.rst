@@ -844,6 +844,80 @@ simulator family relies on.
 FMI inputs: ``b_{x,y,z}_ut`` (body-frame field); parameter
 ``sample_rate_hz`` (default 100 Hz).
 
+The field the magnetometer flies through
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The examples drive the magnetometer FMU with a truth field the host computes,
+because the plants publish no ``out.b_*`` to connect. Two models exist for it
+and they are not interchangeable.
+
+``GeomagneticDipole`` (``examples/common/geomagnetic_field.hpp``) is a centred
+tilted dipole. It reproduces the two coarse facts a field has — roughly
+doubling from magnetic equator to pole, falling off as :math:`1/r^3` — and it
+gets **declination** badly wrong, because a centred dipole has almost no
+declination structure at all.
+
+``WorldMagneticModel`` (``Hemerion/mag/world_magnetic_model.h``) is the real
+thing: WMM2025 to degree and order 12, on the WGS-84 ellipsoid.
+
+.. list-table:: What the difference costs, at the sites these examples use
+   :header-rows: 1
+   :widths: 34 22 22 22
+
+   * - Quantity
+     - Dipole
+     - WMM2025
+     - Gap
+   * - Declination, Kitty Hawk
+     - +0.69°
+     - **−10.99°**
+     - 11.7° apart
+   * - Declination, rocket pad (0°N, 0°E)
+     - ≈ 0°
+     - **−3.80°**
+     -
+   * - Down component, rocket pad
+     - ≈ +3 µT
+     - **−16.0 µT**
+     - opposite sign
+
+The Kitty Hawk gap is the one that matters. It is harmless while the
+simulation is its own truth — the flight computer has no independent reference
+to disagree with, and every byte between the two is exercised identically
+either way — and it stops being harmless the moment anything carries a
+declination table, because then a heading algorithm is being checked against
+the wrong field.
+
+**The coefficients were fetched, not typed.** ``vendor/wmm/WMM.COF`` is NOAA's
+own distribution, committed with its SHA-256, and
+``tools/generate_wmm_coefficients.py`` is the only thing that reads it; its
+``--check`` mode fails if the generated table has drifted. Ninety lines of
+numbers are precisely what no reviewer can check by eye, and one mistyped digit
+gives a field that is entirely plausible and wrong. Same discipline that kept
+the turbulence work from transcribing MIL-F-8785C's exceedance chart.
+
+**The model expires**, and says so. WMM2025 is valid 2025.0–2030.0 and its
+secular variation is a straight line fitted over that window;
+``field_ned()`` refuses dates outside it rather than extrapolating, because a
+vehicle flying on a silently stale field model presents as a heading that is
+merely a bit wrong.
+
+It is validated against NOAA's own 100 reference values rather than against
+itself — worst component error **0.0007 nT** — and that is not ceremony. The
+first implementation agreed with itself perfectly and was out by tens of
+thousands of nanotesla, because it applied the Schmidt normalisation after a
+recurrence written for unnormalised functions. The second bug, a sign on the
+northward component, showed as an *exact* negation at NOAA's equatorial points,
+where the geodetic rotation vanishes and nothing else could have masked it.
+
+.. note::
+
+   The examples still fly the dipole. Swapping them over changes every
+   magnetometer figure on both co-simulation pages — heading residuals, field
+   magnitudes, the captions quoting them — so it is a separate step from
+   landing the model, and ``examples.geomagnetic_field`` still pins the
+   dipole's +0.69° declination until it happens.
+
 Calibrating the installation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

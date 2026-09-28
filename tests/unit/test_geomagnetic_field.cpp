@@ -171,11 +171,16 @@ void test_centre_of_the_earth_is_guarded()
 /// Declination at Kitty Hawk, which the model gets wrong on purpose.
 ///
 /// A centred dipole carries no declination structure, so it produces about
-/// +0.69 degrees here where the real field's is about -11. The documentation
-/// says so in three places. This pins the figure so that swapping in the WMM
-/// or IGRF coefficients fails *this* test loudly, rather than leaving those
-/// three passages quietly stale -- at which point the assertion should be
-/// replaced by one against the real value, not merely widened.
+/// +0.69 degrees here where the real field's is -10.985 -- which is now a
+/// measured number rather than an estimate, since `WorldMagneticModel` landed
+/// on 2026-09-27 and `sensors.world_magnetic_model` checks it against NOAA's
+/// own reference values.
+///
+/// The assertion stays, and stays pinned, because the examples still fly the
+/// dipole: this is what they get, and it should keep being what they get until
+/// somebody deliberately switches them over. When that happens this test moves
+/// to the WMM and the assertion becomes one against -10.985, rather than being
+/// widened to accommodate both.
 void test_dipole_declination_is_the_documented_wrong_one()
 {
   const FieldNed kitty_hawk = GeomagneticDipole::field_ned(36.0, -75.7, 3052.0);
