@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <optional>
+#include <utility>
 
 #include "hemerion/sim/udp_bridge/udp_bridge.h"
 
@@ -40,10 +41,10 @@ ChannelFrame make_frame(std::initializer_list<double> values)
 
 void test_round_trip_step()
 {
-  std::optional<UdpBridge> master = UdpBridge::create_master(kLoopback, 58201, kLoopback, 58202);
-  assert(master.has_value());
-  std::optional<UdpBridge> peer = UdpBridge::create_peer(kLoopback, 58202, kLoopback, 58201);
-  assert(peer.has_value());
+  std::optional<std::pair<UdpBridge, UdpBridge>> pair = UdpBridge::create_pair(kLoopback);
+  assert(pair.has_value());
+  UdpBridge* master = &pair->first;
+  UdpBridge* peer = &pair->second;
 
   assert(master->step_index() == 0);
 
@@ -81,8 +82,9 @@ void test_round_trip_step()
 
 void test_wait_for_inputs_times_out_when_nothing_posted()
 {
-  std::optional<UdpBridge> peer = UdpBridge::create_peer(kLoopback, 58203, kLoopback, 58204);
-  assert(peer.has_value());
+  std::optional<std::pair<UdpBridge, UdpBridge>> pair = UdpBridge::create_pair(kLoopback);
+  assert(pair.has_value());
+  UdpBridge* peer = &pair->second;
 
   ChannelFrame inputs;
   double sim_time_s = 0.0;
@@ -93,10 +95,10 @@ void test_wait_for_inputs_times_out_when_nothing_posted()
 
 void test_shutdown_unblocks_peer()
 {
-  std::optional<UdpBridge> master = UdpBridge::create_master(kLoopback, 58205, kLoopback, 58206);
-  assert(master.has_value());
-  std::optional<UdpBridge> peer = UdpBridge::create_peer(kLoopback, 58206, kLoopback, 58205);
-  assert(peer.has_value());
+  std::optional<std::pair<UdpBridge, UdpBridge>> pair = UdpBridge::create_pair(kLoopback);
+  assert(pair.has_value());
+  UdpBridge* master = &pair->first;
+  UdpBridge* peer = &pair->second;
 
   master->request_shutdown();
 

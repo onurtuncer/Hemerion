@@ -25,6 +25,19 @@ std::optional<UdpBridge> UdpBridge::create_master(const std::string& local_addre
   return UdpBridge(std::move(*socket));
 }
 
+std::optional<std::pair<UdpBridge, UdpBridge>> UdpBridge::create_pair(const std::string& address)
+{
+  std::optional<std::pair<UdpSocket, UdpSocket>> sockets = UdpSocket::create_pair(address);
+  if (!sockets)
+  {
+    return std::nullopt;
+  }
+  // Which end is "master" is a statement about the protocol, not about the
+  // socket -- the two differ only in which side the caller is on -- so the
+  // first of the pair is simply named first here.
+  return std::make_pair(UdpBridge(std::move(sockets->first)), UdpBridge(std::move(sockets->second)));
+}
+
 std::optional<UdpBridge> UdpBridge::create_peer(const std::string& local_address,
                                                 std::uint16_t local_port,
                                                 const std::string& peer_address,
