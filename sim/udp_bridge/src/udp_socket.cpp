@@ -60,6 +60,33 @@ void ensure_winsock_ready() { static WinsockInit init; }
 constexpr int kInvalidHandle = -1;
 #endif
 
+/// The port a socket ended up bound to. Asked of the OS rather than echoed
+/// back from the request, because the request may have been 0 -- "give me any
+/// free port" -- which is the whole reason this exists.
+#if defined(_WIN32)
+bool bound_port(SOCKET native, std::uint16_t& out)
+#else
+bool bound_port(int native, std::uint16_t& out)
+#endif
+{
+  sockaddr_in bound{};
+#if defined(_WIN32)
+  int length = static_cast<int>(sizeof(bound));
+  if (getsockname(native, reinterpret_cast<sockaddr*>(&bound), &length) == SOCKET_ERROR)  // NOLINT(*-reinterpret-cast)
+  {
+    return false;
+  }
+#else
+  socklen_t length = sizeof(bound);
+  if (getsockname(native, reinterpret_cast<sockaddr*>(&bound), &length) != 0)  // NOLINT(*-reinterpret-cast)
+  {
+    return false;
+  }
+#endif
+  out = ntohs(bound.sin_port);
+  return true;
+}
+
 bool parse_ipv4(const std::string& address, std::uint16_t port, sockaddr_in& out)
 {
   out = {};
@@ -117,6 +144,10 @@ std::optional<UdpSocket> UdpSocket::create(const std::string& local_address,
 
   UdpSocket result;
   result.handle_ = from_native(native);
+  if (!bound_port(native, result.local_port_))
+  {
+    return std::nullopt;
+  }
   return result;
 #else
   int native = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -137,8 +168,52 @@ std::optional<UdpSocket> UdpSocket::create(const std::string& local_address,
 
   UdpSocket result;
   result.handle_ = native;
+  if (!bound_port(native, result.local_port_))
+  {
+    return std::nullopt;
+  }
   return result;
 #endif
+}
+
+std::optional<std::pair<UdpSocket, UdpSocket>> UdpSocket::create_pair(const std::string& address)
+{
+  // Bind both to port 0 first and only then connect them to each other. The
+  // alternative -- discovering two free ports with throwaway sockets and
+  // reopening them -- leaves an interval in which the ports are known but
+  // owned by nobody, and a test written to stop being flaky should not open a
+  // new window for it.
+  std::optional<UdpSocket> first = create(address, 0, address, 1);
+  if (!first.has_value())
+  {
+    return std::nullopt;
+  }
+  std::optional<UdpSocket> second = create(address, 0, address, first->local_port());
+  if (!second.has_value())
+  {
+    return std::nullopt;
+  }
+
+  // `first` was connected to a placeholder so that create() could bind it; now
+  // that `second` exists, point it at the real peer. Re-connecting a UDP
+  // socket is defined on both stacks and keeps the binding untouched.
+  sockaddr_in peer{};
+  if (!parse_ipv4(address, second->local_port(), peer))
+  {
+    return std::nullopt;
+  }
+#if defined(_WIN32)
+  if (connect(to_native(first->handle_),
+              reinterpret_cast<sockaddr*>(&peer),  // NOLINT(*-reinterpret-cast)
+              sizeof(peer)) == SOCKET_ERROR)
+#else
+  if (connect(first->handle_, reinterpret_cast<sockaddr*>(&peer), sizeof(peer)) != 0)  // NOLINT(*-reinterpret-cast)
+#endif
+  {
+    return std::nullopt;
+  }
+
+  return std::make_pair(std::move(*first), std::move(*second));
 }
 
 UdpSocket::UdpSocket(UdpSocket&& other) noexcept { *this = std::move(other); }
@@ -149,7 +224,9 @@ UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept
   {
     reset();
     handle_ = other.handle_;
+    local_port_ = other.local_port_;
     other.handle_ = kInvalidHandle;
+    other.local_port_ = 0;
   }
   return *this;
 }

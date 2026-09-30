@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <string>
 
 #include "hemerion/sim/udp_bridge/bridge_protocol.h"
@@ -68,6 +69,18 @@ public:
                                                             std::uint16_t local_port,
                                                             const std::string& peer_address,
                                                             std::uint16_t peer_port);
+
+  /// @brief A master and a peer already bound to each other, on ports the OS
+  /// chooses.
+  ///
+  /// Prefer it to naming a port pair. A port free on one machine may be
+  /// administratively excluded on another -- Windows reserves ranges
+  /// dynamically, and a bind inside one fails with "permission denied" rather
+  /// than "in use". See UdpSocket::create_pair(), which does the binding.
+  ///
+  /// @param address Numeric IPv4 to bind both ends to.
+  /// @return {master, peer}, or std::nullopt if the sockets could not be made.
+  [[nodiscard]] static std::optional<std::pair<UdpBridge, UdpBridge>> create_pair(const std::string& address);
 
   UdpBridge(const UdpBridge&) = delete;
   UdpBridge& operator=(const UdpBridge&) = delete;

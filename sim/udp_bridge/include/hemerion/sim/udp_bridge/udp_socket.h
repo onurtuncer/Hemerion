@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <string>
 
 namespace hemerion::sim::udp_bridge
@@ -39,10 +40,44 @@ public:
   /// "127.0.0.1" or "0.0.0.0") -- no DNS resolution is performed. Fails
   /// (returns std::nullopt) if the local port is already bound by another
   /// socket on this host, or if either address fails to parse.
+  ///
+  /// Pass 0 as `local_port` to let the OS choose a free one, and read it back
+  /// with local_port(). Prefer that to picking a number: a port free on one
+  /// machine may be administratively excluded on another. For two sockets that
+  /// must talk to each other, use create_pair().
   [[nodiscard]] static std::optional<UdpSocket> create(const std::string& local_address,
                                                        std::uint16_t local_port,
                                                        const std::string& peer_address,
                                                        std::uint16_t peer_port);
+
+  /// @brief Binds a mutually connected pair on `address`, on ports the OS
+  /// chooses.
+  ///
+  /// Two sockets that must exchange datagrams cannot both be made by
+  /// create(): that binds *and* connects in one step, connect() filters out
+  /// every sender but the peer, and neither socket's port is known until it is
+  /// bound. This binds both first, reads back what the OS assigned, and
+  /// connects each to the other -- so there is no interval in which a port is
+  /// known but unowned, which is what a probe-then-reuse approach would leave
+  /// open.
+  ///
+  /// Prefer it to a hardcoded port pair. A port that is free on one machine
+  /// may be administratively excluded on another -- Windows reserves ranges
+  /// dynamically for Hyper-V and WSL, and a bind inside one fails with
+  /// "permission denied" rather than "in use", which looks nothing like a port
+  /// clash while debugging.
+  ///
+  /// @param address Numeric IPv4 to bind both sockets to; loopback for a
+  ///        channel that never reaches a network interface.
+  /// @return The pair, or std::nullopt if the address fails to parse or the OS
+  ///         refuses a socket.
+  [[nodiscard]] static std::optional<std::pair<UdpSocket, UdpSocket>> create_pair(const std::string& address);
+
+  /// @brief The port this socket is bound to.
+  ///
+  /// The value the OS assigned when create() was called with port 0, and the
+  /// port that was asked for otherwise. Fixed for the socket's lifetime.
+  [[nodiscard]] std::uint16_t local_port() const { return local_port_; }
 
   UdpSocket(const UdpSocket&) = delete;
   UdpSocket& operator=(const UdpSocket&) = delete;
@@ -66,6 +101,10 @@ public:
 private:
   UdpSocket() = default;
   void reset() noexcept;
+
+  /// The bound port, read back from the OS after bind() so that port 0 --
+  /// "any free port" -- is answerable.
+  std::uint16_t local_port_ = 0;
 
   // SOCKET on Windows is an unsigned integer handle (not a file descriptor),
   // so it is stored as a plain integer here to keep this header free of
