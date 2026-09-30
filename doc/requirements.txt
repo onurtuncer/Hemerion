@@ -7,7 +7,12 @@ sphinx-rtd-theme
 # Doxygen/Sphinx pairing -- every doc/api page went red on the day it was released, on files
 # nobody touched. Same reason cmakelang is pinned in the format workflow: an unpinned major
 # release turns main red on its own schedule. Re-test before moving it.
-breathe==5.0.0
+#
+# Dependabot raised the pin to 5.0.0 anyway on 2026-09-30, leaving this comment
+# in place above the change it describes, and every doxygenfile went "Cannot
+# find file" exactly as written. A comment cannot stop a bot, so breathe is now
+# in .github/dependabot.yml's ignore list; take it out of there when moving this.
+breathe==4.36.0
 sphinxcontrib-bibtex
 
 # Measures cyclomatic complexity for doc/generate_metrixpp_report.py, which
