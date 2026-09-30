@@ -105,6 +105,18 @@ void test_a_pair_gets_two_distinct_ports()
   assert(pair->first.local_port() != pair->second.local_port());
 }
 
+void test_an_unparseable_address_is_refused()
+{
+  // Numeric IPv4 only -- create() performs no DNS resolution, so a hostname is
+  // as invalid as nonsense. Worth asserting for both entry points: create_pair
+  // builds on create(), and a refusal that got swallowed on the way would hand
+  // back a pair that was never bound.
+  assert(!UdpSocket::create("localhost", 0, kLoopback, 1).has_value());
+  assert(!UdpSocket::create(kLoopback, 0, "not-an-address", 1).has_value());
+  assert(!UdpSocket::create_pair("localhost").has_value());
+  assert(!UdpSocket::create_pair("999.1.1.1").has_value());
+}
+
 void test_move_construct_transfers_ownership()
 {
   std::optional<std::pair<UdpSocket, UdpSocket>> pair = UdpSocket::create_pair(kLoopback);
@@ -130,6 +142,7 @@ int main()
   test_create_fails_if_local_port_already_bound();
   test_port_zero_is_resolved_to_a_real_port();
   test_a_pair_gets_two_distinct_ports();
+  test_an_unparseable_address_is_refused();
   test_move_construct_transfers_ownership();
 
   std::puts("test_udp_socket: all checks passed");
