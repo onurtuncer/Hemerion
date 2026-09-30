@@ -77,6 +77,21 @@ UBX emitter
 
 .. doxygenfile:: Hemerion/gps/fmu/ubxEmitter.hpp
 
+Receiver latency
+----------------
+
+A receiver delivers an epoch's solution 50--200 ms after closing it, so the
+position a fix describes is already stale when its first byte arrives. At
+172 m/s that is 9--34 m along the velocity vector: systematic, an order of
+magnitude above the receiver's own noise, and unaveragable.
+
+Modelled as a queue rather than as an offset on a timestamp, because a
+*correct* solution delivered late is a different thing from a receiver
+reporting a stale time --- and it is the version the flight computer sees as a
+late arrival.
+
+.. doxygenfile:: Hemerion/gps/fmu/gpsLatencyLine.hpp
+
 UDP sender
 ----------
 

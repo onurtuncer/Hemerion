@@ -38,6 +38,7 @@
 /// are compiled and packaged into an .fmu archive.
 
 #include "Hemerion/gps/fmu/gpsDynamicsModel.hpp"
+#include "Hemerion/gps/fmu/gpsLatencyLine.hpp"
 #include "Hemerion/gps/fmu/gpsNoiseModel.hpp"
 #include "Hemerion/gps/fmu/ubxEmitter.hpp"
 #include "Hemerion/gps/fmu/udpSender.hpp"
@@ -170,6 +171,13 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Error-model RNG seed; 0 draws a nondeterministic one, any other value makes the run "
                         "reproducible");
+    register_real("latency_s", &latency_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Receiver processing latency [s]: how long after an epoch closes its NAV-PVT is delivered. A "
+                        "real receiver is 50-200 ms; at 172 m/s that is 9-34 m of position error along the velocity "
+                        "vector, systematic and unaveragable. 0 (default) delivers immediately, as this part did "
+                        "before");
     noise_parameter("horizontal_pos_noise_m",
                     &horizontal_pos_noise_m_,
                     "White position error 1-sigma, north and east independently [m]");
@@ -225,6 +233,7 @@ public:
   {
     noise_model_.reset_state();
     seed_ = 0;
+    latency_s_ = 0.0;
     horizontal_pos_noise_m_ = kDefaultNoise.horizontal_pos_noise_m;
     vertical_pos_noise_m_ = kDefaultNoise.vertical_pos_noise_m;
     speed_noise_mps_ = kDefaultNoise.speed_noise_mps;
@@ -253,6 +262,7 @@ public:
     last_verdict_ = GpsDynamicsVerdict::kValid;
 
     sender_.reset();
+    latency_line_.reset();
   }
 
 protected:
@@ -299,13 +309,25 @@ protected:
       last_verdict_ = verdict;
     }
 
-    const UbxEmitter::Frame frame = UbxEmitter::encode_nav_pvt(fix);
-    if (!sender_->send(frame.data(), frame.size()))
+    // Built when the epoch closes, delivered latency_s later. The queue is
+    // what makes the delay visible as a late *arrival* rather than as a stale
+    // timestamp -- see gpsLatencyLine.hpp on why those are different things.
+    const double epoch_time_s = currentTime() + dt;
+    latency_line_.push(epoch_time_s + latency_s_, UbxEmitter::encode_nav_pvt(fix));
+
+    // A loop, not an if: a communication step longer than the latency makes
+    // several frames due at once, and dropping the older ones would model a
+    // receiver that discards solutions rather than one that delays them.
+    UbxEmitter::Frame frame;
+    while (latency_line_.pop_due(epoch_time_s, frame))
     {
-      // A dropped datagram is a dropped sensor byte, not a simulation error
-      // -- warn and keep stepping rather than returning false, which fmu4cpp
-      // maps to "discard this step and terminate".
-      debugLog(fmiWarning, "[hemerion_gps_fmu] UBX-NAV-PVT frame could not be sent");
+      if (!sender_->send(frame.data(), frame.size()))
+      {
+        // A dropped datagram is a dropped sensor byte, not a simulation error
+        // -- warn and keep stepping rather than returning false, which fmu4cpp
+        // maps to "discard this step and terminate".
+        debugLog(fmiWarning, "[hemerion_gps_fmu] UBX-NAV-PVT frame could not be sent");
+      }
     }
     return true;
   }
@@ -350,6 +372,7 @@ private:
     noise_model_ = (seed_ == 0) ? GpsNoiseModel(config) : GpsNoiseModel(config, static_cast<std::uint64_t>(seed_));
   }
 
+  GpsLatencyLine<UbxEmitter::Frame> latency_line_;
   GpsNoiseModel noise_model_;
   GpsDynamicsModel dynamics_{ kDefaultDynamics };
   std::optional<UdpSender> sender_;
@@ -375,6 +398,7 @@ private:
   // Error-model parameters, FMI-typed (double/int) and narrowed once in
   // apply_noise_config().
   int seed_ = 0;
+  double latency_s_ = 0.0;
   double horizontal_pos_noise_m_ = kDefaultNoise.horizontal_pos_noise_m;
   double vertical_pos_noise_m_ = kDefaultNoise.vertical_pos_noise_m;
   double speed_noise_mps_ = kDefaultNoise.speed_noise_mps;
