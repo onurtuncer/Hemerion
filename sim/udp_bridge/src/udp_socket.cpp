@@ -178,11 +178,30 @@ std::optional<UdpSocket> UdpSocket::create(const std::string& local_address,
 
 std::optional<std::pair<UdpSocket, UdpSocket>> UdpSocket::create_pair(const std::string& address)
 {
+#if defined(_WIN32)
+  // inet_pton is in ws2_32 and wants WSAStartup to have run. create() would
+  // guarantee that by being called first; the address is validated before it
+  // now, so this has to.
+  ensure_winsock_ready();
+#endif
+
+  // Validated once, up front. Parsing it again after both create() calls had
+  // succeeded with it would be a branch that cannot be taken.
+  sockaddr_in peer{};
+  if (!parse_ipv4(address, 0, peer))
+  {
+    return std::nullopt;
+  }
+
   // Bind both to port 0 first and only then connect them to each other. The
   // alternative -- discovering two free ports with throwaway sockets and
   // reopening them -- leaves an interval in which the ports are known but
-  // owned by nobody, and a test written to stop being flaky should not open a
-  // new window for it.
+  // owned by nobody, and a fix written to stop a test being flaky should not
+  // open a new window for it.
+  //
+  // The placeholder peer port on the first socket is why this cannot simply be
+  // two create() calls: create() binds and connects together, and the second
+  // socket's port does not exist until it is bound.
   std::optional<UdpSocket> first = create(address, 0, address, 1);
   if (!first.has_value())
   {
@@ -194,14 +213,9 @@ std::optional<std::pair<UdpSocket, UdpSocket>> UdpSocket::create_pair(const std:
     return std::nullopt;
   }
 
-  // `first` was connected to a placeholder so that create() could bind it; now
-  // that `second` exists, point it at the real peer. Re-connecting a UDP
-  // socket is defined on both stacks and keeps the binding untouched.
-  sockaddr_in peer{};
-  if (!parse_ipv4(address, second->local_port(), peer))
-  {
-    return std::nullopt;
-  }
+  // Now that `second` exists, point `first` at it. Re-connecting a UDP socket
+  // is defined on both stacks and leaves the binding untouched.
+  peer.sin_port = htons(second->local_port());
 #if defined(_WIN32)
   if (connect(to_native(first->handle_),
               reinterpret_cast<sockaddr*>(&peer),  // NOLINT(*-reinterpret-cast)
