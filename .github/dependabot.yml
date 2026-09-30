@@ -28,3 +28,13 @@ updates:
     labels:
       - "dependencies"
       - "docs"
+    ignore:
+      # breathe 5.0.0 cannot resolve a single doxygenfile directive under the
+      # Doxygen/Sphinx pairing this repository uses -- every doc/api page goes
+      # "Cannot find file" and build-docs fails. doc/requirements.txt said so
+      # in a comment and was bumped regardless on 2026-09-30, so the guard
+      # belongs here where the bot reads it. Drop this entry when a release
+      # fixes it, and re-test build-docs on the PR before merging.
+      - dependency-name: "breathe"
+        update-types:
+          - "version-update:semver-major"
