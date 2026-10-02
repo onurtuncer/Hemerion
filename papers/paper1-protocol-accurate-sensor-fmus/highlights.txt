@@ -1,0 +1,5 @@
+Sensor FMUs emit wire-exact bus traffic instead of idealized physical values
+Unmodified flight drivers run in FMI co-simulation exactly as on hardware
+Register-accurate SPI and I2C models capture FIFO overflow and SET/RESET state
+Error models invert on-target conversion, so simulator and firmware self-check
+Four sensors verified end-to-end against a verified 6-DoF rocket plant

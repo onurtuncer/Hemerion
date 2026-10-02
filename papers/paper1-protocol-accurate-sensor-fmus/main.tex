@@ -2,89 +2,99 @@
 %% Protocol-Accurate Sensor FMUs for Sensor-in-the-Loop Co-Simulation
 %% of Embedded GNC Firmware
 %%
-%% Draft for IEEE two-column conference format (IEEEtran).
-%% Target venue: SIMULTECH / SIMPAC (SCITEPRESS) -- see README for the note on
-%% swapping to the SCITEPRESS class at submission time.
+%% Formatted for Simulation Modelling Practice and Theory (Elsevier) with the
+%% elsarticle class: single-column preprint, numbered references
+%% (elsarticle-num). The IEEEtran conference version is in git history.
 %%
 %% Build:  pdflatex main -> bibtex main -> pdflatex main -> pdflatex main
 %% ---------------------------------------------------------------------------
-\documentclass[conference]{IEEEtran}
+\documentclass[preprint,12pt,a4paper]{elsarticle}
 
-\usepackage{cite}
+\usepackage{lineno}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{array}
+\usepackage{rotating}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
 \usepackage{url}
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
 
 \graphicspath{{figures/}}
 
+% Long code identifiers otherwise run into the margin of the single column.
+\setlength{\emergencystretch}{2em}
+
 % A compact monospace helper for register names / identifiers.
 \newcommand{\code}[1]{\texttt{\small #1}}
 
+\journal{Simulation Modelling Practice and Theory}
+
 \begin{document}
 
-\title{Protocol-Accurate Sensor FMUs for\\
-       Sensor-in-the-Loop Co-Simulation of Embedded GNC Firmware}
+\begin{frontmatter}
 
-% For a double-blind SCITEPRESS submission, replace the author block with
-% \author{\IEEEauthorblockN{Anonymous Author(s)}}.
-\author{\IEEEauthorblockN{Onur Tuncer}
-\IEEEauthorblockA{Faculty of Aeronautics and Astronautics\\
-Istanbul Technical University\\
-Istanbul, Turkey\\
-Email: onur.tuncer@itu.edu.tr}}
+\title{Protocol-accurate sensor FMUs for sensor-in-the-loop co-simulation of
+       embedded GNC firmware}
 
-\maketitle
+\author[itu]{Onur Tuncer\corref{cor1}}
+\ead{onur.tuncer@itu.edu.tr}
+\cortext[cor1]{Corresponding author.}
+\affiliation[itu]{organization={Faculty of Aeronautics and Astronautics,
+                                Istanbul Technical University},
+                  addressline={Maslak},
+                  city={Istanbul},
+                  postcode={34469},
+                  country={T\"urkiye}}
 
+% Elsevier caps the abstract at 250 words.
 \begin{abstract}
 Functional Mock-up Interface (FMI) co-simulation is widely used to test
-guidance, navigation and control (GNC) software against a plant model, but the
-sensor boundary is almost always crossed as idealized floating-point physical
-quantities. This bypasses precisely the code that fails most often on real
-hardware: the byte-level driver and protocol-parsing stacks that turn a
-receiver's UART stream or an inertial part's SPI registers into engineering
-units. We present \emph{protocol-accurate sensor FMUs}: co-simulation slaves
-that take noiseless truth in over FMI, apply a grade-specific stochastic error
-model, quantize to register counts, and emit \emph{wire-exact} protocol frames
-on the bus the physical part actually uses---so the \emph{unmodified} target
-firmware parses exactly the bytes it will see in flight, checksums included.
-A sensor's FMI output set is deliberately empty; the byte stream is its output.
-We show that this pattern captures behavior a value-level FMU cannot: a receiver
-losing its navigation fix to export-control (COCOM) dynamics limits; a MEMS
-IMU modeled as a \emph{polled} SPI peripheral with a register map, a sample
-FIFO, and a sticky overflow bit; and a magnetometer whose first useful reading
-does not exist until a blocking, multi-transaction SET/RESET handshake has
-measured and removed a bridge offset the size of Earth's whole field. Because
-each error model is the exact inverse of the on-target conversion routine, a
-round-trip test pins the simulator and the flight code to each other. We
-instantiate five sensors in a single embedded framework---three of them as
-register-accurate parts (a MEMS IMU on SPI, a Bosch BMP390 and a MEMSIC
-MMC5983MA on I$^2$C)---and validate four end-to-end against a verified 6-DoF
-two-stage-rocket plant. The receiver in that run is COCOM-limited and stops
-navigating $31$~s after lift-off, so the GPS statistic is the whole of what a
-real receiver would have yielded: over the $312$ fixes of $2001$ epochs it
-carries, the decoded-fix error RMS matches the injected noise to the centimetre
-($2.12$~m horizontal against $1.5\sqrt{2}$~m expected). The inertial stream is
-unaffected by that outage---$20{,}000$ of $20{,}010$ samples survive the full
-noise-model$\rightarrow$encoder$\rightarrow$SPI-transport$\rightarrow$
-on-target-driver chain with zero checksum errors across $48{,}021$ transfers;
-$2{,}000$ barometric conversions cross $42{,}009$ I$^2$C transactions and are
-recovered by running the real Bosch compensation polynomial forward against an
-FMU that inverted it; and the magnetometer driver measures the simulated part's
-$+16.2/{-}10.3/{+}8.5$~\textmu T bridge offset at bring-up and removes it,
-without which the same samples put heading $28^\circ$ out. The same firmware
-object code runs unchanged across FMI co-simulation, instruction-accurate
-(Renode) simulation, and physical STM32 hardware.
+guidance, navigation and control (GNC) software, but the sensor boundary is
+usually crossed as idealized floating-point quantities. This bypasses the
+code that fails most often on real hardware: the byte-level drivers and
+protocol parsers that turn a receiver's UART stream or an inertial part's SPI
+registers into engineering units. We present protocol-accurate sensor FMUs,
+which take noiseless truth over FMI, apply a grade-specific error model,
+quantize to register counts, and emit wire-exact traffic on the bus the
+physical part uses, so unmodified firmware parses the bytes it will see in
+flight. Because each error model inverts the on-target conversion routine, a
+round-trip test pins simulator and flight code together. We instantiate five sensors in one embedded
+framework, three as register-accurate parts (a MEMS IMU on SPI, a Bosch BMP390
+and a MEMSIC MMC5983MA on I$^2$C), and exercise four end-to-end against a
+verified 6-DoF two-stage-rocket plant. The pattern exposes behaviour a
+value-level FMU cannot: a receiver losing its fix to export-control limits
+31~s after lift-off, a FIFO with sticky overflow semantics, and a magnetometer
+whose bridge offset, comparable to Earth's field, is removed only by a
+multi-transaction SET/RESET handshake, without which heading is a median
+$34^\circ$ out. Decoded error matches injected error within sampling
+uncertainty on every channel, and 20,000 inertial samples cross the SPI bus
+with zero checksum errors. The same decoder code runs unchanged in FMI
+co-simulation and Renode emulation, and cross-compiles unmodified for the
+STM32 flight computer.
 \end{abstract}
 
-\begin{IEEEkeywords}
-FMI, co-simulation, software-in-the-loop, sensor emulation, embedded firmware,
-GNC, hardware-in-the-loop, register-level device models, verification and
-validation.
-\end{IEEEkeywords}
+% Elsevier requires 3-5 highlights of at most 85 characters each, including
+% spaces; they are also uploaded as a separate file (highlights.txt).
+\begin{highlights}
+\item Sensor FMUs emit wire-exact bus traffic instead of idealized physical values
+\item Unmodified flight drivers run in FMI co-simulation exactly as on hardware
+\item Register-accurate SPI and I2C models capture FIFO overflow and SET/RESET state
+\item Error models invert on-target conversion, so simulator and firmware self-check
+\item Four sensors verified end-to-end against a verified 6-DoF rocket plant
+\end{highlights}
+
+\begin{keyword}
+FMI \sep co-simulation \sep software-in-the-loop \sep sensor emulation \sep
+embedded firmware \sep register-level device models \sep GNC
+\end{keyword}
+
+\end{frontmatter}
+
+\linenumbers
 
 % ===========================================================================
 \section{Introduction}
@@ -120,17 +130,16 @@ This paper argues that the shortcut is unnecessary. We introduce
 sensor FMU:
 \begin{enumerate}
   \item takes noiseless \emph{truth} in over ordinary FMI input variables,
-        driven by a physics plant through the co-simulation master's
-        connections;
+        driven by a physics plant through the importer's connections;
   \item applies a sensor-grade-specific stochastic error model and quantizes
         the result to the physical part's register counts; and
   \item emits \emph{wire-exact} protocol frames---sync bytes, scaled integers,
         checksums---on a channel that stands in for the part's real bus, with
-        \emph{no FMI output variables at all}.
+        \emph{no sensor data on FMI output variables}.
 \end{enumerate}
 The flight software decodes those frames with the \emph{unmodified} on-target
 driver and conversion code. The FMI boundary carries physics; the sensor
-boundary carries bytes, exactly as on the vehicle.
+boundary carries bytes, as on the vehicle.
 
 We make four contributions:
 \begin{itemize}
@@ -150,11 +159,12 @@ We make four contributions:
         bring-up \emph{blocks on the plant}---its bridge offset can only be
         measured by taking two real measurements in opposite magnetic
         polarities.
-  \item \textbf{End-to-end validation of four sensors}
+  \item \textbf{End-to-end verification of four sensors}
         (Section~\ref{sec:results}) against a 6-DoF two-stage-rocket plant whose
         trajectory is itself checked against published reference data, showing
-        the decoded error equals the injected error to quantization, that the
-        byte chain is lossless across three transports, and that the
+        the decoded error equals the injected error within sampling
+        uncertainty, that the byte chain crosses three transports without a
+        checksum or transfer error, and that the
         register-level conditioning sequence the flight code runs recovers the
         part parameter it is supposed to recover.
 \end{itemize}
@@ -193,7 +203,7 @@ register- and receiver-level behaviour of the part itself---fix revocation under
 COCOM/platform limits, FIFO overflow under a slow poll. \emph{(iii)~Interface}:
 it exchanges frames as FMI binary \emph{variables} at communication points; we
 keep the byte stream off the FMI variable set entirely and emit it on the part's
-real bus, so transport granularity is the bus's, not the master's step.
+real bus, so transport granularity is the bus's, not the importer's step.
 
 \textbf{Register-level sensor and virtual-platform emulation.}
 Instruction-accurate emulators such as Renode~\cite{renode} run unmodified
@@ -220,17 +230,25 @@ stubbed out in SIL precisely because value-level FMUs make it easy to.
 % ===========================================================================
 
 \subsection{Architecture}
-Each sensor is packaged as an FMI 2.0 co-simulation slave with the structure of
+Each sensor is packaged as an FMI 2.0 co-simulation FMU with the structure of
 Fig.~\ref{fig:pattern}. Truth enters as real-valued FMI \emph{inputs}, wired by
-the co-simulation master from a 6-DoF plant. Inside \code{do\_step()} the FMU
+the importer (the co-simulation master, in FMI 2.0 terms) from a 6-DoF plant. Inside \code{do\_step()} the FMU
 applies its error model, quantizes to register counts, frames the counts into
 the sensor's wire protocol, and pushes the resulting bytes onto a transport that
-stands in for the physical bus. The FMU declares \textbf{no FMI outputs}: from
-the master's point of view it is a pure sink, and its observable behavior is the
+stands in for the physical bus. The FMU carries \textbf{no sensor data on FMI
+outputs}: to the importer it is a sink, and its observable behavior is the
 byte stream, exactly as a real receiver's observable behavior is its UART
-traffic.
+traffic. The only FMI outputs any of the sensor FMUs declares are two
+diagnostic counters on the BMP390 model---conversions latched, and conversions
+produced with the part outside its rated pressure or temperature
+envelope---which report something the silicon cannot and change nothing on the
+bus.
 
-\begin{figure}[t]
+% TODO (review): replace this text box with a drawn architecture figure:
+% plant -> importer -> sensor FMUs -> UDP / SPI-shm / I2C-shm -> flight
+% computer, with the Renode and STM32 tiers alongside showing where the
+% decoders are shared.
+\begin{figure}[tbp]
 \centering
 \footnotesize
 \setlength{\fboxsep}{4pt}
@@ -252,8 +270,7 @@ unmodified on-target code.}
 This placement is deliberate. Model code lives under each sensor's \code{fmu/}
 subtree and is compiled only for the host; it may use \code{<random>} and
 dynamic allocation freely. The \emph{decoder}---parser and
-\code{convert\_raw\_to\_si()}---lives one directory up, is MISRA-friendly
-freestanding code, and is the identical translation unit the STM32 firmware
+\code{convert\_raw\_to\_si()}---lives one directory up, is freestanding code, and is the identical translation unit the STM32 firmware
 cross-compiles.
 
 \subsection{Two fidelity tiers from one pattern}
@@ -272,6 +289,7 @@ paper come from the second tier, and Section~\ref{sec:transport} is about what
 it buys.
 
 \subsection{The shared error model}
+\label{sec:errormodel}
 With the exception of the GPS receiver (which perturbs at the navigation-fix
 level, since a receiver outputs a solution, not counts), every model applies the
 same two-term Gaussian error per measurement channel and then quantizes:
@@ -290,11 +308,28 @@ unit, and $\operatorname{sat}(\cdot)$ clips at the register's full-scale range
 as silicon does rather than wrapping. Setting any $\sigma$ to zero disables that
 term cleanly. Every constructor takes an RNG seed (defaulting to
 \code{std::random\_device}); seed plus configuration fully determine the output
-sequence, including the turn-on biases, giving bit-reproducible runs.
-Table~\ref{tab:params} lists the configured error parameters for the five
-models, chosen to represent the reference parts of Table~\ref{tab:sensors}.
+sequence, including the turn-on biases. Each FMU exposes that seed and every
+$\sigma$ as fixed FMI parameters, and the case study derives a distinct stream
+per part from one run seed, so that the parts are reproducible without being
+correlated with each other. Table~\ref{tab:params} lists the configured error
+parameters for the five models, chosen to represent the reference parts of
+Table~\ref{tab:sensors}.
 
-\begin{table}[t]
+Several further terms are implemented and are off by default. On the IMU the
+bias can wander as a random walk whose increment scales with
+$\sqrt{\Delta t}$, and a per-axis scale-factor error and a small-angle
+misalignment of the triad are drawn once per run; the magnetometer adds a
+symmetric soft-iron matrix; the receiver adds a first-order Gauss--Markov error
+to each position and velocity channel, with a reported accuracy that can be
+made optimistic, and a processing latency between closing an epoch and
+delivering its solution; and each stamped part can be given its own clock, with
+a rate error drawn once per run and a per-sample jitter. A disabled term draws
+nothing from the random stream, so enabling one does not move an existing
+seeded run. The case study leaves all of them at zero: its claims concern the
+transport, and these terms matter to a navigation filter rather than to a
+driver.
+
+\begin{table}[tbp]
 \centering
 \caption{Configured error-model parameters (per measurement channel). White and
 turn-on-bias columns are $1\sigma$; sensitivity $S$ is shared with the on-target
@@ -346,8 +381,10 @@ compensation polynomial of the datasheet's section~8.4~\cite{bosch_bmp390},
 evaluated with
 coefficients burned into each individual part's NVM at the factory. A model that
 emitted counts proportional to pressure would produce a stream the real driver
-would decode into the wrong number. The FMU therefore maps truth altitude
-through the ICAO standard atmosphere and then \emph{numerically inverts the real
+would decode into the wrong number. The FMU therefore takes the static
+pressure and temperature of the air the part is in---the plant's own, where the
+plant publishes them, and the ICAO standard atmosphere at truth altitude
+otherwise---and \emph{numerically inverts the real
 compensation polynomial}---a bisection on the monotone forward map---to find the
 raw words a physical part would have converted, and serves the calibration
 coefficients as the 21 NVM bytes the driver reads at bring-up. Agreement in
@@ -424,25 +461,31 @@ interleaved multi-sensor stream can never desynchronize one parser into
 another's frames. Unknown message ids are checksummed and skipped, not buffered,
 so a stream carrying future message types cannot desync today's parser.
 
-\subsection{Orchestration: mismatches belong to the master}
+\subsection{Orchestration: adaptation belongs to the importer}
+\label{sec:orchestration}
 Unit and frame mismatches are resolved in the co-simulation orchestration layer,
-not inside the models. In the case study the plant reports geodetic position in
-\emph{radians} while the GPS FMU takes \emph{degrees}; the two conversions ride
-on the master's connections as modifiers. Velocity wires one-to-one into the
-receiver's NED inputs, from which it derives speed-over-ground and course
-itself. Two quantities have no direct plant output and are functions of several.
-Accelerometer \emph{specific force} is one ($\mathbf{f} =
-(F_{\text{thrust}}\hat{x} + \mathbf{F}_{\text{aero}})/m$); the body-frame
-\emph{magnetic field} is the other, since it depends both on where the vehicle
-is and on how it is pointing---a centred tilted dipole evaluated at
-lat/lon/altitude and rotated into body axes by the plant's yaw/pitch/roll.
-Because a connection modifier sees only a single source variable, the host
-computes both after each step and writes the corresponding FMU inputs through
-master \emph{properties}, incurring the same one-step transport delay a
-connection would. Scalar truth inputs that do map one-to-one---ambient
-temperature into the barometer, die temperature into the magnetometer---ride on
-ordinary connections. Keeping these adaptations in the master leaves every model
-free of scenario-specific glue and reusable across vehicles.
+not inside the models, and the fewer there are the better: a port that carries
+its unit in its name can be connected without a conversion to get wrong. In the
+case study the plant publishes geodetic position in degrees, NED velocity, body
+rates, body-frame specific force (aerodynamic plus thrust force over mass at
+the centre of gravity, gravitation excluded) and its own static pressure, and
+each of these connects one-to-one to the sensor input of the same quantity. The
+receiver derives speed-over-ground and course from the NED velocity itself. One
+unit conversion remains and rides on the connection as a modifier: air
+temperature, published in kelvin, into the barometer's and the magnetometer's
+Celsius inputs.
+
+One quantity has no plant output and is a function of several. The body-frame
+\emph{magnetic field} depends both on where the vehicle is and on how it is
+pointing: the host evaluates the World Magnetic Model
+(WMM2025, to degree and order 12) at the plant's latitude, longitude and
+altitude for a fixed date, and rotates the result into body axes with the
+plant's yaw, pitch and roll. Because a connection modifier sees only a single
+source variable, the host computes this after each step and writes the
+magnetometer's inputs through importer \emph{properties}, incurring the same
+one-step transport delay a connection would. Keeping these adaptations in the
+importer leaves every model free of scenario-specific glue and reusable across
+vehicles.
 
 % ===========================================================================
 \section{Talker and Polled Transports}
@@ -459,7 +502,7 @@ without repackaging the archive. A \emph{polled} part sends nothing: it holds
 state until the flight computer comes to get it, over shared-memory SPI or
 I$^2$C buses that carry one framed transaction per handshake.
 
-\begin{table*}[t]
+\begin{sidewaystable}
 \centering
 \caption{The five instantiated protocol-accurate sensor models. The upper block
 is the generic tier of Section~\ref{sec:tiers}, all of it \emph{talkers} on UDP;
@@ -469,6 +512,7 @@ counterparts, and are what the sync bytes belong to; \emph{shm} is a
 shared-memory bus segment carrying one framed transaction per handshake.}
 \label{tab:sensors}
 \footnotesize
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}lllllll@{}}
 \toprule
 Sensor & Reference part & Truth inputs (FMI) & Boundary contents & Sync & Bus & Rate\\
@@ -479,13 +523,13 @@ Baro (gen.) & MS5611-class      & altitude MSL                 & Hemerion baro f
 Mag.\ (gen.)& RM3100-class      & body field [\textmu T]       & Hemerion mag frame        & \code{D1 1D} & UDP 5766 & 100\,Hz\\
 \midrule
 IMU         & ADIS16470-class   & specific force, body rates   & registers $+$ 16\,KiB FIFO      & --- & SPI (shm)     & 100\,Hz\\
-Barometer   & Bosch BMP390      & altitude MSL, ambient $T$    & registers, 21-B NVM, 24-bit words & --- & I$^2$C (shm) & prog.\ ODR\\
-Magnetometer& MEMSIC MMC5983MA  & body field [\textmu T], die $T$ & registers, 18-bit words, SET/RESET & --- & I$^2$C (shm) & prog.\ rate\\
+Barometer   & Bosch BMP390      & static pressure, ambient $T$ & \begin{tabular}[t]{@{}l@{}}registers, 21-B NVM,\\ 24-bit words\end{tabular} & --- & I$^2$C (shm) & prog.\ ODR\\
+Magnetometer& MEMSIC MMC5983MA  & body field [\textmu T], die $T$ & \begin{tabular}[t]{@{}l@{}}registers, 18-bit words,\\ SET/RESET\end{tabular} & --- & I$^2$C (shm) & prog.\ rate\\
 \bottomrule
 \end{tabular}
-\end{table*}
+\end{sidewaystable}
 
-The split is the point: \emph{the receiver talks, the other three are polled}.
+The split matters: \emph{the receiver talks, the other three are polled}.
 A GNSS module pushes navigation solutions down a UART whenever it has them; an
 inertial part sits holding samples until the flight computer asserts
 chip-select, and a barometer or magnetometer converts nothing at all until a
@@ -521,7 +565,7 @@ differs between host co-simulation, Renode and the STM32 is the bus
 implementation beneath the driver: a chip-select-framed transfer and a data-ready
 read.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
 \caption{The IMU peripheral register map.}
 \label{tab:regmap}
@@ -540,7 +584,7 @@ Addr & Register & Behaviour\\
 \end{tabular}
 \end{table}
 
-\subsection{Two I\texorpdfstring{$^2$}{2}C parts that disagree with each other}
+\subsection{Two I\texorpdfstring{$^2$}{2}C parts with differing bus conventions}
 \label{sec:i2c}
 The barometer and the magnetometer are also polled, but over I$^2$C, and
 carrying them at the part-accurate tier surfaces something the SPI model alone
@@ -561,7 +605,7 @@ exactly as on the part. (This is why the on-target driver shadows
 take-temperature, SET, RESET, OTP-read) are self-clearing at the write, while
 the interrupt-enable and automatic-set/reset bits persist; its status flags are
 set when a measurement lands and cleared by writing them back as ones. None of
-this is arbitrary detail---it is the entire content of ``the driver is correct.''
+this is incidental: it is the content of the statement that the driver is correct.
 
 The magnetometer model additionally carries the one piece of state a register
 file cannot express: the magnetization sign left behind by the last coil pulse
@@ -575,7 +619,7 @@ standing field and store it as an offset---so the driver refuses the call rather
 than performing it. Running both is not redundancy, it is a bug, and the
 simulator is where that is cheap to discover.
 
-One transport limitation is worth stating: the shared-memory I$^2$C bus carries
+One transport limitation applies: the shared-memory I$^2$C bus carries
 one peripheral per bus, so the BMP390 and the MMC5983MA sit on two separate
 simulated buses here, where a real board would put both on I2C1 at \code{0x76}
 and \code{0x30}. Multi-drop addressing is the one thing about driving two
@@ -585,19 +629,144 @@ I$^2$C parts that this work does not exercise.
 \section{Case Study: A Two-Stage Rocket to Orbit}
 \label{sec:casestudy}
 % ===========================================================================
-We validate the pattern with an end-to-end scenario coupling six independently
-developed pieces under the Ecos co-simulation master~\cite{ecos} (which imports
+We exercise the pattern with an end-to-end scenario coupling six independently
+developed pieces under the Ecos importer~\cite{ecos} (which imports
 FMUs through fmi4c~\cite{fmi4c}): a 6-DoF plant, the GPS, IMU, BMP390 and
 MMC5983MA FMUs, and a host stand-in for the STM32H743 flight computer's
 sensor-ingest paths, which drives all four buses with the unmodified on-target
-drivers. The master runs a fixed 0.1\,s communication step (a 10\,Hz GNSS
+drivers. The importer runs a fixed 0.1\,s communication step (a 10\,Hz GNSS
 navigation rate; the IMU latches at 100\,Hz within each step) over Scenario 17's
 200\,s window. Neither I$^2$C part has a rate parameter at all: each converts at
 whatever the flight computer programs into its control registers, and neither
 converts anything while it is still in the power-on state its own datasheet
 specifies.
 
-\subsection{A verified plant}
+\subsection{Execution model and synchronization}
+\label{sec:sync}
+% Drafted from examples/rocket_gps_ecos/{cosim_host_main,flight_computer_main}.cpp,
+% the sensor fmu_main.cpp files, sim/{spi,i2c}_shm and Ecos'
+% fixed_step_algorithm.cpp / simulation.cpp.
+The scenario runs as two operating-system processes, and only one of them is
+under the importer's control. The importer process hosts the five FMUs and
+advances them with Ecos's fixed-step algorithm at $h=0.1$\,s. The
+flight-computer stand-in is a separate process: it is not an FMU, it is never
+stepped, and it has no access to simulated time. It reaches the sensor FMUs
+only through the three buses. This subsection states what that arrangement does
+and does not synchronize, because the sample counts and the timing behaviour
+reported in Section~\ref{sec:results} follow from it.
+
+\emph{Stepping order.} At each communication point $t_n$ the importer visits the
+FMUs sequentially, in the order they were registered; for each it applies the
+pending inputs, calls \code{doStep}$(t_n,h)$ and reads the outputs. Only after
+all five have stepped are the connections transferred. No FMU therefore sees an
+output that another produced in the same step: the scheme is of Jacobi type,
+each sensor FMU advances over $[t_n,t_{n+1}]$ against plant truth sampled at
+$t_n$ and held, and every connection carries one communication step of delay.
+Quantities the host derives from several plant outputs
+(Section~\ref{sec:orchestration}) are written after the step and carry the same
+delay. The plant takes one implicit Radau step per communication step.
+
+\emph{Inside a step.} Simulated time advances only inside \code{doStep}, and
+each part does a whole step's worth of sampling there
+(Table~\ref{tab:sync}). The receiver emits one frame, stamped $t_{n+1}$. The
+IMU latches $\operatorname{round}(h f_s)=10$ samples into its FIFO, each with a
+fresh noise draw and its own time stamp $t_n+k/f_s$. The two I$^2$C parts
+free-run at the period their control registers currently select: every whole
+period that elapses within the step latches a conversion and the remainder
+carries into the next step, so a 50\,Hz part stepped at 10\,Hz does convert at
+50\,Hz. Its data registers hold one conversion, however, so only the newest of
+a step's five is ever visible to a controller. A one-shot measurement that the
+firmware triggers over the bus is served by the next \code{doStep}.
+
+\begin{table}[tbp]
+\centering
+\caption{What each sensor FMU does within one communication step of
+$h=0.1$\,s, what holds the result until the firmware collects it, and which
+time stamp reaches the firmware.}
+\label{tab:sync}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Sensor & Latched per step & Held in & Time stamp at firmware\\
+\midrule
+GPS       & 1 frame, at $t_{n+1}$     & OS socket queue   & none; epoch index $\times\,h$\\
+IMU       & 10 frames (100\,Hz)       & 16\,KiB FIFO      & per frame, part clock\\
+BMP390    & 5 conversions (50\,Hz)    & registers (newest) & \code{SENSORTIME}\\
+MMC5983MA & 5 (50\,Hz); 1 per trigger & registers (newest) & none; latest IMU stamp\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Bus service.} Bus traffic is not tied to communication points. Each
+shared-memory bus is answered by its own service thread inside the importer
+process, at whatever wall-clock instant the controller posts a transaction, and
+the receiver's datagrams are queued by the operating system. A device model's
+state is guarded by one mutex held for the whole transaction---a
+chip-select frame on SPI, START to STOP on I$^2$C---so a read never observes a
+half-latched sample and a latch never lands inside a transaction.
+
+\emph{The consumer.} The flight-computer process runs a free loop on the host's
+monotonic clock: it waits up to 5\,ms for a datagram and drains the socket,
+bursts the IMU FIFO for as long as data-ready is asserted, then polls the
+barometer and the magnetometer. The drivers are the unmodified on-target ones,
+but their scheduling is the host operating system's and not the target RTOS's:
+task periods and interrupt latency are not represented in this tier, and are
+the business of the instruction-accurate one (Section~\ref{sec:discussion}).
+
+\emph{Three clocks.} A run therefore has three time bases: simulated time; each
+part's own clock, which stamps the IMU frames and drives the BMP390's
+\code{SENSORTIME} counter (and is ideal here, the clock-error terms of
+Section~\ref{sec:errormodel} being off); and the flight computer's clock, which records
+arrival. Two parts give the firmware no stamp at all. A NAV-PVT frame carries no
+time the parser reads, so a fix is placed by its epoch index; an MMC5983MA
+sample carries nothing, so it is aligned to the most recent IMU stamp, as
+firmware does with an unstamped sensor. Arrival time equals simulated time only
+when the importer is paced at a real-time factor of one. \emph{Sample-time}
+fidelity is thus carried by the parts' own stamps and is exact to the sample
+period; \emph{arrival-time} fidelity is bounded by $h$, because a step's samples
+all become visible at once.
+
+\emph{Pacing.} The importer can sleep after each step until wall-clock time
+$t/\rho$ for a real-time factor $\rho$. Unpaced, the run executes several times
+faster than real time, and not uniformly: powered flight in the atmosphere is
+expensive to integrate and coasting is cheap. Three consequences follow. First, an unpaced importer can outrun the consumer's poll
+loop and overflow the IMU FIFO (Section~\ref{sec:fifo}); paced at $\rho=1$ the
+stream is lossless. Second, an unbuffered part is observable at no more than
+the smallest of its programmed rate, $1/h$ and the consumer's poll rate,
+whatever the pacing. Third, the magnetometer's bring-up blocks on the importer:
+a triggered measurement lands only at the next \code{doStep}, and the driver
+polls for 200\,ms before timing out, so a communication step must take less
+wall-clock time than that or the probe is retried
+(Section~\ref{sec:magcond}).
+The run reported in Section~\ref{sec:results} is paced at $\rho=1$ and seeded,
+unless stated otherwise.
+
+\emph{Start-up and shutdown.} Either process may start first. The flight
+computer binds its UDP port, so that early datagrams queue rather than drop,
+and then waits for the three buses to appear. Frames the IMU buffered before
+the controller's probe reset the FIFO are discarded, which is the origin of the
+ten samples missing in Section~\ref{sec:integrity}. At termination the IMU FMU
+keeps its bus up for up to 2\,s while the FIFO drains and then powers the part
+down; the flight computer treats a vanished peripheral as the end of the run
+rather than as a bus fault, drains the socket and exits.
+
+\emph{Determinism.} The loop is open: nothing the flight computer computes
+returns to the plant, so the trajectory is independent of the consumer's
+timing. With a fixed seed, each part's error stream is a function of simulated
+time: Section~\ref{sec:fifo} repeats the reference run at a different pacing
+and finds every sample common to both identical. The coupled run is nevertheless not
+reproducible sample for sample. Which conversion of an unbuffered part the
+consumer observes, where a FIFO burst boundary falls, and the instant at which
+the firmware programs a polled part's rate registers all depend on host
+scheduling. Statistics reproduce; a byte-wise comparison of the consumer's logs
+does not. Removing that residue means stepping the consumer on the importer's
+clock, as an FMU or as a bus-synchronized process, which is also the
+precondition for closing the control loop and is left to future work.
+
+\subsection{Plant verification}
+% TODO (review): add a figure of the three reference trajectories and this
+% run (altitude vs time), since the envelope check is called load-bearing.
 The truth source is a two-stage-rocket FMU (NASA TM-2015-218675 Scenario
 17~\cite{nasa_tm2015}: DAVE-ML~\cite{jackson2011daveml} aero/propulsion/inertia
 tables, J2 gravity, stage separation) integrated with a Radau IIA scheme on
@@ -607,13 +776,17 @@ clean-looking sensor streams, which is what makes such an error easy to miss.
 The run is therefore checked against the three published reference trajectories
 for the scenario. The criterion is their \emph{envelope}, not any single one:
 they are independent simulators of the same case and disagree by up to $7\%$
-(16.97\,km) at $t=200$\,s. Our run lies inside the envelope at all 2001 samples
-and within 20\,m of all three at stage-1 burnout. This check caught the
+(16.97\,km) at $t=200$\,s. Our run lies within the envelope, to a tolerance of
+$1\%$ plus 100\,m, at all 2001 samples: it is within 20\,m of all three
+references at stage-1 burnout (26.77\,km against 26.75--26.76\,km), sits
+0.2--0.3\,km above them at stage-2 ignition (138.52\,km against
+138.24--138.34\,km) and lies between them at stage-2 burnout (220.15\,km against
+217.97--230.00\,km). This check caught the
 scenario's worst defect---an FMU parameter (\code{stg2.ignition\_time\_s})
 defaulting to zero flew continuous thrust to 638\,km against a reference topping
 out near 251\,km, while every sensor figure still looked plausible.
 
-\subsection{The receiver loses its fix, on purpose}
+\subsection{Receiver fix revocation under dynamics limits}
 \label{sec:cocom}
 A real receiver does not keep reporting a solution however hard the vehicle
 accelerates, and a launch vehicle is exactly where that matters. The GPS FMU
@@ -641,19 +814,19 @@ the flight software gates on fix type, exactly as it must on the vehicle. This
 is behavior a value-level FMU structurally cannot present: there is no clean
 real to withhold.
 
-\subsection{Driving the IMU over SPI}
+\subsection{IMU access over SPI}
 The flight computer runs the on-target \code{ImuSpiDriver} against the simulated
 part: \code{probe()} (\code{WHO\_AM\_I}, then enable/reset the FIFO), then poll
 while the data-ready line is asserted, reading \code{STATUS}+\code{FIFO\_COUNT}
 in one transfer and bursting the FIFO. The 16\,KiB FIFO holds roughly 420 frames
 ($\sim$4\,s at 100\,Hz); a controller slower than that loses whole samples and
-learns so from the sticky overflow bit. This is the FIFO's raison d'\^etre made
+learns so from the sticky overflow bit. This is the FIFO's purpose made
 observable, and it is testable in isolation: a unit test runs the real driver
 against the real device model and asserts the bytes burst from the FIFO are the
 bytes the emitter produced---including the normal case where a burst lands
 mid-frame, since a controller cannot align its reads to frame boundaries.
 
-\subsection{Conditioning the magnetometer over I\texorpdfstring{$^2$}{2}C}
+\subsection{Magnetometer conditioning over I\texorpdfstring{$^2$}{2}C}
 \label{sec:magcond}
 The magnetometer is the only sensor in the scenario whose bring-up
 \emph{blocks on the plant}, and that is what makes it worth carrying. The other
@@ -666,7 +839,7 @@ SET and measure, RESET and measure, average, re-SET, restore continuous
 mode---and every step is a separate I$^2$C transaction with a status poll loop
 between. It cannot be folded into a register write, and it cannot complete at
 all unless the co-simulation is \emph{stepping}, because the simulated part only
-converts when the master advances it.
+converts when the importer advances it.
 
 Three consequences follow, and all three are properties of the real system that
 a value-level FMU has nowhere to put.
@@ -675,8 +848,7 @@ a value-level FMU has nowhere to put.
 exist; this one needs the physics to be running. The flight computer therefore
 retries the magnetometer probe on a measurement timeout rather than failing, and
 distinguishes ``not being stepped'' from ``wrong part'' in its diagnostics---an
-artifact of co-simulation that a real board never needs, and one worth naming
-rather than hiding.
+artifact of co-simulation that a real board never needs.
 
 \emph{The final SET is not decoration.} Leaving the part RESET yields readings
 that are offset-corrected, of the correct magnitude, and negated on every axis.
@@ -695,57 +867,77 @@ residual as the constant gap it is.
 \label{sec:results}
 % ===========================================================================
 
-\subsection{The decoded error is the injected error}
-Fig.~\ref{fig:gpserror} shows the decoded-fix error against truth over the
-31\,s of fixes the export limits leave. The configuration injects 1.5\,m
-1-sigma independently into north and east, so the horizontal error
-\emph{magnitude} has expected RMS $1.5\sqrt{2}=2.12$\,m; vertical is a single
-axis at 3\,m. The rolling-RMS lines sit on those values: the error the flight
-software recovers is exactly the error injected, with no distortion added by the
-encode/transmit/parse chain. Table~\ref{tab:validation} states the comparison
-numerically: the decoded-fix RMS matches the analytic expectation from the
-injected noise to the centimetre.
+All results in this section come from one run of the scenario: paced at
+$\rho=1$, seeded (run seed 17, chosen before the run), with every optional
+error term off, on a desktop host running the two processes of
+Section~\ref{sec:sync}. Counts that depend on the host's scheduling are
+identified as such.
 
-\begin{table}[t]
+\subsection{Decoded error against injected error}
+Fig.~\ref{fig:gpserror} shows the decoded-fix error against truth over the
+31\,s of fixes the export limits leave. Each fix is compared with the truth one
+communication step earlier, which is the truth the receiver was given
+(Section~\ref{sec:sync}); comparing at equal time stamps would measure the
+vehicle's speed times $h$, not the receiver's error. The configuration injects
+1.5\,m 1-sigma independently into north and east, so the horizontal error
+\emph{magnitude} has expected RMS $1.5\sqrt{2}=2.12$\,m; vertical is a single
+axis at 3\,m.
+
+Table~\ref{tab:validation} makes the same comparison for every stochastic
+channel the run carries. The RMS of $N$ independent Gaussian samples has a
+relative standard error of about $1/\sqrt{2N}$, which is $4\%$ for the 312
+fixes a COCOM-limited receiver yields and $0.5\%$ for the 20{,}000 inertial
+samples. Every decoded figure lies within two such standard errors of its
+expectation: the receiver's within $6\%$, the inertial channels within $1\%$.
+The expectation for the register-count channels includes the quantizer's own
+contribution, $q/\sqrt{12}$ for a step of $q$, which is what moves the
+gyroscope's from 2.00 to 2.02\,mrad/s. This is a check on the byte path and not
+on the sensor models: it shows that encoding, transport, parsing and conversion
+add no error of their own, which is the claim, and it would hold for any error
+model placed in front of them.
+
+\begin{table}[tbp]
 \centering
-\caption{GPS decoded-fix error: analytic expectation from the injected noise
-vs.\ RMS recovered by the unmodified on-target parser (312 fixes). The
-uncorrected column is the same run before the truth-log quantization artifact
-was removed (see text).}
+\caption{Decoded error against the error injected, for each stochastic channel
+of the reference run. Inertial residuals are taken about their mean, which is
+the turn-on bias; magnetometer noise is estimated from second differences of
+successive samples, which removes the slowly varying field. The last column is
+the relative standard error of an RMS estimated from $N$ samples.}
 \label{tab:validation}
 \footnotesize
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}lccc@{}}
+\begin{tabular}{@{}lrlll@{}}
 \toprule
-Component & Injected $1\sigma$ & Expected RMS & Decoded RMS\\
+Channel & $N$ & Expected & Decoded & $1/\sqrt{2N}$\\
 \midrule
-Horizontal (magnitude) & 1.5\,m/axis & $1.5\sqrt{2}=2.12$\,m & 2.12\,m\\
-Vertical (single axis)  & 3.0\,m      & 3.0\,m               & 3.0\,m\\
-\midrule
-\multicolumn{3}{@{}l}{Horizontal, before artifact removal} & 2.81\,m\\
+GPS horizontal (magnitude) & 312 & 2.12\,m & 2.18\,m & 4.0\%\\
+GPS north / east           & 312 & 1.50\,m & 1.50 / 1.59\,m & 4.0\%\\
+GPS vertical               & 312 & 3.00\,m & 3.08\,m & 4.0\%\\
+Accelerometer $x/y/z$      & 20{,}000 & 50.1\,mm/s$^2$ & 50.1 / 50.1 / 50.0\,mm/s$^2$ & 0.5\%\\
+Gyroscope $x/y/z$          & 20{,}000 & 2.02\,mrad/s & 2.04 / 2.01 / 2.04\,mrad/s & 0.5\%\\
+Magnetometer $x/y/z$       & 878 & 0.040\,\textmu T & 0.041 / 0.040 / 0.042\,\textmu T & 2.4\%\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Reaching this required removing two measurement
-artifacts that had produced plausible-looking output---the master's default CSV
-writer quantized the radian-valued truth log at 6.4\,m on the ground (inflating
-horizontal RMS to 2.81\,m, the excess being precisely the $6.37/\sqrt{12}=1.84$\,m
-RMS of uniform rounding), and no-fix epochs logged invalid coordinates as if
-they were measurements. Both were found by asking why a plotted number had the
-value it did---the kind of question a wire-accurate harness makes answerable.
+The reference for that comparison must not carry noise of its own. The truth
+log is therefore written by the host at round-trip precision and not by the
+importer's CSV writer, whose six decimal places of a geodetic angle are a
+length on the ground, and epochs the receiver reports without a solution are
+logged as such and excluded: the position fields of a no-fix frame are filled,
+and decode correctly, but are not a measurement of anything.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{gps_error.png}
 \caption{Decoded-fix error against truth (faint points) with a 10\,s rolling RMS
-(solid). Horizontal magnitude sits on the expected $1.5\sqrt{2}=2.12$\,m and
-vertical on 3\,m: the chain adds nothing. The x-axis is the 31\,s a
-COCOM-limited receiver leaves.}
+(solid). The dashed lines are the expected $1.5\sqrt{2}=2.12$\,m and 3\,m; over
+all 312 fixes the RMS is 2.18\,m and 3.08\,m, each within one standard error.
+The x-axis is the 31\,s a COCOM-limited receiver leaves.}
 \label{fig:gpserror}
 \end{figure}
 
-\subsection{The fix goes when both limits hold}
+\subsection{GPS: fix availability}
 Fig.~\ref{fig:availability} and Fig.~\ref{fig:altitude} show the availability
 consequence. The vehicle passes 515\,m/s at $t=10.1$\,s with nothing
 happening---it is only 2\,km up---and loses the fix when it crosses 18\,km at
@@ -755,7 +947,7 @@ all of stage 2, are unnavigated. Flight software that assumes GNSS through boost
 is shown otherwise---and shown the useful version, the 31\,s of good data a
 launch-detect or initialization routine actually gets.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{gps_availability.png}
 \caption{Altitude and speed against the COCOM thresholds; every no-fix epoch is
@@ -764,7 +956,7 @@ goes at 18\,km ($t=31.2$\,s).}
 \label{fig:availability}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{altitude_vs_time.png}
 \caption{Truth altitude with the decoded fixes over the first 31\,s; the
@@ -773,48 +965,70 @@ actually received.}
 \label{fig:altitude}
 \end{figure}
 
-\subsection{The byte chain is lossless}
+\subsection{Transport integrity across the byte chain}
+\label{sec:integrity}
 The mission profile reads straight off the decoded IMU stream
 (Fig.~\ref{fig:sf}), the cheapest sanity check on the plant there is:
-${\sim}54$\,m/s$^2$ at lift-off rising to 125\,m/s$^2$ as stage 1 burns off,
-\emph{exactly zero through the 94\,s coast} (an accelerometer does not sense
-gravity), 57\,m/s$^2$ when stage 2 lights, 265\,m/s$^2$ at burnout, then zero.
-Over the run, $20{,}000$ of $20{,}010$ inertial samples were decoded across
-48{,}021 chip-select-framed SPI transfers with \emph{zero} checksum errors,
-\emph{zero} FIFO overflows and \emph{zero} failed transfers; all 2001 NAV-PVT
-frames were decoded (0 checksum errors); $2{,}000$ barometric conversions were
-read and compensated across $42{,}009$ I$^2$C transactions with none failed; and
-the magnetometer's 574 measurements crossed $2{,}368$ I$^2$C transactions, again
-with none failed. The ten absent inertial samples are those the FMU buffered
-before the flight computer probed and reset the FIFO---a driver clearing what
-accumulated before it took over. The whole chain, from 6-DoF truth through four
-noise models, four encoders, three transports and the on-target drivers, is
-lossless and wire-correct. Fig.~\ref{fig:rates} shows the same fidelity in the
-gyro channel, where the visible LSB banding is the quantization the flight
-software must live with on the real part.
+54\,m/s$^2$ at lift-off rising to 125\,m/s$^2$ as stage 1 burns off; a coast of
+94\,s that opens at $-1.7$\,m/s$^2$ of residual drag and decays to zero as the
+air thins (an accelerometer does not sense gravity); 51\,m/s$^2$ when stage 2
+lights, 265\,m/s$^2$ at burnout, then zero.
 
-Sample \emph{counts} differ by two orders of magnitude between the SPI and
-I$^2$C parts for a structural reason worth stating: the IMU FMU buffers ten
-samples per communication step into a FIFO the controller drains in bursts,
-while the two I$^2$C parts hold one conversion in unshadowed data registers and
-a controller polling slower than the programmed rate simply observes the newest.
-The magnetometer's 574 measurements over 200\,s are what a host-paced
-co-simulation delivered against a 50\,Hz programmed rate, not a property of the
-part. That is the honest reading of a polled-part sample count, and it is the
-same reading a real slow consumer would get.
+Table~\ref{tab:transport} gives the transport counts. All 2001 NAV-PVT frames
+were decoded, and $20{,}000$ of the $20{,}010$ inertial samples; no checksum
+failed, no FIFO overflowed and no transfer or transaction failed on any of the
+three buses. The ten absent inertial samples are those the FMU buffered before
+the flight computer probed and reset the FIFO---a driver clearing what
+accumulated before it took over. Within what the consumer collected, the chain
+from 6-DoF truth through four noise models, four encoders, three transports and
+the on-target drivers is lossless and wire-correct. Fig.~\ref{fig:rates} shows
+the same fidelity in the gyro channel, where the visible LSB banding is the
+quantization the flight software must live with on the real part.
 
-\begin{figure}[t]
+\begin{table}[tbp]
+\centering
+\caption{Transport counts for the reference run. ``Produced'' is what the
+part made available; ``decoded'' is what the on-target stack recovered. The two
+I$^2$C parts convert at 50\,Hz but hold one conversion at a time, so their
+decoded counts are set by the consumer's poll rate on this host.}
+\label{tab:transport}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Sensor & Bus & Produced & Decoded & Bus operations & Errors\\
+\midrule
+GPS       & UDP          & 2{,}001  & 2{,}001  & 2{,}001 datagrams     & 0\\
+IMU       & SPI (shm)    & 20{,}010 & 20{,}000 & 9{,}877 transfers     & 0\\
+BMP390    & I$^2$C (shm) & ---      & 904      & 2{,}618 transactions  & 0\\
+MMC5983MA & I$^2$C (shm) & ---      & 878      & 3{,}457 transactions  & 0\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Sample \emph{counts} differ by more than an order of magnitude between the SPI
+and I$^2$C parts for the structural reason of Section~\ref{sec:sync}: the IMU
+buffers ten samples per communication step into a FIFO the controller drains
+in bursts, while the two I$^2$C parts hold one conversion in their data
+registers and a controller polling slower than the programmed rate observes the
+newest. On this host one pass of the consumer's loop takes about 0.23\,s, so
+each part was observed about 4.4 times per second against a programmed 50\,Hz. That is a property of the
+consumer and the host, not of the part, and it is the count a real slow
+consumer would get; every sample that was read is a correct one, and the
+BMP390's carry the part's own time stamp.
+
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{imu_specific_force.png}
 \caption{Body-X specific force: truth vs.\ samples burst from the FIFO and
 converted from raw counts. The full Scenario 17 profile is legible, including
-zero through the coast. The receiver is COCOM-dark for 169 of these 200\,s,
+the coast at zero. The receiver is COCOM-dark for 169 of these 200\,s,
 including all of stage 2, and the inertial stream is indifferent to that---which
 is the point of carrying an IMU.}
 \label{fig:sf}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{imu_body_rates.png}
 \caption{Body rates: the damped pitch oscillation during atmospheric flight,
@@ -824,16 +1038,27 @@ floor.}
 \label{fig:rates}
 \end{figure}
 
-\subsection{The barometer stops being an altimeter}
+\subsection{BMP390: compensated pressure and the range floor}
 The BMP390 channel (Fig.~\ref{fig:baroalt}) is the complement to the GPS
 result, and it fails for an unrelated reason. Compensated pressure decoded by
-the on-target driver rides the ISA curve down from $101{,}321$\,Pa on the
-pad---the sea-level value arrived at through the part's own compensation
-arithmetic---and then flatlines near $10{,}450$\,Pa from $t\approx50$\,s, where
-the reference part's ADC bottoms out. Inverted through the ISA, as flight
-software does with a static-pressure measurement, the altimeter is honest to
-$\sim$16\,km and then stops being an altimeter while the vehicle climbs another
-220\,km.
+the on-target driver follows the plant's atmosphere down from 101.2\,kPa on the
+pad until the vehicle passes 16\,km at $t\approx30$\,s, where the reference
+part's ADC bottoms out. Inverted through the standard atmosphere, as flight
+software does with a static-pressure measurement, the altimeter tracks truth to
+$\sim$16\,km and then saturates while the vehicle climbs another 220\,km. Below
+15\,km the decoded pressure altitude differs from truth altitude by $-0.4$\,m in
+the mean with a standard deviation of 5.3\,m over 144 conversions, a figure
+that includes the part's injected noise and turn-on bias.
+
+The floor itself is not a constant, and that is a detail only a register-level
+model produces. What saturates is the raw pressure word; the temperature word
+does not, and the compensated pressure is a polynomial in both. So the decoded
+``floor'' reads 10.44\,kPa while the die is at $-56\,^\circ$C, falls to
+9.93\,kPa as the air warms towards the stratopause, and settles at 11.82\,kPa
+at $-84\,^\circ$C above it. The die is by then far below the part's
+$-40\,^\circ$C rating as well as below its 300\,hPa pressure rating; the words
+on the bus stay plausible throughout, as they do on silicon, and the FMU's
+diagnostic counter is the only place the excursion is recorded.
 
 The agreement below the range floor is the load-bearing part. The FMU produced
 those raw words by \emph{inverting} the Bosch compensation polynomial and the
@@ -844,53 +1069,59 @@ independent execution of the manufacturer's published arithmetic, over a
 register interface, and the range floor it inherits is the reference part's
 rather than a modelling choice.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{baro_altitude.png}
 \caption{Pressure altitude from decoded BMP390 samples against truth. The part
-is an altimeter to $\sim$16\,km and then is not, while the vehicle climbs
+tracks truth to $\sim$16\,km and then saturates, while the vehicle climbs
 another 220\,km---the barometric counterpart to the receiver's COCOM cut-off,
 and the reason a launch vehicle carries several sensors at once.}
 \label{fig:baroalt}
 \end{figure}
 
-\subsection{The magnetometer is unusable until it is conditioned}
+\subsection{MMC5983MA: bridge-offset conditioning}
 \label{sec:magresults}
-The magnetometer is where a register-accurate model earns its cost outright.
+The magnetometer is where a register-accurate model shows its value most clearly.
 On the run reported here the simulated part was born with a bridge offset of
-$+2656/{-}1690/{+}1395$~LSB, i.e.\ $+16.21/{-}10.31/{+}8.51$~\textmu T, against
-a field of about 30~\textmu T. The on-target driver's SET/RESET pair measured
-it at bring-up and removed it, and every sample afterwards is a field rather
-than a field plus an unknown vector of its own size. Over the flight the
-decoded field magnitude ran from 30.6 down to 27.2~\textmu T---the
-$1/r^3$ falloff over 236\,km, plus the eastward translation of 2000\,km
-relative to the dipole axis.
+$-7945/{+}80/{+}2688$~LSB, i.e.\ $-48.5/{+}0.5/{+}16.4$~\textmu T, against a
+field of 32~\textmu T. The on-target driver's SET/RESET pair measured it at
+bring-up and removed it, and every sample afterwards is a field rather than a
+field plus an unknown vector larger than itself. Over the flight the decoded
+field magnitude ran from 31.6 down to 27.3~\textmu T against a truth of 31.8
+down to 28.2~\textmu T, as the vehicle climbed to 236\,km and travelled some
+540\,km east.
 
 Fig.~\ref{fig:magfield} plots the three body axes rather than the magnitude,
-deliberately. The axes are doing three different things---body $Y$ carries
-almost the whole field because the vehicle flies due east across a
-mostly-northward one, while $X$ and $Z$ hold the small residue as it pitches
-over---which is exactly the geometry a swapped axis or a sign error destroys and
-exactly what a magnitude plot hides. The constant gap between decoded samples
-and the truth handed to the FMU is the simulated installation's hard iron,
-present by design and not removed by conditioning.
+deliberately. The axes are doing three different things. Body $Y$ carries the
+horizontal field, $-27$\,\textmu T, because the vehicle heads east across a
+field that points north. The field at this site also has an upward component of
+16\,\textmu T (the inclination is $-30^\circ$), which the pitch angle divides
+between $X$ and $Z$; $X$ falls from $+12$ to $+2$\,\textmu T as the vehicle
+pitches over. That geometry is exactly what a swapped axis or a sign error
+destroys and exactly what a magnitude plot hides. The constant gap between
+decoded samples and the truth handed to the FMU, $+1.2/{+}0.5/{+}1.4$\,\textmu T,
+is the simulated installation's hard iron, present by design and not removed by
+conditioning; it is also why the decoded magnitude sits below truth.
 
 Fig.~\ref{fig:magerror} quantifies what skipping the conditioning would have
 cost, drawn from the same samples with the measured bridge offset added back:
-$28$--$29^\circ$ of direction error on this run, and tens of degrees on any run,
-since $\delta$ is redrawn each time from the datasheet's tolerance. The first
-version of that figure plotted the uncalibrated \emph{magnitude}, and the two
-curves nearly coincided---which is true, and is precisely why magnitude is the
-wrong place to look: adding an offset the size of Earth's field to a field that
-size barely changes the length of the vector while swinging its direction most
-of a right angle. Heading is what a magnetometer is for, so the angle is the
-honest measure of the damage. This is the paper's sharpest instance of the
-central claim. Firmware that never runs the SET/RESET sequence produces a
-plausible-looking field stream, passes every value-level check, and is wrong by
-roughly $100\%$; no idealized sensor FMU can present that failure, because there
-is no bridge in a floating-point number.
+$74$--$83^\circ$ of direction error on this run. This draw is a large one, an
+offset magnitude of 51\,\textmu T that the model's distribution exceeds in
+$2.4\%$ of draws, so the figure for a single run should not be read as typical.
+Sampling $\delta$ from that distribution against a 30\,\textmu T field gives a
+median direction error of $34^\circ$, with $9^\circ$ and $83^\circ$ as the 5th
+and 95th percentiles, and more than $10^\circ$ in $94\%$ of draws. Heading is
+what a magnetometer is for, so the angle is the relevant measure of the damage.
+Magnitude is a less reliable witness: on this run an unconditioned driver would
+have reported 45--52\,\textmu T, which is visibly wrong, but in $14\%$ of draws
+the offset changes the magnitude by less than a tenth while still turning the
+vector. This is the sharpest instance of the paper's central claim. Firmware
+that never runs the SET/RESET sequence produces a well-formed field stream,
+passes every value-level check, and is typically wrong by tens of degrees; no
+idealized sensor FMU can present that failure, because there is no bridge in a
+floating-point number.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{mag_body_field.png}
 \caption{Body-frame field decoded by the on-target \code{Mmc5983maDriver} over
@@ -901,36 +1132,69 @@ does not remove and is not meant to.}
 \label{fig:magfield}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=\columnwidth]{mag_magnitude.png}
-\caption{Top: total intensity over the flight, 30.6 down to
-27.2\,\textmu T. Bottom: the direction error a skipped SET/RESET calibration
-would have caused, reconstructed by adding the measured bridge offset back into
-the same samples---$28$--$29^\circ$ on this run. Magnitude barely moves while
-heading swings most of a right angle, which is why the angle is the honest
-measure.}
+\caption{Top: total intensity over the flight, decoded samples against the
+WMM2025 truth; the gap is the hard iron. Bottom: the direction error a skipped
+SET/RESET calibration would have caused, reconstructed by adding the measured
+bridge offset back into the same samples---$74$--$83^\circ$ on this run, whose
+offset is a large draw (the median over the part's tolerance is $34^\circ$).}
 \label{fig:magerror}
 \end{figure}
 
-\subsection{One honest artifact}
-Unpaced, the co-simulation is not uniformly fast---in-atmosphere powered flight
-costs real time (DAVE-ML table lookups on every implicit Radau stage) while
-coasting is cheap---so where the master accelerates it can outrun the poll loop
-and overflow the FIFO, losing a few hundred of 20{,}010 samples. The sticky
-overflow bit reports it and no frame is ever truncated: this is exactly what a
-FIFO plus overflow flag exists to give. It is an artifact of the simulation, not
-of the system under test---a real plant cannot outrun its consumer---and pacing
-the master to wall-clock removes it. That the harness \emph{surfaces} the
-condition rather than hiding it is itself a property worth having.
+\subsection{FIFO overflow under an unpaced importer}
+\label{sec:fifo}
+The consumer is not stepped by the importer (Section~\ref{sec:sync}), and one
+consequence is visible in the data. The reference scenario was repeated with
+the same seed and the importer unpaced, which on this host runs the 200\,s of
+flight in about 24\,s of wall-clock time. The importer then outran the
+consumer's poll loop on every bus, and each transport lost data in its own
+way (Table~\ref{tab:unpaced}).
+
+\begin{table}[tbp]
+\centering
+\caption{The same seeded scenario, paced at $\rho=1$ and unpaced. Every sample
+the unpaced run did deliver is identical to the paced run's sample with the
+same time stamp.}
+\label{tab:unpaced}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+Decoded & Paced & Unpaced & How the loss is reported\\
+\midrule
+NAV-PVT epochs        & 2{,}001  & 1{,}248  & not at all (datagram queue)\\
+\quad of which fixes  & 312      & 312      & \\
+IMU samples           & 20{,}000 & 18{,}421 & sticky overflow bit, 28 polls\\
+BMP390 conversions    & 904      & 3        & none; newest value overwrites\\
+MMC5983MA measurements& 878      & 5        & none; newest value overwrites\\
+Checksum errors, failed transfers & 0 & 0 & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The IMU lost 1{,}589 of 20{,}010 samples, in whole frames, and said so: the
+sticky overflow bit was set on 28 polls and no frame was truncated, which is
+what a FIFO with an overflow flag exists to give. The talker lost 753 of its
+2{,}001 frames without any indication, as a UART without flow control would,
+and with them the mapping from epoch index to time on which an unstamped
+stream depends. The two unbuffered parts were simply seen a handful of times.
+None of this is a fault in the system under test: a real plant cannot outrun
+its consumer, and pacing the importer removes all of it. What the comparison
+does establish is the determinism claim of Section~\ref{sec:sync}. All
+18{,}421 inertial samples and all 1{,}248 epochs the unpaced run delivered are
+identical to the paced run's at the same time stamps, and the two runs' drivers
+recovered the same bridge offset to within one count; what differs between the
+runs is only which samples the consumer was there to collect.
 
 % ===========================================================================
 \section{Discussion}
 \label{sec:discussion}
 % ===========================================================================
-\textbf{Same code across three tiers.} The decoders validated above are the
+\textbf{Same code across three tiers.} The decoders exercised above are the
 identical translation units that run inside Renode's instruction-accurate STM32
-simulation and on physical STM32H743 hardware; only the bus shim beneath the
+simulation and that the STM32H743 firmware cross-compiles; only the bus shim beneath the
 driver changes (UDP or shared memory here, \code{HAL\_SPI\_TransmitReceive} or
 \code{HAL\_I2C\_Mem\_Read} plus GPIO on the target). For the two I$^2$C parts
 this is measured rather than asserted: two software-in-the-loop tests gate in
@@ -942,8 +1206,8 @@ full blocking SET/RESET handshake over that transport, and its load-bearing
 assertion is not the field values but that the bridge offset the firmware
 reports matches, to one LSB, the one the peripheral independently reports having
 been born with---the one comparison that separates conditioned firmware from
-firmware that merely prints plausible numbers. SIL results therefore
-transfer to HIL with a validity a value-level harness cannot claim, because the
+firmware that merely prints plausible numbers. SIL results are therefore
+positioned to transfer to HIL with a validity a value-level harness cannot claim, because the
 code that most often breaks on hardware is the code SIL usually omits.
 
 \textbf{Conformance as a side effect.} Because neither sensor FMU hand-writes
@@ -953,43 +1217,36 @@ variables---the description and binary cannot drift, and the archive passes a
 strict loader (fmi4c resolves the complete 2.0 table up front and refuses a
 binary that omits any function, even those whose capability flags are false).
 Generating the description from the model is good conformance pressure any strict
-master would exert.
+importer would exact.
 
 Generation removes one class of drift but not another. An \code{.fmu} is a zip
 whose \emph{root} must hold \code{modelDescription.xml} with \code{binaries/}
-beside it, and that layout is produced by the build, not by the model: a
-perfectly conformant model can be sealed into an archive no importer will open.
-We hit exactly that---an archiving step wrote absolute member names, burying
-every member under the build machine's own path prefix and leaving the root
-empty---and nothing caught it but unzipping the file by hand. The build
-therefore now registers a packaging test per exported model per FMI version
-(fourteen in the current tree), each unzipping the archive and asserting the
+beside it, and that layout is produced by the build, not by the model, so a
+conformant model can still be sealed into an archive no importer will open. The
+build therefore registers a packaging test per exported model per FMI version
+(fourteen in the current tree) that unzips the archive and asserts the
 description at its root, a binary named for the \code{modelIdentifier} under
-\code{binaries/}, and a description declaring that same identifier; the last
-catches an archive assembled from a stale staging directory, which would load
-and instantiate the wrong model. Conformance is cheap to generate and cheap to
-lose in the packaging step after it.
+\code{binaries/}, and a description declaring that same identifier.
 
-\textbf{Limitations.} The error models are per-axis Gaussian with a turn-on bias
-and quantization; they omit correlated in-run bias walk (Gauss-Markov), scale-
-factor and misalignment errors, temperature dependence, and---for the
-magnetometer---soft-iron distortion, which is deliberately excluded to keep the
-diagonal inverse exactly equal to \code{convert\_raw\_to\_si()}. (Hard iron
-\emph{is} modelled, as Section~\ref{sec:partmodels} describes, because it is a
-field rather than a distortion and needs no inverse.) The magnetic environment
-is a centred tilted dipole rather than a full spherical-harmonic model, which is
-adequate for exercising a driver and inadequate for magnetic navigation,
-particularly at the scenario's equatorial pad. The MMC5983MA's self-test coil is
-modelled at the register level but not magnetically, so a driver self-test would
-pass vacuously against the FMU; the shared-memory I$^2$C bus carries one
-peripheral per bus, so multi-drop addressing is not exercised
-(Section~\ref{sec:i2c}). The barometer carries a local ISA atmosphere as a
-placeholder pending an environment model. The radar altimeter is the one sensor
-of the five with a model but no case-study validation: the scenario is a launch
-to orbit, and there is no ground under it to measure. The specific-force and magnetic-field
-inputs and the master's between-step connection propagation each introduce one
-communication step of transport delay, which the analysis accounts for but which
-bounds timing fidelity to the communication rate. None of these affect the
+\textbf{Limitations.} The case study exercises the default error models:
+per-axis Gaussian noise, a turn-on bias and quantization. The correlated,
+signal-proportional and clock terms of Section~\ref{sec:errormodel} are
+implemented but not exercised here, and the temperature dependence of bias and
+scale is not modelled at all. The magnetic environment is the WMM2025 main field
+at a fixed date, with no crustal or time-varying external contribution. The
+MMC5983MA's self-test coil applies a field of the model's choosing
+(100\,\textmu T), because the datasheet specifies a pass threshold and not the
+field the coil produces: a driver self-test exercises the real sequence against
+a model that answers, but its absolute threshold cannot be calibrated against
+the FMU. The shared-memory I$^2$C bus carries one peripheral per bus, so multi-drop
+addressing is not exercised (Section~\ref{sec:i2c}). The radar altimeter is the
+one sensor of the five with a model but no case-study run: the scenario is a
+launch to orbit, and there is no ground under it to measure. The consumer is a
+free-running host process rather than a stepped participant
+(Section~\ref{sec:sync}): the loop is open, firmware task timing is not
+represented in this tier, every connection carries one communication step of
+transport delay, and arrival-time fidelity is bounded by that step. None of
+these affect the
 paper's claim, which is about the \emph{transport and protocol} fidelity of the
 sensor boundary, not the richness of the stochastic model behind it; richer
 error models drop into~\eqref{eq:errormodel} without changing the pattern.
@@ -1001,7 +1258,8 @@ Value-level sensor FMUs let SIL co-simulation test everything about GNC software
 except the byte-level driver and protocol code that fails most on real hardware.
 We showed that this shortcut is avoidable: protocol-accurate sensor FMUs take
 truth in over FMI and answer the part's real bus---wire-exact frames where the
-part frames, register bursts where it does not---with no FMI outputs, so the
+part frames, register bursts where it does not---with no sensor data on FMI
+outputs, so the
 unmodified flight-software decoder is exercised against exactly what it will see
 in flight. The pattern captures a talker/polled distinction across three
 transports and in-flight behaviors a value-level model cannot express: a
@@ -1011,12 +1269,13 @@ counts mean anything, and a magnetometer with no useful output at all until a
 blocking multi-transaction handshake has separated its bridge offset from the
 field. Its inverse-model property makes simulator and flight code mutually
 self-checking. End-to-end against a verified two-stage-rocket plant, four
-sensors decode losslessly across three transports, the decoded error equals the
-injected error to quantization, and the conditioning sequence recovers a bridge
-offset without which heading would be $28^\circ$ out. Future work extends the
-stochastic models with correlated bias dynamics and the deferred soft-iron term,
-closes the guidance loop with an onboard convex solver, and quantifies
-SIL-to-HIL transfer on physical STM32 hardware.
+sensors decode without a checksum or transfer error across three transports,
+the decoded error equals the injected error within sampling uncertainty, and
+the conditioning sequence recovers a bridge offset without which heading would
+be tens of degrees out. Future work exercises the
+correlated and signal-proportional error terms in a closed-loop case, steps the
+consumer on the importer's clock, and measures SIL-to-HIL transfer on physical
+STM32H743 hardware.
 
 % ===========================================================================
 \section*{Reproducibility}
@@ -1026,29 +1285,65 @@ the plotting scripts are open source under GPLv3. Each sensor FMU is exported
 for both FMI 2.0 and 3.0 from one source, and every model constructor accepts an
 RNG seed---so a run's turn-on biases, hard iron and bridge offset are
 reproducible bit for bit, which is what makes a figure like
-Fig.~\ref{fig:magerror} checkable rather than merely illustrative.
+Fig.~\ref{fig:magerror} checkable rather than merely illustrative. The
+reference run of Section~\ref{sec:results} is repository commit
+\code{55a95ce} with run seed 17, against the plant FMU of Aetherion 0.16.0;
+% VERIFY: the installed TwoStageRocket.fmu was built 2026-10-01 and the local
+% Aetherion checkout is tagged v0.16.0, but the install's version was not read
+% from the FMU itself.
+its configuration files, console transcripts and the script that computes the
+statistics quoted there accompany the manuscript source.
 
 Continuous integration rebuilds every tier on each change and runs three
 suites: the host-side unit and integration tests over the conversion routines,
-frame parsers and simulated buses (30 cases); the packaging checks over the
+frame parsers, error models and simulated buses (36 cases); the packaging checks over the
 exported archives described in Section~\ref{sec:discussion} (14 cases, one per
 model per FMI version); and the Renode SWIL harness, which drives
 cross-compiled firmware under \code{pyrenode3} (3 cases). Line coverage of the
 natively compiled framework sources is $81.1\%$ ($93.2\%$ of functions, $51.1\%$
 of branches), measured with \code{gcovr} over the first of those suites.
 
-Two harness properties are worth stating because they bear on whether such
-numbers mean anything. A test whose artifact failed to build is reported as a
-failure, not a skip: \code{ctest} scores a skipped test as a pass, so a suite
-that silently builds nothing reports success while checking nothing. And a
-filter that matches no test is an error rather than an empty pass, for the same
-reason. Both were real failures in this repository before they were guarded, and
-neither is visible in a green badge.
+% ===========================================================================
+% Elsevier end matter. Every statement below is the author's to make: each is
+% marked TODO until it has been confirmed or replaced.
+% ===========================================================================
+\section*{CRediT authorship contribution statement}
+% TODO: confirm the roles.
+\textbf{Onur Tuncer:} Conceptualization, Methodology, Software, Validation,
+Formal analysis, Investigation, Visualization, Writing -- original draft,
+Writing -- review \& editing.
 
-\section*{Acknowledgment}
-% Fill in funding / institutional acknowledgments before submission.
+\section*{Declaration of competing interest}
+% TODO: confirm.
+The author declares no known competing financial interests or personal
+relationships that could have appeared to influence the work reported
+in this paper.
 
-\bibliographystyle{IEEEtran}
+\section*{Data availability}
+The source code, sensor FMUs, case-study configuration, logged data and
+plotting scripts are openly available under GPLv3 at
+\url{https://github.com/onurtuncer/Hemerion}.
+% TODO: cite an archived release (e.g. a Zenodo DOI) rather than the live
+% repository, so the data statement points at the exact version reported here.
+
+\section*{Declaration of generative AI and AI-assisted technologies in the
+manuscript preparation process}
+% TODO: Elsevier requires this section if such tools were used; delete it if
+% none were. Fill in the tool and purpose.
+During the preparation of this work the author used [NAME TOOL / SERVICE] in
+order to [REASON]. After using this tool/service, the author reviewed and
+edited the content as needed and takes full responsibility for the content of
+the published article.
+
+\section*{Funding}
+% TODO: name the funder and grant number, or keep the standard sentence.
+This research did not receive any specific grant from funding agencies in the
+public, commercial, or not-for-profit sectors.
+
+\section*{Acknowledgements}
+% TODO: institutional acknowledgements, or delete this section.
+
+\bibliographystyle{elsarticle-num}
 \bibliography{references}
 
 \end{document}

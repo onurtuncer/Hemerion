@@ -1,0 +1,49 @@
+[fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
+[fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi' and the BMP390 on I2C bus 'hemerion_bmp390_i2c'
+[fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
+[fc] BMP390 identified on I2C (CHIP_ID matched), calibrated, converting at 50 Hz
+[fc] MMC5983MA identified on I2C (product ID matched), bridge offset -7945/+80/+2688 LSB (-48.49/+0.49/+16.41 uT) cancelled, measuring at 50 Hz
+[fc] fix     1  t=    0.1 s  lat=  0.0000185  lon=  -0.0000005  alt=      3.9 m  vel=    0.0 m/s  crs=149.0 deg  sats=11
+[fc] imu      1  t=    0.1 s  f=[   54.24    0.12    0.00] m/s2  w=[  0.0011 -0.0021  0.0032] rad/s
+[fc] baro     1  t=    0.7 s  p= 101207.2 Pa  T= 15.08 C
+[fc] mag      1  t=    0.6 s  b=( +13.17,  -26.97,   -9.34) uT  |b|= 31.43 uT
+[fc] fix    50  t=    5.0 s  lat= -0.0000190  lon=   0.0033982  alt=    431.6 m  vel=  156.6 m/s  crs= 88.7 deg  sats=11
+[fc] fix   100  t=   10.0 s  lat= -0.0000208  lon=   0.0145609  alt=   1793.9 m  vel=  351.3 m/s  crs= 88.8 deg  sats=11
+[fc] imu   1000  t=   10.1 s  f=[   63.20    0.10    1.04] m/s2  w=[ -0.0021 -0.0351  0.0021] rad/s
+[fc] fix   150  t=   15.0 s  lat= -0.0000136  lon=   0.0356737  alt=   4029.6 m  vel=  589.5 m/s  crs= 89.1 deg  sats=11
+[fc] fix   200  t=   20.0 s  lat=  0.0000004  lon=   0.0680588  alt=   7181.0 m  vel=  860.6 m/s  crs= 90.1 deg  sats=11
+[fc] imu   2000  t=   20.1 s  f=[   75.60    0.07   -0.26] m/s2  w=[ -0.0043  0.0202  0.0000] rad/s
+[fc] fix   250  t=   25.0 s  lat=  0.0000098  lon=   0.1133567  alt=  11302.1 m  vel= 1167.2 m/s  crs= 90.0 deg  sats=11
+[fc] fix   300  t=   30.0 s  lat=  0.0000184  lon=   0.1734214  alt=  16523.4 m  vel= 1522.4 m/s  crs= 90.8 deg  sats=11
+[fc] imu   3000  t=   30.1 s  f=[   97.88    0.01   -0.02] m/s2  w=[ -0.0021 -0.0213  0.0021] rad/s
+[fc] fix   313  t=   31.3 s  no fix -- receiver outside its dynamics envelope
+[fc] imu   4000  t=   40.1 s  f=[   -0.92    0.07   -0.18] m/s2  w=[ -0.0011  0.0011  0.0000] rad/s
+[fc] imu   5000  t=   50.1 s  f=[   -0.15    0.13    0.09] m/s2  w=[ -0.0011 -0.0074  0.0011] rad/s
+[fc] imu   6000  t=   60.1 s  f=[   -0.04    0.12    0.07] m/s2  w=[  0.0032  0.0011  0.0032] rad/s
+[fc] imu   7000  t=   70.1 s  f=[    0.09    0.02    0.04] m/s2  w=[ -0.0021 -0.0085  0.0032] rad/s
+[fc] imu   8000  t=   80.1 s  f=[   -0.01   -0.04    0.07] m/s2  w=[ -0.0011  0.0000  0.0021] rad/s
+[fc] imu   9000  t=   90.1 s  f=[    0.00    0.16    0.06] m/s2  w=[  0.0000 -0.0032  0.0000] rad/s
+[fc] imu  10000  t=  100.1 s  f=[    0.02    0.07   -0.02] m/s2  w=[ -0.0021  0.0000  0.0021] rad/s
+[fc] baro   500  t=  107.4 s  p=  11824.5 Pa  T=-83.85 C
+[fc] imu  11000  t=  110.1 s  f=[    0.01    0.10    0.01] m/s2  w=[  0.0021 -0.0021 -0.0011] rad/s
+[fc] mag    500  t=  115.3 s  b=(  +6.04,  -25.52,  -12.38) uT  |b|= 29.00 uT
+[fc] imu  12000  t=  120.1 s  f=[    0.00    0.07   -0.01] m/s2  w=[ -0.0021 -0.0064  0.0011] rad/s
+[fc] imu  13000  t=  130.1 s  f=[   -0.02    0.11    0.00] m/s2  w=[  0.0011 -0.0032  0.0011] rad/s
+[fc] imu  14000  t=  140.1 s  f=[   56.60    0.15    0.04] m/s2  w=[  0.0011 -0.0032 -0.0011] rad/s
+[fc] imu  15000  t=  150.1 s  f=[   66.42    0.09    0.00] m/s2  w=[  0.0000 -0.0021  0.0032] rad/s
+[fc] imu  16000  t=  160.1 s  f=[   80.35    0.02   -0.04] m/s2  w=[ -0.0053 -0.0021  0.0011] rad/s
+[fc] imu  17000  t=  170.1 s  f=[  101.79    0.06    0.02] m/s2  w=[  0.0000 -0.0011  0.0032] rad/s
+[fc] imu  18000  t=  180.1 s  f=[  138.73    0.07    0.02] m/s2  w=[  0.0021  0.0000 -0.0021] rad/s
+[fc] imu  19000  t=  190.1 s  f=[  217.87   -0.01    0.06] m/s2  w=[  0.0000  0.0011 -0.0011] rad/s
+[fc] imu  20000  t=  200.1 s  f=[    0.06    0.11    0.07] m/s2  w=[  0.0000 -0.0032 -0.0011] rad/s
+[fc] IMU powered down (FMU terminated) -- co-simulation finished
+[fc] summary: 2001 NAV-PVT epochs decoded (0 checksum errors), 312 carried a fix, 1689 did not
+[fc] no-fix window: t=31.3 s to t=200.1 s (receiver outside its dynamics envelope)
+[fc] 20000 IMU samples decoded over 9877 SPI transfers (0 checksum errors, 0 FIFO overflows, 0 failed transfers)
+[fc] 904 BMP390 conversions read over 2618 I2C transactions (0 failed)
+[fc] 878 MMC5983MA measurements read over 3457 I2C transactions (0 failed)
+[fc] min pressure 9930.39 Pa, min temperature -83.8693 C (both at the top of the observed trajectory)
+[fc] field magnitude 27.2602 to 31.6043 uT over the flight (1/r^3 falloff with altitude)
+[fc] max altitude 17954.7 m, max ground speed 1617.07 m/s (over 312 fixes carrying a solution)
+[fc] max |specific force| 264.657 m/s2, max |body rate| 0.0564541 rad/s
+[fc] fixes written to results_resync/gps_fixes.csv, IMU samples to results_resync/imu_samples.csv, baro samples to results_resync/baro_samples.csv, magnetometer samples to results_resync/mag_samples.csv
