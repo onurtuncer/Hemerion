@@ -45,13 +45,11 @@ or, if `latexmk` is available:
 latexmk -pdf main.tex
 ```
 
-## Open items before submission
+## Done, and when
 
-- [ ] **Verify citations against primary sources** — especially NASA
-      TM-2015-218675 (confirm exact title/authors), the FMI intro paper, the
-      co-simulation survey, the Renode reference, and the two datasheet entries
-      added with the register-accurate parts: `bosch_bmp390` (document
-      number/revision date) and `memsic_mmc5983ma` (revision letter/date).
+The forward-looking list is `TODO.md`. This section records what has been
+done and when; everything still open is in `TODO.md`.
+
 - [x] Reformat for the venue: done for SMPT (`elsarticle`).
 - [x] **Re-sync the draft with the repository** (2026-10-02, commit `55a95ce`,
       Aetherion 0.16.0 plant). The scenario was re-run paced (`--rtf 1 --seed 17`)
@@ -83,18 +81,6 @@ latexmk -pdf main.tex
       flight unpaced; a 10x IMU rate costs nothing measurable). The flight
       computer harness gained `--fault imu-range | mag-skip-conditioning |
       mag-leave-reset`, and Section 6.7 reports the three injected faults.
-- [ ] Still open: stepping the consumer on the importer's clock (a
-      flight-computer FMU), which is also the precondition for closing the
-      loop; Monte Carlo over seeds for the GPS RMS; vector versions of the
-      PNG figures.
-- [ ] Fill in or confirm every `% TODO` in the end matter of `main.tex`:
-      CRediT roles, competing interests, funding, acknowledgements, and the
-      generative-AI declaration (delete it if no such tools were used).
-- [ ] Archive a tagged release (e.g. Zenodo) and cite its DOI in the Data
-      availability statement instead of the live repository.
-- [ ] Re-check the SMPT Guide for Authors at submission time for limits that
-      could not be confirmed here (abstract kept at 250 words, Elsevier's
-      default; 1-7 keywords; highlights of at most 85 characters).
 - [x] Add a **related-work novelty scan** (ArduPilot/PX4 done 2026-10-03; SystemC/TLM, QEMU, virtual-ECU and DCP citations still to add) — the current Related Work section is
       argued but lightly cited; a proper literature search should confirm the
       "no prior protocol-accurate sensor FMU" claim and add citations.
@@ -102,12 +88,3 @@ latexmk -pdf main.tex
       to complement the per-sensor figures. The GPS row exists
       (`tab:validation`); the IMU, BMP390 and MMC5983MA rows would need a
       residual analysis the example's logs already support.
-- [ ] The **radar altimeter is still unvalidated end-to-end** — it is the one
-      sensor of the five with a model and no case-study run. Either wire it into
-      a scenario that has ground beneath it or say so explicitly in
-      Section "Limitations".
-- [ ] Re-run `swil.mag_logger` once WSL is recovered (see the repo's `TODO.md`)
-      and promote the Discussion's magnetometer SWIL sentence from "written but
-      not yet executed" to a measured result.
-- [ ] Regenerate figures at higher DPI / as PDF if the venue prefers vector art.
-- [ ] Page-count pass against SMPT's limit, if it sets one.
