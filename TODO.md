@@ -126,6 +126,33 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   lateral offset), not only lat/lon/alt/heading — the references carry no command columns, so the
   commanded value comes from the scenario definition, as above.
 
+* **Note from Aetherion (2026-09-24, v0.15.0 on `main`).** The two entries below are stale:
+  - Cases 15/16: `F16Autopilot.fmu` now carries the `F16_gnc.dml` circumnavigator behind a
+    `circumnavigate` parameter, with `cmd.circlePoleSW` choosing the pole (Aetherion commit
+    30b9710). Unblocked at 0.15.0.
+  - Trim: `TrimSolver` now trims against the rotating, curved Earth (Aetherion PR #61). The
+    Earth-rotation/curvature lead was right. Re-measure the case 11/12 initial-pitch offsets and
+    the 13.x results against a fresh 0.15.0 install; the 0.14.1 numbers above will move.
+  Also: the plant already publishes ambient static pressure as `out.P_Pa` (with `out.T_K`,
+  `out.rho_kg_m3`, `out.a_m_s`), so the barometer stopgap can wire that today. The plant-side
+  wind / Dryden / ISA-offset work is now written up in Aetherion's
+  `TODO-wind-turbulence-atmosphere.md` (it was referenced below but had not been written);
+  it is implemented and tested (Aetherion branch `feat/wind-turbulence-atmosphere`, 2026-09-24) as
+  v0.16.0, which becomes the new version floor. Ports, all defaulting to the calm
+  standard day (earlier outputs unchanged bit for bit at the defaults):
+  - `F16Plant` and `TwoStageRocket` parameters: `wind.north_mps`, `wind.east_mps`, `wind.down_mps`
+    (steady wind, NED at the initial position); `atm.deltaT_K`, `atm.deltaP_sl_Pa` (ISA + dT and
+    QNH offset, hydrostatically re-integrated; `out.P_Pa`/`out.T_K`/`out.rho_kg_m3`/`out.a_m_s`
+    follow, and so does the F-16 trim).
+  - `F16Plant` only: `turb.sigma_u_mps`, `turb.sigma_v_mps`, `turb.sigma_w_mps` (all zero = off),
+    `turb.L_u_m`, `turb.L_v_m`, `turb.L_w_m` (default 533.4 m), `turb.seed`; outputs
+    `out.wind_{north,east,down}_m_s` (total wind at the CG, NED, steady + gust),
+    `out.gust_{u,v,w}_m_s` (body axes) and `out.gust_{p,q,r}_rad_s` (angular velocity of the air;
+    the aero sees the body rate minus this). Dryden, MIL-F-8785C form, stepped once per plant
+    sub-step at the current airspeed: keep the communication step fixed while it is on.
+  - With wind, `out.vt_m_s` is air-relative and no longer equals the GPS ground speed; `out.alpha_deg`
+    is formed from the same air-relative vector as the forces.
+
 * **Blocked on Aetherion: cases 15 and 16.** `F16Autopilot.fmu` (0.14.1) still hardcodes the
   circumnavigator inputs off (`circlePoleSW = 0`, built from `F16_control.dml`, not `F16_gnc.dml`).
 
