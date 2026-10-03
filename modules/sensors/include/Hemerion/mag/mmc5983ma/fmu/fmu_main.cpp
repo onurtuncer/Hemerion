@@ -54,7 +54,7 @@
 /// and then poll, and this part only advances when the FMI master steps this
 /// FMU. The master's communication step must therefore be shorter than
 /// Mmc5983maDriver::kMeasurementPollAttempts x kMeasurementPollIntervalMs
-/// (50 ms as configured), or bring-up times out against a part that is
+/// (200 x 1 ms as configured), or bring-up times out against a part that is
 /// merely paused.
 ///
 /// The INT line level is re-published once per step; a clear-on-write inside

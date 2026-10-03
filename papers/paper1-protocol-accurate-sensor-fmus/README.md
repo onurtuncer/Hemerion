@@ -69,22 +69,24 @@ latexmk -pdf main.tex
       - The BMP390 floor is not constant: 9.9-11.8 kPa as die temperature
         moves.
       - Transport counts are from one run, not three different ones.
-- [ ] Still open from the re-sync:
-      - confirm the installed plant FMU really is Aetherion 0.16.0 (marked
-        `% VERIFY` in the Reproducibility section);
-      - the line-coverage figures (81.1 % / 93.2 % / 51.1 %) predate the six
-        new test suites and need re-measuring from CI;
-      - the repository docs still say the vehicle flies "2000 km east"
-        (`doc/rocket_gps_ecos_cosim.rst`, `plot_results.py`); the truth log
-        gives about 540 km. The paper is corrected; the docs are not.
-      - the MMC5983MA FMU's header comment quotes a 50 ms driver poll budget;
-        the driver constants give 200 ms.
-- [ ] Review items not yet addressed: synchronising the consumer with the
-      importer (or defending the open loop), the ArduPilot SITL prior art in
-      Related Work, the IMU's tier (synthetic register map vs "part-accurate"),
-      a negative-control table of injected driver bugs, a cost measurement,
-      and a drawn architecture figure (two `% TODO (review)` markers in
-      `main.tex`).
+- [x] Items closed on 2026-10-03: the plant version is read from the FMU
+      (0.16.0); line coverage is 85.9 % from Codecov at `55a95ce` (the old
+      function/branch figures are gone, Codecov does not publish them); the
+      "2000 km east" error is corrected in `doc/rocket_gps_ecos_cosim.rst` and
+      `plot_results.py` (it is ~540 km); the MMC5983MA FMU comment now says
+      200 ms. Related Work now credits ArduPilot SITL's protocol-level GPS and
+      register-level I2C devices and reframes the novelty as "standard FMUs,
+      importable anywhere, co-solved with an external plant". The IMU is called
+      what it is: register-accurate but synthetic. Figure 1 is a drawn
+      architecture figure (TikZ); Figure 2 is the plant-envelope check. The
+      Discussion defends the open loop and reports cost (21.1 s per 200 s of
+      flight unpaced; a 10x IMU rate costs nothing measurable). The flight
+      computer harness gained `--fault imu-range | mag-skip-conditioning |
+      mag-leave-reset`, and Section 6.7 reports the three injected faults.
+- [ ] Still open: stepping the consumer on the importer's clock (a
+      flight-computer FMU), which is also the precondition for closing the
+      loop; Monte Carlo over seeds for the GPS RMS; vector versions of the
+      PNG figures.
 - [ ] Fill in or confirm every `% TODO` in the end matter of `main.tex`:
       CRediT roles, competing interests, funding, acknowledgements, and the
       generative-AI declaration (delete it if no such tools were used).
@@ -93,10 +95,10 @@ latexmk -pdf main.tex
 - [ ] Re-check the SMPT Guide for Authors at submission time for limits that
       could not be confirmed here (abstract kept at 250 words, Elsevier's
       default; 1-7 keywords; highlights of at most 85 characters).
-- [ ] Add a **related-work novelty scan** — the current Related Work section is
+- [x] Add a **related-work novelty scan** (ArduPilot/PX4 done 2026-10-03; SystemC/TLM, QEMU, virtual-ECU and DCP citations still to add) — the current Related Work section is
       argued but lightly cited; a proper literature search should confirm the
       "no prior protocol-accurate sensor FMU" claim and add citations.
-- [ ] Consider adding a **results table** of per-sensor RMS (decoded vs injected)
+- [x] Consider adding a **results table** of per-sensor RMS (Table 5, 2026-10-02) (decoded vs injected)
       to complement the per-sensor figures. The GPS row exists
       (`tab:validation`); the IMU, BMP390 and MMC5983MA rows would need a
       residual analysis the example's logs already support.

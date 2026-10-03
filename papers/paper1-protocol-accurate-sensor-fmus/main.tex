@@ -19,6 +19,8 @@
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta,calc}
 \usepackage{url}
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
@@ -63,8 +65,8 @@ quantize to register counts, and emit wire-exact traffic on the bus the
 physical part uses, so unmodified firmware parses the bytes it will see in
 flight. Because each error model inverts the on-target conversion routine, a
 round-trip test pins simulator and flight code together. We instantiate five sensors in one embedded
-framework, three as register-accurate parts (a MEMS IMU on SPI, a Bosch BMP390
-and a MEMSIC MMC5983MA on I$^2$C), and exercise four end-to-end against a
+framework, three of them register-accurate (a synthetic MEMS IMU on SPI, a
+Bosch BMP390 and a MEMSIC MMC5983MA on I$^2$C), and exercise four end-to-end against a
 verified 6-DoF two-stage-rocket plant. The pattern exposes behaviour a
 value-level FMU cannot: a receiver losing its fix to export-control limits
 31~s after lift-off, a FIFO with sticky overflow semantics, and a magnetometer
@@ -181,11 +183,28 @@ al.~\cite{gomes2018cosim} survey the field. It is used routinely to run embedded
 control software in the loop against physical
 models~\cite{pedersen2016fmi,mikelsons2017virtual}. In all of this the sensor
 boundary is crossed at the level of physical \emph{quantities}: the plant hands
-the control code real-valued positions and rates. The same holds for the
-dominant GNC simulation stacks in practice---PX4 and ArduPilot
-software-in-the-loop inject idealized sensor values (e.g.\ MAVLink
-\code{HIL\_SENSOR}) rather than driving the receiver's or IMU's real byte-level
-parser. That driver/protocol code is exactly what our FMUs exercise.
+the control code real-valued positions and rates. PX4's
+software-in-the-loop does the same, taking simulated sensor values in SI units
+over MAVLink (\code{HIL\_SENSOR}, \code{HIL\_GPS}) or the Gazebo bridge and
+writing them to its internal topics~\cite{px4_sim}, so none of its device
+drivers runs.
+
+\textbf{Protocol-level sensor simulation inside a flight stack.} ArduPilot's
+SITL is the notable exception and the closest prior practice~\cite{ardupilot_sitl}.
+Its simulated GNSS receiver generates the wire protocol of a chosen
+backend---u-blox UBX, NMEA, SBP, Septentrio SBF, Trimble GSOF or NovAtel---on a
+simulated serial port that the unmodified \code{AP\_GPS} driver parses, and a
+simulated I$^2$C bus answers the real drivers' transfers with device models
+such as an MS5611 barometer, a QMC5883L magnetometer and an ICM-40609 IMU. We
+share that premise. The differences are in where the models live and what they
+can be coupled to. ArduPilot's device models are part of one flight stack's own
+test harness, written against its HAL and driven by its own vehicle model; ours
+are standard co-simulation FMUs with no dependency on the consumer, importable
+under any FMI master, driven by an external 6-DoF plant through FMI
+connections, and reusable unchanged under an instruction-accurate emulator. We
+also treat the receiver's dynamics envelope, the FIFO's overflow semantics and
+the magnetometer's conditioning state as first-class model behaviour, and we
+measure the pattern's transport fidelity rather than only using it.
 
 \textbf{Frames across the FMI boundary.} The closest prior art carries
 wire-level frames through FMI itself. FMI 3.0 adds an opaque \code{Binary}
@@ -244,26 +263,54 @@ produced with the part outside its rated pressure or temperature
 envelope---which report something the silicon cannot and change nothing on the
 bus.
 
-% TODO (review): replace this text box with a drawn architecture figure:
-% plant -> importer -> sensor FMUs -> UDP / SPI-shm / I2C-shm -> flight
-% computer, with the Renode and STM32 tiers alongside showing where the
-% decoders are shared.
 \begin{figure}[tbp]
 \centering
 \footnotesize
-\setlength{\fboxsep}{4pt}
-\fbox{\begin{minipage}{0.92\columnwidth}
-\centering
-\textsf{6-DoF plant (truth)}\\
-$\big\downarrow$ \emph{FMI real inputs (Ecos connections)}\\[2pt]
-\textsf{hemerion\_$\langle$sensor$\rangle$\_fmu}\\
-\textsf{\scriptsize noise model $+$ quantizer $+$ packet emitter}\\
-$\big\downarrow$ \emph{wire-exact frames on the part's bus}\\[2pt]
-\textsf{on-target driver $+$ parser $+$ convert\_raw\_to\_si()}
-\end{minipage}}
-\caption{The protocol-accurate sensor FMU pattern. Physics crosses the FMI
-boundary; \emph{bytes} cross the sensor boundary. The flight software is the
-unmodified on-target code.}
+\begin{tikzpicture}[
+  font=\footnotesize,
+  box/.style={draw, rounded corners=1pt, align=center, inner sep=3pt, minimum height=5.5mm},
+  fmu/.style={box, fill=black!6, minimum width=30mm},
+  drv/.style={box, fill=black!6, minimum width=46mm},
+  proc/.style={draw, dashed, rounded corners=3pt, inner sep=5pt},
+  bus/.style={-{Stealth[length=2mm]}, thick},
+  fmi/.style={-{Stealth[length=2mm]}},
+  lbl/.style={font=\scriptsize, inner sep=1pt},
+  node distance=3mm and 34mm]
+  \newcommand{\id}[1]{\texttt{\scriptsize #1}}
+  % importer side
+  \node[fmu] (plant) {6-DoF plant FMU\\\scriptsize truth: position, velocity,\\\scriptsize rates, specific force, air};
+  \node[fmu, below=7mm of plant] (gps) {GPS FMU\\\scriptsize noise, envelope, UBX};
+  \node[fmu, below=of gps]   (imu) {IMU FMU\\\scriptsize noise, registers, FIFO};
+  \node[fmu, below=of imu]   (baro){BMP390 FMU\\\scriptsize inverse compensation};
+  \node[fmu, below=of baro]  (mag) {MMC5983MA FMU\\\scriptsize SET/RESET state};
+  \node[proc, fit=(plant)(gps)(imu)(baro)(mag), label={[font=\scriptsize]above:importer process (Ecos, fixed step $h$)}] (imp) {};
+  % consumer side
+  \node[drv, right=of gps]  (dgps) {\id{GpsDriver} + \id{UbxParser}};
+  \node[drv, right=of imu]  (dimu) {\id{ImuSpiDriver} + \id{convert\_raw\_to\_si}};
+  \node[drv, right=of baro] (dbaro){\id{Bmp390Driver} + compensator};
+  \node[drv, right=of mag]  (dmag) {\id{Mmc5983maDriver}};
+  \node[proc, fit=(dgps)(dimu)(dbaro)(dmag), label={[font=\scriptsize]above:flight-computer process (free-running)}] (fc) {};
+  % FMI connections
+  \draw[fmi] (plant.south) -- (gps.north) node[lbl, midway, left=1pt, align=right] {FMI inputs,\\one step of delay};
+  \draw[fmi] (gps.south) -- (imu.north);
+  \draw[fmi] (imu.south) -- (baro.north);
+  \draw[fmi] (baro.south) -- (mag.north);
+  % buses
+  \draw[bus] (gps.east)  -- (dgps.west)  node[lbl, midway, above] {UDP (UART stand-in)};
+  \draw[bus] (imu.east)  -- (dimu.west)  node[lbl, midway, above] {SPI, shared memory};
+  \draw[bus] (baro.east) -- (dbaro.west) node[lbl, midway, above] {I$^2$C, shared memory};
+  \draw[bus] (mag.east)  -- (dmag.west)  node[lbl, midway, above] {I$^2$C, shared memory};
+  % tiers below
+  \node[box, below=5mm of fc.south, minimum width=46mm] (tiers) {same translation units, other bus shims:\\\scriptsize Renode (emulated UART/SPI/I$^2$C) and\\\scriptsize STM32H743 (HAL + GPIO)};
+  \draw[fmi, dashed] (fc.south) -- (tiers.north);
+\end{tikzpicture}
+\caption{The protocol-accurate sensor FMU pattern as instantiated in the case
+study. Physics crosses the FMI boundary inside the importer; \emph{bytes}
+cross the sensor boundary to a separate process that runs the unmodified
+on-target drivers. The vertical arrows on the left stand for the importer's
+connections, which carry plant truth to every sensor FMU with one step of
+delay (Section~\ref{sec:sync}). The same driver translation units run under
+Renode and on the STM32H743 with only the bus shim replaced.}
 \label{fig:pattern}
 \end{figure}
 
@@ -281,12 +328,17 @@ barometer---with a plausible register sensitivity and a talker transport; it
 costs a day to write and exercises the parser and the conversion arithmetic. A
 \emph{part-accurate} model transcribes one datasheet: its register map, its bus
 conventions, its calibration data, and whatever internal state a driver has to
-manage. Three of the five sensors here exist at the second tier (the SPI IMU,
-the Bosch BMP390, the MEMSIC MMC5983MA); the generic magnetometer, barometer and
-radar-altimeter emitters remain, since a scenario that only needs a field
-measurement should not pay for a register file. The interesting claims in this
-paper come from the second tier, and Section~\ref{sec:transport} is about what
-it buys.
+manage. Two of the five sensors exist at that tier, the Bosch BMP390 and the
+MEMSIC MMC5983MA. The SPI IMU sits between the two: it is
+\emph{register-accurate} but \emph{synthetic}, a register map, FIFO and shift
+register in the shape most MEMS inertial parts share, with sensitivities taken
+from a representative part rather than one datasheet transcribed. It exercises
+everything a polled peripheral asks of a driver without claiming to be a
+particular device, and the paper is careful to call it that. The generic
+magnetometer, barometer and radar-altimeter emitters remain, since a scenario
+that only needs a field measurement should not pay for a register file. The
+interesting claims in this paper come from the register-accurate models, and
+Section~\ref{sec:transport} is about what they buy.
 
 \subsection{The shared error model}
 \label{sec:errormodel}
@@ -522,7 +574,7 @@ Radar alt.  & FMCW altimeter    & height above ground          & Hemerion radalt
 Baro (gen.) & MS5611-class      & altitude MSL                 & Hemerion baro frame       & \code{B7 7B} & UDP 5764 & 50\,Hz\\
 Mag.\ (gen.)& RM3100-class      & body field [\textmu T]       & Hemerion mag frame        & \code{D1 1D} & UDP 5766 & 100\,Hz\\
 \midrule
-IMU         & ADIS16470-class   & specific force, body rates   & registers $+$ 16\,KiB FIFO      & --- & SPI (shm)     & 100\,Hz\\
+IMU         & synthetic MEMS part & specific force, body rates   & registers $+$ 16\,KiB FIFO      & --- & SPI (shm)     & 100\,Hz\\
 Barometer   & Bosch BMP390      & static pressure, ambient $T$ & \begin{tabular}[t]{@{}l@{}}registers, 21-B NVM,\\ 24-bit words\end{tabular} & --- & I$^2$C (shm) & prog.\ ODR\\
 Magnetometer& MEMSIC MMC5983MA  & body field [\textmu T], die $T$ & \begin{tabular}[t]{@{}l@{}}registers, 18-bit words,\\ SET/RESET\end{tabular} & --- & I$^2$C (shm) & prog.\ rate\\
 \bottomrule
@@ -765,8 +817,6 @@ clock, as an FMU or as a bus-synchronized process, which is also the
 precondition for closing the control loop and is left to future work.
 
 \subsection{Plant verification}
-% TODO (review): add a figure of the three reference trajectories and this
-% run (altitude vs time), since the envelope check is called load-bearing.
 The truth source is a two-stage-rocket FMU (NASA TM-2015-218675 Scenario
 17~\cite{nasa_tm2015}: DAVE-ML~\cite{jackson2011daveml} aero/propulsion/inertia
 tables, J2 gravity, stage separation) integrated with a Radau IIA scheme on
@@ -774,7 +824,8 @@ SE(3). None of the sensor results mean anything if the truth is flying the wrong
 mission---and a plant with the wrong staging profile still produces perfectly
 clean-looking sensor streams, which is what makes such an error easy to miss.
 The run is therefore checked against the three published reference trajectories
-for the scenario. The criterion is their \emph{envelope}, not any single one:
+for the scenario (Fig.~\ref{fig:envelope}). The criterion is their
+\emph{envelope}, not any single one:
 they are independent simulators of the same case and disagree by up to $7\%$
 (16.97\,km) at $t=200$\,s. Our run lies within the envelope, to a tolerance of
 $1\%$ plus 100\,m, at all 2001 samples: it is within 20\,m of all three
@@ -785,6 +836,16 @@ references at stage-1 burnout (26.77\,km against 26.75--26.76\,km), sits
 scenario's worst defect---an FMU parameter (\code{stg2.ignition\_time\_s})
 defaulting to zero flew continuous thrust to 638\,km against a reference topping
 out near 251\,km, while every sensor figure still looked plausible.
+
+\begin{figure}[tbp]
+\centering
+\includegraphics[width=\columnwidth]{plant_envelope.pdf}
+\caption{The reference run's altitude against the three NASA Scenario 17
+check-case trajectories (top) and the difference from each (bottom). Check
+cases 04 and 05 coincide. The references diverge from each other after stage-2
+ignition, by 17\,km at $t=200$\,s; this run lies between them throughout.}
+\label{fig:envelope}
+\end{figure}
 
 \subsection{Receiver fix revocation under dynamics limits}
 \label{sec:cocom}
@@ -1143,6 +1204,64 @@ offset is a large draw (the median over the part's tolerance is $34^\circ$).}
 \label{fig:magerror}
 \end{figure}
 
+\subsection{Injected driver faults}
+\label{sec:faults}
+The claim that a value-level FMU cannot present these failures is best tested
+by committing them. The flight-computer harness can inject three mistakes a
+real driver makes against a real part, each from outside the on-target code:
+converting counts with the sensitivities of a different full-scale range than
+the part is configured for (\code{imu-range}: $\pm250\,^\circ$/s and
+$\pm16$\,g against the part's $\pm2000\,^\circ$/s and $\pm40$\,g); never
+running the SET/RESET pair (\code{mag-skip-conditioning}); and conditioning
+the part correctly but then leaving it magnetised in the RESET direction
+(\code{mag-leave-reset}), which a second code path on a real board can do
+behind the driver's back. Each was run against the reference scenario with the
+same seed, so the parts produced the same samples as in
+Section~\ref{sec:integrity}; Table~\ref{tab:faults} gives the result.
+
+\begin{table}[tbp]
+\centering
+\caption{Three injected driver faults, each run against the reference
+scenario with the reference seed. ``Observed'' is what the harness's own
+comparison against truth shows; the last column is how the fault would appear
+in a harness that hands the flight software floating-point sensor values.}
+\label{tab:faults}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lp{46mm}p{34mm}@{}}
+\toprule
+Fault & Observed here & In a value-level harness\\
+\midrule
+\code{imu-range} & gyro reads $0.125\times$ truth, accelerometer $0.39\times$;
+  no checksum or transfer error & cannot be expressed: there is no full-scale
+  constant to get wrong\\
+\code{mag-skip-conditioning} & field direction $75^\circ$ from truth (median
+  over 844 samples; 72--81$^\circ$); magnitude 45--52\,\textmu T against
+  28--32\,\textmu T & cannot be expressed: there is no bridge offset\\
+\code{mag-leave-reset} & field direction $177^\circ$ from truth (880
+  samples): every axis negated, magnitude correct & cannot be expressed: there
+  is no magnetisation state\\
+\midrule
+none (reference run) & field direction $3.3^\circ$ from truth, the hard iron;
+  scales $1.00\times$ & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+None of the three disturbs a byte: every frame checksums, every transfer and
+transaction completes, and the sample counts are those of a healthy run. That
+is the point. The conditioning fault measured here also agrees with the
+reconstruction of Section~\ref{sec:magresults}, which predicted
+74--83$^\circ$ from the healthy run's samples; and the $3^\circ$ by which the
+RESET fault falls short of a full reversal is the same hard iron that
+separates the healthy run from truth. Each of these is a fault in the code that a value-level harness
+leaves out, and each produces a stream that looks healthy to any check that
+does not compare against truth in physical units. The range fault is the
+quiet one, a constant factor that a filter will happily absorb into its
+estimate; the conditioning faults are the loud ones, tens of degrees of
+heading or a reversed field, and they are the two the Renode
+software-in-the-loop test of Section~\ref{sec:discussion} also guards.
+
 \subsection{FIFO overflow under an unpaced importer}
 \label{sec:fifo}
 The consumer is not stepped by the importer (Section~\ref{sec:sync}), and one
@@ -1209,6 +1328,36 @@ been born with---the one comparison that separates conditioned firmware from
 firmware that merely prints plausible numbers. SIL results are therefore
 positioned to transfer to HIL with a validity a value-level harness cannot claim, because the
 code that most often breaks on hardware is the code SIL usually omits.
+
+\textbf{The open loop, and what it does and does not cost.} The consumer in
+the case study is not stepped by the importer and feeds nothing back to the
+plant (Section~\ref{sec:sync}). A co-simulation referee is right to ask what
+that gives up. For the claims made here, little: every result in
+Section~\ref{sec:results} is a property of the byte path between a part and its
+driver, and each part's output is a function of simulated time alone, which the
+paced and unpaced runs demonstrate by producing identical samples at identical
+stamps. Consumer timing decides which samples are collected, not what they
+contain, and the FIFO's and the datagram queue's loss behaviour under an
+unpaced importer is the behaviour of those mechanisms rather than an artifact
+of the model. What the open loop does cost is twofold. Timing claims about the
+firmware---latency from sample to use, jitter, the interaction of several
+drivers on one core---cannot be made in this tier, because the consumer's
+scheduling is the host's; that is the instruction-accurate tier's job. And
+closing a guidance loop through these FMUs would require the consumer to be a
+stepped participant, so that an actuator command computed from a sample reaches
+the plant at a defined simulated time. The pattern does not prevent that: a
+flight-computer FMU that owns the three bus controllers and advances them in
+its own \code{doStep} is the natural construction, and it is the next step of
+this work.
+
+\textbf{Cost.} Protocol accuracy is cheap at the importer. Unpaced, with no
+consumer attached, the importer advances the plant and all four sensor FMUs
+through the 200\,s scenario in 21.1\,s of wall-clock time on the development
+machine; attaching the consumer, whose bus transactions are answered by the
+FMUs' service threads, raises that to 23.7\,s. Raising the IMU's rate tenfold,
+to 1\,kHz, changes it by less than the run-to-run variation. The plant's
+implicit integration dominates, and the sensor models' noise draws,
+quantization, framing and register bookkeeping are a small fraction of a step.
 
 \textbf{Conformance as a side effect.} Because neither sensor FMU hand-writes
 the FMI export table---a \code{fmu4cpp}~\cite{fmu4cpp} layer exports the full
@@ -1288,9 +1437,6 @@ reproducible bit for bit, which is what makes a figure like
 Fig.~\ref{fig:magerror} checkable rather than merely illustrative. The
 reference run of Section~\ref{sec:results} is repository commit
 \code{55a95ce} with run seed 17, against the plant FMU of Aetherion 0.16.0;
-% VERIFY: the installed TwoStageRocket.fmu was built 2026-10-01 and the local
-% Aetherion checkout is tagged v0.16.0, but the install's version was not read
-% from the FMU itself.
 its configuration files, console transcripts and the script that computes the
 statistics quoted there accompany the manuscript source.
 
@@ -1300,8 +1446,9 @@ frame parsers, error models and simulated buses (36 cases); the packaging checks
 exported archives described in Section~\ref{sec:discussion} (14 cases, one per
 model per FMI version); and the Renode SWIL harness, which drives
 cross-compiled firmware under \code{pyrenode3} (3 cases). Line coverage of the
-natively compiled framework sources is $81.1\%$ ($93.2\%$ of functions, $51.1\%$
-of branches), measured with \code{gcovr} over the first of those suites.
+natively compiled framework sources under the first of those suites is
+$85.9\%$ at the commit reported here, as measured by \code{gcovr} in
+continuous integration and published through Codecov.
 
 % ===========================================================================
 % Elsevier end matter. Every statement below is the author's to make: each is

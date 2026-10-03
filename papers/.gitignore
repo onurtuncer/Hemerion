@@ -15,3 +15,5 @@
 *.vrb
 *.pdf
 *.spl
+# Vector figures are sources, not build output.
+!**/figures/*.pdf

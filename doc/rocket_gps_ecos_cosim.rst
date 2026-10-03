@@ -883,7 +883,8 @@ PNG detached from its caption has no other way to tell you which it is.
    Top: total intensity, the near-rotation-invariant quantity, so this panel
    is about the flight rather than the attitude — **31.8 µT on the pad to
    28.2 µT at 236 km**, weakening as the vehicle climbs and shifting as it
-   flies 2000 km east across the real field's structure.
+   flies some 540 km east (4.9° of longitude) across the real field's
+   structure.
 
    Bottom: what skipping the SET/RESET calibration would have cost, drawn
    from the same samples with the measured bridge offset added back — **48–57°

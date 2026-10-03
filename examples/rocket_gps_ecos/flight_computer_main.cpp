@@ -138,7 +138,25 @@ struct Options
   int mag_print_every = 500;   // console line every N magnetometer samples
   long quiet_ms = 3000;        // exit after this long with no sensor data, once at least one sample arrived
   long max_wall_s = 900;       // hard wall-clock cap
+  // A deliberate driver mistake, injected from the harness so the on-target
+  // code stays untouched: see kFaults. Empty = none, which is every normal run.
+  std::string fault;
 };
+
+/// The mistakes the bench can stand in for, each one a real way firmware goes
+/// wrong against a real part and each one invisible to a harness that hands
+/// the flight software floating-point sensor values:
+///
+/// * `imu-range` -- the driver converts counts with the +/-250 deg/s, +/-16 g
+///   sensitivities while the part is configured for +/-2000 deg/s, +/-40 g.
+///   Scale is not on the wire, so nothing in the byte stream can object; the
+///   decoded rates are simply eight times too small.
+/// * `mag-skip-conditioning` -- the driver never runs the SET/RESET pair, so
+///   the bridge offset it would have measured stays in every sample.
+/// * `mag-leave-reset` -- the driver conditions the part correctly and then
+///   leaves it magnetised in the RESET direction, so every axis comes back
+///   negated.
+constexpr std::array<std::string_view, 3> kFaults = { "imu-range", "mag-skip-conditioning", "mag-leave-reset" };
 
 void print_usage()
 {
@@ -156,7 +174,9 @@ void print_usage()
                "               the FMU reads the same name from HEMERION_BMP390_FMU_I2C_BUS)\n"
                "  --mag-bus    shared-memory I2C bus the MMC5983MA FMU answers on (default\n"
                "               hemerion_mmc5983ma_i2c; must match HEMERION_MMC5983MA_FMU_I2C_BUS)\n"
-               "  --imu-wait-s how long to wait for those buses to appear, so either process may start first\n";
+               "  --imu-wait-s how long to wait for those buses to appear, so either process may start first\n"
+               "  --fault      inject one driver mistake from the harness: imu-range, mag-skip-conditioning\n"
+               "               or mag-leave-reset (default none; see the kFaults comment)\n";
 }
 
 // The options that take a value, paired with what to do with it. A table rather than a chain
@@ -169,7 +189,8 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 16> kValueOptions = { {
+constexpr std::array<ValueOption, 17> kValueOptions = { {
+    { "--fault", [](Options& o, const char* v) { o.fault = v; } },
     { "--port", [](Options& o, const char* v) { o.gps_port = static_cast<std::uint16_t>(std::stoi(v)); } },
     { "--imu-bus", [](Options& o, const char* v) { o.imu_bus = v; } },
     { "--baro-bus", [](Options& o, const char* v) { o.baro_bus = v; } },
@@ -209,6 +230,12 @@ bool parse_args(int argc, char** argv, Options& options)
       return false;
     }
     option->apply(options, argv[++i]);
+  }
+  if (!options.fault.empty() && std::ranges::find(kFaults, options.fault) == kFaults.end())
+  {
+    std::cerr << "unknown --fault '" << options.fault << "'\n";
+    print_usage();
+    return false;
   }
   return true;
 }
@@ -538,7 +565,12 @@ int main(int argc, char** argv)
   // make the example fragile in exactly the way start-order races are.
   ShmMagI2cBus mag_bus(*mag_i2c, std::chrono::milliseconds(2000));
   Mmc5983maDriver mag_driver(mag_bus);
-  const Mmc5983maConfig mag_config;
+  Mmc5983maConfig mag_config;
+  if (options.fault == "mag-skip-conditioning")
+  {
+    mag_config.calibrate_offset_on_probe = false;
+    std::cout << "[fc] fault injected: mag-skip-conditioning (no SET/RESET pair at bring-up)\n";
+  }
   bool mag_up = false;
   for (int attempt = 0; attempt < 20 && !mag_up; ++attempt)
   {
@@ -568,6 +600,23 @@ int main(int argc, char** argv)
     std::cerr << "error: the MMC5983MA never completed its SET/RESET calibration -- is rocket_gps_cosim "
                  "stepping?\n";
     return EXIT_FAILURE;
+  }
+  if (options.fault == "mag-leave-reset")
+  {
+    // The conditioning above ended with a SET; undo it, behind the driver's
+    // back and straight onto the bus, as a second code path on a real board
+    // might. Interrupt enable is the one persistent bit the driver wrote into
+    // this register, so keep it.
+    using hemerion::sensors::mag::mmc5983ma::kMmc5983maControl0InterruptEnable;
+    using hemerion::sensors::mag::mmc5983ma::kMmc5983maControl0Reset;
+    using hemerion::sensors::mag::mmc5983ma::Mmc5983maRegister;
+    if (!mag_bus.write_register(static_cast<std::uint8_t>(Mmc5983maRegister::kInternalControl0),
+                                kMmc5983maControl0Reset | kMmc5983maControl0InterruptEnable))
+    {
+      std::cerr << "error: could not inject mag-leave-reset\n";
+      return EXIT_FAILURE;
+    }
+    std::cout << "[fc] fault injected: mag-leave-reset (part left magnetised in the RESET direction)\n";
   }
   {
     // The bridge offset is worth a line of its own: it is what the SET/RESET
@@ -638,15 +687,16 @@ int main(int argc, char** argv)
     // Without it a reader of mag_samples.csv cannot tell a run whose
     // calibration worked from one whose part happened to have a small offset,
     // and plot_results.py could not draw the uncalibrated counterfactual.
-    std::ofstream mag_config =
+    std::ofstream mag_sidecar =
         open_csv(options.mag_csv_path.parent_path() / (options.mag_csv_path.stem().string() + ".config"));
-    if (mag_config)
+    if (mag_sidecar)
     {
       const auto& offset = mag_driver.bridge_offset();
-      mag_config << "bridge_offset_x_lsb=" << offset.x << "\n"
-                 << "bridge_offset_y_lsb=" << offset.y << "\n"
-                 << "bridge_offset_z_lsb=" << offset.z << "\n"
-                 << "lsb_per_microtesla=" << kMmc5983maLsbPerMicrotesla << "\n";
+      mag_sidecar << "bridge_offset_x_lsb=" << offset.x << "\n"
+                  << "bridge_offset_y_lsb=" << offset.y << "\n"
+                  << "bridge_offset_z_lsb=" << offset.z << "\n"
+                  << "lsb_per_microtesla=" << kMmc5983maLsbPerMicrotesla << "\n"
+                  << "fault=" << options.fault << "\n";
     }
   }
 
@@ -655,7 +705,14 @@ int main(int argc, char** argv)
   // configured the part's registers itself; here the "configuration" is the
   // IMU FMU's default ImuNoiseConfig, so its scale is the one that converts
   // these counts back to SI.
-  const hemerion::sensors::imu::ImuScale imu_scale = hemerion::sensors::imu::fmu::ImuNoiseConfig{}.scale;
+  const hemerion::sensors::imu::ImuScale imu_scale =
+      (options.fault == "imu-range") ?
+          hemerion::sensors::imu::imu_scale_for(hemerion::sensors::imu::ImuRange::k250DpsPm16G) :
+          hemerion::sensors::imu::fmu::ImuNoiseConfig{}.scale;
+  if (options.fault == "imu-range")
+  {
+    std::cout << "[fc] fault injected: imu-range (converting with +/-250 deg/s, +/-16 g sensitivities)\n";
+  }
 
   std::array<std::uint8_t, 2048> datagram{};
   std::array<ImuRawSample, 64> imu_batch{};
