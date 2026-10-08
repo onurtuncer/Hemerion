@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<package name="hemerion" version="0.9.0">
+<package name="hemerion" version="0.10.0">
   <description>Embedded firmware framework for aerospace GNC and real-time embedded systems</description>
   <maintainer email="onur.tuncer@itu.edu.tr">Onur Tuncer</maintainer>
   <license>GPL-3.0-only</license>

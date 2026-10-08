@@ -196,6 +196,18 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Gyroscope register sensitivity [LSB per degree/s]; the consuming driver must convert with the "
                         "same value");
+    // Registered last so every earlier value reference keeps the number it had before these existed.
+    register_real("accel_noise_density_mps2_sqrt_hz", &accel_noise_density_mps2_sqrt_hz_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Accelerometer white noise density [m/s^2 per sqrt(Hz)]; nonzero replaces accel_noise_mps2 "
+                        "with density / sqrt(sample period), so the noise stays the same physics at any "
+                        "sample_rate_hz. 0 keeps the per-sample sigma");
+    register_real("gyro_noise_density_rad_s_sqrt_hz", &gyro_noise_density_rad_s_sqrt_hz_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Gyroscope white noise density, the angle random walk [rad/s per sqrt(Hz)]; nonzero replaces "
+                        "gyro_noise_rad_s the same way. 1 deg/sqrt(h) is about 2.9e-4");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -238,6 +250,8 @@ public:
     clock_jitter_sigma_s_ = 0.0;
     accel_noise_mps2_ = kDefaultNoise.accel_noise_mps2;
     gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
+    accel_noise_density_mps2_sqrt_hz_ = kDefaultNoise.accel_noise_density_mps2_sqrt_hz;
+    gyro_noise_density_rad_s_sqrt_hz_ = kDefaultNoise.gyro_noise_density_rad_s_sqrt_hz;
     accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
     gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
     accel_bias_walk_mps2_sqrt_s_ = kDefaultNoise.accel_bias_walk_mps2_sqrt_s;
@@ -268,6 +282,9 @@ protected:
     const long samples = std::lround(dt * sample_rate_hz_);
     const long count = (samples > 0) ? samples : 1;
     const double sample_period_s = dt / static_cast<double>(count);
+    // The period actually emitted, not 1 / sample_rate_hz: rounding the count
+    // can make them differ, and the density must hold at the real one.
+    noise_model_.set_sample_period_s(sample_period_s);
 
     for (long k = 1; k <= count; ++k)
     {
@@ -300,6 +317,8 @@ private:
     ImuNoiseConfig config;
     config.accel_noise_mps2 = static_cast<float>(accel_noise_mps2_);
     config.gyro_noise_rad_s = static_cast<float>(gyro_noise_rad_s_);
+    config.accel_noise_density_mps2_sqrt_hz = static_cast<float>(accel_noise_density_mps2_sqrt_hz_);
+    config.gyro_noise_density_rad_s_sqrt_hz = static_cast<float>(gyro_noise_density_rad_s_sqrt_hz_);
     config.accel_bias_sigma_mps2 = static_cast<float>(accel_bias_sigma_mps2_);
     config.gyro_bias_sigma_rad_s = static_cast<float>(gyro_bias_sigma_rad_s_);
     config.accel_bias_walk_mps2_sqrt_s = static_cast<float>(accel_bias_walk_mps2_sqrt_s_);
@@ -325,6 +344,8 @@ private:
   double clock_jitter_sigma_s_ = 0.0;
   double accel_noise_mps2_ = kDefaultNoise.accel_noise_mps2;
   double gyro_noise_rad_s_ = kDefaultNoise.gyro_noise_rad_s;
+  double accel_noise_density_mps2_sqrt_hz_ = kDefaultNoise.accel_noise_density_mps2_sqrt_hz;
+  double gyro_noise_density_rad_s_sqrt_hz_ = kDefaultNoise.gyro_noise_density_rad_s_sqrt_hz;
   double accel_bias_sigma_mps2_ = kDefaultNoise.accel_bias_sigma_mps2;
   double gyro_bias_sigma_rad_s_ = kDefaultNoise.gyro_bias_sigma_rad_s;
   double accel_bias_walk_mps2_sqrt_s_ = kDefaultNoise.accel_bias_walk_mps2_sqrt_s;
