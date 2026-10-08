@@ -230,6 +230,54 @@ void test_imu_bias_random_walk()
   CHECK(static_cast<double>(fixed_bias.gyro_bias_rad_s()[0]) == before);
 }
 
+// Noise density: the per-sample sigma must follow the rate as
+// density / sqrt(period), so the density recovered from the samples --
+// sigma * sqrt(period) -- is the same whatever the rate. A per-sample sigma
+// is the opposite: fixed per sample, so a faster part would be a quieter one.
+// That is what lets a filter be tuned once, in continuous time, before the
+// rate is settled. And a zero density must leave the stream bit-identical.
+void test_imu_noise_density()
+{
+  const ImuTruthSample truth = imu_truth();
+  constexpr double kDensity = 1e-3;  // rad/s per sqrt(Hz); well above the 1.06e-3 rad/s LSB at 100 Hz and up
+
+  const auto recovered_density = [&](double period_s) {
+    ImuNoiseConfig config;
+    config.gyro_bias_sigma_rad_s = 0.0F;
+    config.gyro_noise_density_rad_s_sqrt_hz = static_cast<float>(kDensity);
+    ImuNoiseModel model(config, /*seed=*/21);
+    model.set_sample_period_s(period_s);
+    CHECK(near(model.gyro_noise_sigma_rad_s(), kDensity / std::sqrt(period_s), 1e-6 * kDensity / std::sqrt(period_s)));
+    const double gyro_lsb_per_rad_s = static_cast<double>(config.scale.gyro_lsb_per_dps) * (180.0 / std::numbers::pi);
+    std::vector<double> gyro_x;
+    gyro_x.reserve(kDraws);
+    for (int k = 0; k < kDraws; ++k)
+    {
+      gyro_x.push_back(static_cast<std::int16_t>(model.apply(truth).gyro_x) / gyro_lsb_per_rad_s);
+    }
+    return stddev(gyro_x) * std::sqrt(period_s);
+  };
+  const double at_100_hz = recovered_density(0.01);
+  const double at_400_hz = recovered_density(0.0025);
+  CHECK(near(at_100_hz, kDensity, 0.1 * kDensity));
+  CHECK(near(at_400_hz, kDensity, 0.1 * kDensity));
+
+  // Density 0 (the default): telling the model the period changes nothing,
+  // so the FMU's defaults draw exactly the numbers they always have.
+  ImuNoiseModel told(ImuNoiseConfig{}, /*seed=*/77);
+  ImuNoiseModel untold(ImuNoiseConfig{}, /*seed=*/77);
+  told.set_sample_period_s(0.0025);
+  CHECK(told.accel_noise_sigma_mps2() == ImuNoiseConfig{}.accel_noise_mps2);
+  CHECK(told.gyro_noise_sigma_rad_s() == ImuNoiseConfig{}.gyro_noise_rad_s);
+  for (int k = 0; k < 200; ++k)
+  {
+    const auto rt = told.apply(truth);
+    const auto ru = untold.apply(truth);
+    CHECK(rt.accel_x == ru.accel_x && rt.accel_y == ru.accel_y && rt.accel_z == ru.accel_z);
+    CHECK(rt.gyro_x == ru.gyro_x && rt.gyro_y == ru.gyro_y && rt.gyro_z == ru.gyro_z);
+  }
+}
+
 // Scale factor and misalignment are cross-axis errors invisible at rest: they
 // scale with the signal. A part with 1 % scale error reads 1 % high on a rate
 // it is actually turning at, and nothing extra on a rate of zero.
@@ -560,6 +608,7 @@ int main()
 {
   test_imu_seeding();
   test_imu_bias_random_walk();
+  test_imu_noise_density();
   test_imu_scale_and_misalignment();
   test_bmp390_seeding();
   test_mmc5983ma_seeding();
