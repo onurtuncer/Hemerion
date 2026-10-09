@@ -1,48 +1,94 @@
-# Journal companion — extension roadmap
+# Paper 1 — what is left
 
-The conference paper targets **SIMULTECH / SIMPAC**. The companion targets a
-journal — primary **Simulation Modelling Practice and Theory (SMPT, Elsevier)**,
-which has a standing invited-extension pipeline from SIMULTECH; fast open-access
-fallback **MDPI *Aerospace***.
+The draft targets **Simulation Modelling Practice and Theory** directly (the
+SIMULTECH-first plan is retired; its extension roadmap is in git history).
+Forward-looking list; the README's checklist records what has been done and
+when. Branch `papers/paper1-smpt-resync`, as of 2026-10-09.
 
-A journal version must add ~30–40% genuinely new material over the conference
-paper, cite it explicitly, and avoid self-plagiarism. Items 1 and 2 below alone
-justify the extension; the rest deepen it.
+## Referee-level
 
-## Extension delta
+- [ ] **Step the consumer on the importer's clock.** A flight-computer FMU that
+      owns the three bus controllers and advances them in its own `doStep`.
+      This closes three things at once: it makes a run reproducible sample for
+      sample (today only the parts' streams are), it removes the host
+      dependence of the polled-part sample counts (904/878 here, ~2000 on the
+      docs' Linux host), and it is the precondition for closing a guidance
+      loop. The paper currently defends the open loop (Discussion); a referee
+      may still ask for this.
+- [ ] **Monte Carlo over seeds.** The GPS RMS is quoted from 312 fixes (4 %
+      standard error). Run N seeds and report the distribution against the
+      analytic expectation. GPS and IMU samples are pacing-independent, so
+      unpaced runs (~25 s each) suffice; the magnetometer needs paced runs.
+      Mechanics: `rocket_gps_cosim --seed <n>` + `run_statistics.py` per
+      results directory.
+- [ ] **Radar altimeter.** Still the one sensor with a model and no case-study
+      run in this paper. `examples/f16_trim_ecos` carries a radalt residual
+      figure (commit `fb74c9b`): check whether that is an end-to-end run of the
+      same FMU through the on-target parser and, if so, cite its numbers in a
+      short subsection rather than leaving the Limitations sentence.
+- [ ] **SIL → HWIL on physical hardware.** The paper now claims only
+      co-simulation and Renode. Put the same decoders on an STM32H743 with a
+      measured byte-level comparison across the three tiers. First step is
+      `swil.mag_logger` end to end (blocked on WSL; repo `TODO.md`).
+- [ ] **Multi-drop I²C.** `sim/i2c_shm` carries one peripheral per bus; a real
+      board puts the BMP390 and MMC5983MA on I2C1 at `0x76` and `0x30`. A
+      register-accurate claim invites exactly this probe.
+- [ ] **Related Work breadth.** ArduPilot/PX4 are now cited. Still missing:
+      SystemC/TLM register-accurate peripheral modelling, QEMU/Renode sensor
+      emulation papers, virtual-ECU tooling (dSPACE VEOS, Synopsys
+      Virtualizer), DCP, GNSS protocol/RF simulators, and a citation for the
+      Introduction's "historically bug-prone" driver-code claim.
+- [ ] **COCOM wording.** "An AND, in every receiver one can buy" is stronger
+      than the sources support; cite the u-blox document the model follows and
+      note that manufacturers differ. Also re-verify "one usable fix in 2001
+      with `--dyn-model 8`" with a current run (it is quoted from the docs).
+- [ ] **FMI 3.0 binary-output variant.** A referee will ask why the byte
+      stream is not *also* exposed as an FMI 3.0 `Binary` output so the design
+      is master-visible. Either build it (the FMUs already export 3.0) and
+      report, or argue the trade explicitly in Section 2.
+- [ ] **Timing terms.** `--sensor-clock` and `--gps-latency` exist but are off
+      in the reference run. One run with them on, reported as a short
+      subsection, would answer the "what about timing" question directly.
 
-- [x] ~~**1. Validate all five sensors end-to-end, not just GPS+IMU.**~~ Mostly
-  done, and it went into the conference paper rather than being saved for the
-  journal: the BMP390 and MMC5983MA are now register-accurate I²C parts with
-  case-study results (Sections "The barometer stops being an altimeter" and
-  "The magnetometer is unusable until it is conditioned"). **The radar altimeter
-  remains unvalidated** — the scenario is a launch to orbit and has no ground
-  under it. Validating it needs a different scenario, which is still a real
-  journal delta.
+## Presentation
 
-- [ ] **2. Quantify SIL→HWIL transfer.** Partly closed: the BMP390 SWIL loop
-  (firmware in Renode → emulated I²C → C# bridge → TCP → shared-memory bus →
-  the same device model the FMU embeds) now gates in CI, and the conference
-  paper says so. Still to do: run `swil.mag_logger` end to end (blocked on WSL,
-  see the repo's `TODO.md`), and put the same decoders on physical STM32H743
-  hardware with a measured byte-level comparison across all three tiers.
+- [ ] Vector figures: `plot_results.py` writes PNG only; add PDF output and
+      switch the ten `includegraphics` calls (the envelope figure is already
+      PDF).
+- [ ] Tone pass over what remains of the essay voice; page-count pass against
+      SMPT's limit if it sets one.
+- [ ] Table 7 (injected faults) is cramped in the `p{}` columns; consider
+      `tabularx` or shorter cell text.
+- [ ] Re-check highlights (≤85 characters), keywords (1–7) and abstract
+      (≤250 words) against the Guide for Authors at submission time.
 
-- [ ] **3. Richer error models.** Correlated in-run bias (Gauss-Markov),
-  scale-factor / misalignment, and the soft-iron term deliberately deferred —
-  each plugged into the same `sat(round(·))` form. The magnetic environment is
-  also still a centred tilted dipole rather than a spherical-harmonic model,
-  and the MMC5983MA's self-test coil is register-modelled but not magnetically
-  modelled, so a driver self-test passes vacuously.
+## Submission mechanics
 
-- [ ] **6. Multi-drop I²C.** `sim/i2c_shm` carries one peripheral per bus, so
-  the BMP390 and the MMC5983MA sit on separate simulated buses where a real
-  board puts both on I2C1 at `0x76` and `0x30`. Addressing two parts on one bus
-  is the one thing about driving I²C the work does not exercise, and it is
-  exactly the kind of gap a register-accurate claim invites a reviewer to probe.
+- [ ] End matter: confirm CRediT roles, competing interests and funding; fill
+      in or delete the generative-AI declaration (every `% TODO` in
+      `main.tex`).
+- [ ] Zenodo (or equivalent) DOI for the exact commit, cited from Data
+      availability instead of the live repository.
+- [ ] Verify citations against primary sources: NASA TM-2015-218675
+      title/authors, `bosch_bmp390` and `memsic_mmc5983ma` document numbers,
+      and the three entries BibTeX flags as missing pages (`pedersen2016fmi`,
+      `mikelsons2017virtual`, `jackson2011daveml`).
+- [ ] Cover letter and suggested reviewers.
 
-- [ ] **4. Deeper FMI-LS-BUS comparison.** Possibly an actual head-to-head on a
-  bus both can express, turning the three-axes argument into a measured
-  contrast.
+## Repository follow-ups the paper surfaced
 
-- [ ] **5. Citable reproducibility artifact.** The JOSS paper discussed earlier,
-  referenced from the journal version to give it a DOI.
+- [ ] Document `gps_flight_computer --fault` in
+      `examples/rocket_gps_ecos/README.md` and `doc/rocket_gps_ecos_cosim.rst`.
+- [ ] The consumer's poll loop takes ~0.23 s per pass on Windows against
+      ~0.1 s on Linux, which is what sets the polled-part counts; look at the
+      shared-memory link's backoff (`sleep_for` granularity on Windows) before
+      blaming the drivers.
+- [ ] `doc/rocket_gps_ecos_cosim.rst` still quotes the original three-sensor
+      transcript and a different run's magnetometer numbers (48–57°); fine as
+      labelled, but a single current transcript would be cleaner.
+- [ ] `TODO-sensor-fusion.md` (step 4) may move the example from a 100 Hz to
+      a 500 Hz IMU. If it does, the reference run must be re-taken: Section
+      5.1's "10 samples per step", Table 4, the two IMU figures and the IMU
+      rows of Table 5 all assume 100 Hz, and the per-sample sigma in Table 1
+      would then need to be restated as the density (or the run made with the
+      density set) so the noise physics stays the one the paper reports.

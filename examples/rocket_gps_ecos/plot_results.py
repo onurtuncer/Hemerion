@@ -866,7 +866,8 @@ def plot_mag_magnitude(truth, mag, mag_config: dict[str, float], out: Path, capt
     **Top: total intensity.** Magnitude is the near-rotation-invariant
     quantity, so this panel is about the flight rather than the attitude. The
     field weakens as the vehicle climbs (1/r³ costs ~10% over 236 km) and
-    shifts as it flies 2000 km east across the real field's structure. The
+    shifts as it flies some 540 km east (4.9° of longitude) across the real
+    field's structure. The
     decoded samples sit a little under truth throughout: that gap is the
     simulated part's *hard iron*, a real field the installation adds, which no
     amount of SET/RESET removes -- only a magnetic calibration flown through

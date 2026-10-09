@@ -1,0 +1,16 @@
+[fc] listening for UBX-NAV-PVT on UDP port 5762 (GpsDriver, protocol=UBX)
+[fc] waiting up to 120 s for the IMU on SPI bus 'hemerion_imu_spi' and the BMP390 on I2C bus 'hemerion_bmp390_i2c'
+[fc] IMU identified on SPI (WHO_AM_I matched), FIFO enabled
+[fc] BMP390 identified on I2C (CHIP_ID matched), calibrated, converting at 50 Hz
+[fc] MMC5983MA identified on I2C (product ID matched), bridge offset -7945/+80/+2689 LSB (-48.49/+0.49/+16.41 uT) cancelled, measuring at 50 Hz
+[fc] IMU powered down (FMU terminated) -- co-simulation finished
+[fc] summary: 1248 NAV-PVT epochs decoded (0 checksum errors), 312 carried a fix, 936 did not
+[fc] no-fix window: t=31.3 s to t=124.8 s (receiver outside its dynamics envelope)
+[fc] 18421 IMU samples decoded over 6149 SPI transfers (0 checksum errors, 28 FIFO overflows, 0 failed transfers)
+[fc] 3 BMP390 conversions read over 16 I2C transactions (0 failed)
+[fc] 5 MMC5983MA measurements read over 39 I2C transactions (0 failed)
+[fc] min pressure 9930.39 Pa, min temperature -19.1141 C (both at the top of the observed trajectory)
+[fc] field magnitude 30.0659 to 30.1998 uT over the flight (1/r^3 falloff with altitude)
+[fc] max altitude 17954.7 m, max ground speed 1617.07 m/s (over 312 fixes carrying a solution)
+[fc] max |specific force| 264.657 m/s2, max |body rate| 0.0564541 rad/s
+[fc] fixes written to results_unpaced/gps_fixes.csv, IMU samples to results_unpaced/imu_samples.csv, baro samples to results_unpaced/baro_samples.csv, magnetometer samples to results_unpaced/mag_samples.csv
