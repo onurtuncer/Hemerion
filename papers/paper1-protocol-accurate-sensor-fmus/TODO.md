@@ -3,7 +3,7 @@
 The draft targets **Simulation Modelling Practice and Theory** directly (the
 SIMULTECH-first plan is retired; its extension roadmap is in git history).
 Forward-looking list; the README's checklist records what has been done and
-when. Branch `papers/paper1-smpt-resync`, as of 2026-10-03.
+when. Branch `papers/paper1-smpt-resync`, as of 2026-10-09.
 
 ## Referee-level
 
@@ -86,3 +86,9 @@ when. Branch `papers/paper1-smpt-resync`, as of 2026-10-03.
 - [ ] `doc/rocket_gps_ecos_cosim.rst` still quotes the original three-sensor
       transcript and a different run's magnetometer numbers (48–57°); fine as
       labelled, but a single current transcript would be cleaner.
+- [ ] `TODO-sensor-fusion.md` (step 4) may move the example from a 100 Hz to
+      a 500 Hz IMU. If it does, the reference run must be re-taken: Section
+      5.1's "10 samples per step", Table 4, the two IMU figures and the IMU
+      rows of Table 5 all assume 100 Hz, and the per-sample sigma in Table 1
+      would then need to be restated as the density (or the run made with the
+      density set) so the noise physics stays the one the paper reports.

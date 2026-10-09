@@ -81,6 +81,17 @@ done and when; everything still open is in `TODO.md`.
       flight unpaced; a 10x IMU rate costs nothing measurable). The flight
       computer harness gained `--fault imu-range | mag-skip-conditioning |
       mag-leave-reset`, and Section 6.7 reports the three injected faults.
+- [x] Re-sync after merging `main` (2026-10-09, Hemerion 0.10.0). The one
+      sensor-model change since `55a95ce` is the IMU's optional noise density
+      (`accel_noise_density_mps2_sqrt_hz`, `gyro_noise_density_rad_s_sqrt_hz`,
+      commit `9ab7660`); its zero default is bit-identical, which
+      `test_imu_noise_density` asserts, so no figure or number moved. Section 5
+      now describes the density form and the 100 Hz equivalents of Table 1's IMU
+      figures (5e-3 m/s^2/sqrt(Hz), 2e-4 rad/s/sqrt(Hz)); the Discussion notes
+      that the 1 kHz cost run kept the per-sample sigma; Reproducibility says
+      the reference run reproduces from the current tree. The test counts
+      (36/14/3) are unchanged: the new test is a function inside
+      `sensors.seeding`.
 - [x] Add a **related-work novelty scan** (ArduPilot/PX4 done 2026-10-03; SystemC/TLM, QEMU, virtual-ECU and DCP citations still to add) — the current Related Work section is
       argued but lightly cited; a proper literature search should confirm the
       "no prior protocol-accurate sensor FMU" claim and add citations.

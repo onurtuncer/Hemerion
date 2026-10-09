@@ -381,6 +381,21 @@ seeded run. The case study leaves all of them at zero: its claims concern the
 transport, and these terms matter to a navigation filter rather than to a
 driver.
 
+The IMU's white noise can also be specified as a density rather than a
+per-sample $\sigma_w$: a velocity random walk in m/s$^2$/$\sqrt{\text{Hz}}$ and
+an angle random walk in rad/s/$\sqrt{\text{Hz}}$, from which the model derives
+$\sigma_w = \text{density}/\sqrt{T_s}$ at the sample period it actually emits.
+A per-sample $\sigma_w$ fixes the noise each sample carries, so changing
+\code{sample\_rate\_hz} silently changes the density, and with it the process
+noise a downstream filter is tuned for; the density form keeps the physics
+fixed and lets the rate change only the discretisation. The two agree at one
+rate: Table~\ref{tab:params}'s IMU figures at 100\,Hz correspond to
+$5\times10^{-3}$\,m/s$^2$/$\sqrt{\text{Hz}}$ and
+$2\times10^{-4}$\,rad/s/$\sqrt{\text{Hz}}$ (about $0.69^\circ/\sqrt{\text{h}}$).
+A density of zero, the default, leaves the per-sample $\sigma_w$ in charge and
+the output stream bit-identical, which the seeding test asserts; the case study
+uses the per-sample form.
+
 \begin{table}[tbp]
 \centering
 \caption{Configured error-model parameters (per measurement channel). White and
@@ -1355,8 +1370,11 @@ consumer attached, the importer advances the plant and all four sensor FMUs
 through the 200\,s scenario in 21.1\,s of wall-clock time on the development
 machine; attaching the consumer, whose bus transactions are answered by the
 FMUs' service threads, raises that to 23.7\,s. Raising the IMU's rate tenfold,
-to 1\,kHz, changes it by less than the run-to-run variation. The plant's
-implicit integration dominates, and the sensor models' noise draws,
+to 1\,kHz, changes it by less than the run-to-run variation (that run kept the
+per-sample $\sigma_w$, so the part was also $\sqrt{10}$ noisier per
+$\sqrt{\text{Hz}}$; the density form of Section~\ref{sec:errormodel} is what
+one would set to raise the rate without moving the physics, at the same cost).
+The plant's implicit integration dominates, and the sensor models' noise draws,
 quantization, framing and register bookkeeping are a small fraction of a step.
 
 \textbf{Conformance as a side effect.} Because neither sensor FMU hand-writes
@@ -1438,7 +1456,11 @@ Fig.~\ref{fig:magerror} checkable rather than merely illustrative. The
 reference run of Section~\ref{sec:results} is repository commit
 \code{55a95ce} with run seed 17, against the plant FMU of Aetherion 0.16.0;
 its configuration files, console transcripts and the script that computes the
-statistics quoted there accompany the manuscript source.
+statistics quoted there accompany the manuscript source. The one sensor-model
+change since that commit (the IMU noise density of Section~\ref{sec:errormodel},
+Hemerion 0.10.0) is opt-in with a zero default, and the seeding suite asserts
+that the default leaves the stream bit for bit unchanged, so the reference run
+reproduces from the current tree as well as from \code{55a95ce}.
 
 Continuous integration rebuilds every tier on each change and runs three
 suites: the host-side unit and integration tests over the conversion routines,
