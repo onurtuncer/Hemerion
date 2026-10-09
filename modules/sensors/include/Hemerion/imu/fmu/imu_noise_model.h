@@ -57,8 +57,23 @@ struct ImuTruthSample
 /// registers.
 struct ImuNoiseConfig
 {
-  float accel_noise_mps2 = 0.05F;        ///< Accelerometer white noise, 1-sigma per axis [m/s^2].
-  float gyro_noise_rad_s = 0.002F;       ///< Gyroscope white noise, 1-sigma per axis [rad/s].
+  float accel_noise_mps2 = 0.05F;   ///< Accelerometer white noise, 1-sigma per axis [m/s^2].
+  float gyro_noise_rad_s = 0.002F;  ///< Gyroscope white noise, 1-sigma per axis [rad/s].
+
+  /// Accelerometer white noise as a density [m/s^2 per sqrt(Hz)], the
+  /// velocity random walk. A per-sample sigma fixes the noise each sample
+  /// carries, so changing the output rate silently changes the density and
+  /// with it the process noise a filter has to be tuned for. A density fixes
+  /// the physics instead: each sample then carries density / sqrt(period),
+  /// and the noise integrated over a second is the same at any rate. Nonzero
+  /// takes precedence over accel_noise_mps2, once
+  /// ImuNoiseModel::set_sample_period_s() has said what the period is; 0 (the
+  /// default) leaves the per-sample sigma in charge.
+  float accel_noise_density_mps2_sqrt_hz = 0.0F;
+  /// Gyroscope white noise as a density [rad/s per sqrt(Hz)], the angle random
+  /// walk; same rules as the accelerometer's. 1 deg/sqrt(h) is about 2.9e-4.
+  float gyro_noise_density_rad_s_sqrt_hz = 0.0F;
+
   float accel_bias_sigma_mps2 = 0.02F;   ///< Turn-on bias 1-sigma per axis, drawn once per run [m/s^2].
   float gyro_bias_sigma_rad_s = 0.001F;  ///< Turn-on bias 1-sigma per axis, drawn once per run [rad/s].
 
@@ -127,6 +142,36 @@ public:
     draw_misalignment(gyro_misalignment_);
   }
 
+  /// @brief Tells the model how far apart its samples are, so a configured
+  /// noise density can become a per-sample sigma.
+  ///
+  /// A no-op for an axis whose density is 0, which keeps the per-sample sigma
+  /// exactly as configured -- and the noise stream bit-identical to a model
+  /// that was never told. Call it again if the rate changes.
+  ///
+  /// @param period_s Time between samples [s]; ignored unless positive.
+  void set_sample_period_s(double period_s)
+  {
+    if (period_s <= 0.0)
+    {
+      return;
+    }
+    if (config_.accel_noise_density_mps2_sqrt_hz > 0.0F)
+    {
+      accel_noise_sigma_ = static_cast<float>(config_.accel_noise_density_mps2_sqrt_hz / std::sqrt(period_s));
+    }
+    if (config_.gyro_noise_density_rad_s_sqrt_hz > 0.0F)
+    {
+      gyro_noise_sigma_ = static_cast<float>(config_.gyro_noise_density_rad_s_sqrt_hz / std::sqrt(period_s));
+    }
+  }
+
+  /// The white-noise 1-sigma each accelerometer sample currently carries [m/s^2].
+  [[nodiscard]] float accel_noise_sigma_mps2() const { return accel_noise_sigma_; }
+
+  /// The white-noise 1-sigma each gyroscope sample currently carries [rad/s].
+  [[nodiscard]] float gyro_noise_sigma_rad_s() const { return gyro_noise_sigma_; }
+
   /// @brief Produces one raw register sample from one truth sample.
   ///
   /// Per axis: truth + turn-on bias + white noise, scaled to counts with
@@ -167,18 +212,18 @@ public:
     // constructor -- it requires a strictly positive stddev.
     auto accel = [&](double sensed_mps2, float bias) {
       float noise = 0.0F;
-      if (config_.accel_noise_mps2 > 0.0F)
+      if (accel_noise_sigma_ > 0.0F)
       {
-        noise = std::normal_distribution<float>(0.0F, config_.accel_noise_mps2)(rng_);
+        noise = std::normal_distribution<float>(0.0F, accel_noise_sigma_)(rng_);
       }
       // Inverse of convert_raw_to_si(): counts = m/s^2 * (LSB/g) / (m/s^2 per g).
       return quantize((sensed_mps2 + bias + noise) * config_.scale.accel_lsb_per_g / kStandardGravityMps2);
     };
     auto gyro = [&](double sensed_rad_s, float bias) {
       float noise = 0.0F;
-      if (config_.gyro_noise_rad_s > 0.0F)
+      if (gyro_noise_sigma_ > 0.0F)
       {
-        noise = std::normal_distribution<float>(0.0F, config_.gyro_noise_rad_s)(rng_);
+        noise = std::normal_distribution<float>(0.0F, gyro_noise_sigma_)(rng_);
       }
       // counts = rad/s * (LSB per deg/s) / (rad per deg).
       return quantize((sensed_rad_s + bias + noise) * config_.scale.gyro_lsb_per_dps / kDegToRad);
@@ -224,6 +269,10 @@ private:
 
   ImuNoiseConfig config_;
   std::mt19937_64 rng_;
+  /// Per-sample white sigmas actually drawn with: the configured ones until
+  /// set_sample_period_s() converts a density.
+  float accel_noise_sigma_ = config_.accel_noise_mps2;
+  float gyro_noise_sigma_ = config_.gyro_noise_rad_s;
   /// Draws a per-axis scale-factor error; identity (1.0) when disabled.
   void draw_scale(float sigma, float (&scale)[3])
   {
