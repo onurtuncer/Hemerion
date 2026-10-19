@@ -124,6 +124,7 @@
 #include "Hemerion/imu/imu_types.h"
 
 #include "environment.hpp"
+#include "log_contract.hpp"
 
 #include <algorithm>
 #include <array>
@@ -155,6 +156,8 @@ using hemerion::examples::GpsErrorModel;
 using hemerion::examples::kCorrelatedReceiver;
 using hemerion::examples::kFeetToMetres;
 using hemerion::examples::kWhiteReceiver;
+using hemerion::examples::with_drawn_errors;
+namespace log_contract = hemerion::examples::log_contract;
 using hemerion::examples::parse_csv_doubles;
 
 using hemerion::sensors::mag::to_body;
@@ -244,7 +247,8 @@ struct Options
   // spread measured in tenths of a degree, and staying on Aetherion's value is what lets this run agree with
   // Aetherion's own standalone examples to millimetres.
   double roll0_deg = -0.172;
-  double step_s = 0.1;           // communication step == GPS output period (10 Hz)
+  double step_s = 0.1;           // communication step
+  double gps_period_s = 0.1;     // NAV-PVT period: the GPS FMU's step-size hint (10 Hz), independent of step_s
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double radalt_rate_hz = 25.0;  // radar altimeter pulse rate
 
@@ -415,7 +419,10 @@ void print_usage()
                "  --vt0       trim true airspeed [ft/s] (default 565.685 = 335.15 KTAS, or 2000 for --case 12)\n"
                "  --heading0 --roll0  trim attitude [deg] (default 45 / -0.172)\n"
                "  --stop      simulation stop time [s] (default 200 = the reference trajectory's window)\n"
-               "  --step      communication step size [s]; also the GPS fix period (default 0.1)\n"
+               "  --step      communication step size [s] (default 0.1)\n"
+               "  --gps-period  NAV-PVT period [s] (default 0.1: the 10 Hz the estimator is designed for). A whole\n"
+               "              number of steps, and independent of --step, so a finer step does not make a faster\n"
+               "              receiver; pass the same to the flight computer as --fix-period\n"
                "  --csv       plant truth output CSV (default results/f16_truth.csv)\n"
                "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
 }
@@ -430,7 +437,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 34> kValueOptions = { {
+constexpr std::array<ValueOption, 35> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -519,6 +526,7 @@ constexpr std::array<ValueOption, 34> kValueOptions = { {
     { "--roll0", [](Options& o, const char* v) { o.roll0_deg = std::stod(v); } },
     { "--stop", [](Options& o, const char* v) { o.stop_s = std::stod(v); } },
     { "--step", [](Options& o, const char* v) { o.step_s = std::stod(v); } },
+    { "--gps-period", [](Options& o, const char* v) { o.gps_period_s = std::stod(v); } },
     { "--csv", [](Options& o, const char* v) { o.csv_path = v; } },
     { "--rtf", [](Options& o, const char* v) { o.realtime_factor = std::stod(v); } },
 } };
@@ -585,9 +593,21 @@ bool parse_args(int argc, char** argv, Options& options)
       return false;
     }
   }
+  // The GPS FMU is stepped once per NAV-PVT period, and Ecos steps a model only
+  // on base-step boundaries, so the period must be a whole number of steps. It
+  // is an option of its own rather than the step itself so that a finer step --
+  // what a manoeuvring case wants for the IMU -- does not quietly make a 100 Hz
+  // receiver; the flight computer's --fix-period has to match it either way.
+  const double steps_per_fix = options.gps_period_s / options.step_s;
+  if (!(options.step_s > 0.0) || steps_per_fix < 1.0 - 1e-9 ||
+      std::fabs(steps_per_fix - std::round(steps_per_fix)) > 1e-6)
+  {
+    std::cerr << "--gps-period " << options.gps_period_s << " must be a positive whole number of --step "
+              << options.step_s << " s steps\n";
+    return false;
+  }
   return true;
 }
-
 /// @brief Which external archiver Ecos will spawn to unpack an .fmu.
 ///
 /// Mirrors ecos::detail::make_args(): on Windows it uses `unzip` when SHELL
@@ -726,7 +746,7 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
       << "mag_date_year=" << options.mag_date_year << "\n"
-      << "gps_latency_s=" << options.gps_latency_s << "\n"
+      << log_contract::kGpsLatencyKey << '=' << options.gps_latency_s << "\n"
       << "mag_declination_deg=" << field_declination_deg << "\n"
       << "mag_inclination_deg=" << field_inclination_deg << "\n"
       << "mag_intensity_ut=" << field_intensity_ut << "\n"
@@ -747,6 +767,8 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
       << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
       << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
+      << "gps_vertical_speed_noise_mps=" << receiver.vertical_speed_noise_mps << "\n"
+      << "gps_vertical_speed_correlated_mps=" << receiver.vertical_speed_correlated_mps << "\n"
       << "wind_north_mps=" << options.wind_north_mps << "\n"
       << "wind_east_mps=" << options.wind_east_mps << "\n"
       << "wind_down_mps=" << options.wind_down_mps << "\n"
@@ -754,17 +776,18 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "turbulence_seed=" << options.turbulence_seed << "\n"
       << "atmosphere_deltaT_K=" << options.atmosphere_delta_t_k << "\n"
       << "atmosphere_deltaP_sl_Pa=" << options.atmosphere_delta_p_pa << "\n"
-      << "lat0_deg=" << options.lat0_deg << "\n"
-      << "lon0_deg=" << options.lon0_deg << "\n"
-      << "alt0_ft=" << options.alt0_ft << "\n"
+      << log_contract::kLat0Key << '=' << options.lat0_deg << "\n"
+      << log_contract::kLon0Key << '=' << options.lon0_deg << "\n"
+      << log_contract::kAlt0FtKey << '=' << options.alt0_ft << "\n"
       << "vt0_fps=" << options.vt0_fps << "\n"
       << "heading0_deg=" << options.heading0_deg << "\n"
       << "roll0_deg=" << options.roll0_deg << "\n"
       << "step_s=" << options.step_s << "\n"
+      << "gps_period_s=" << options.gps_period_s << "\n"
       << "stop_s=" << options.stop_s << "\n"
       << "imu_rate_hz=" << options.imu_rate_hz << "\n"
       << "radalt_rate_hz=" << options.radalt_rate_hz << "\n"
-      << "realtime_factor=" << options.realtime_factor << "\n";
+      << log_contract::kRealtimeFactorKey << '=' << options.realtime_factor << "\n";
 }
 
 /// @brief Truth log, written by the host rather than by Ecos' ``csv_writer``.
@@ -905,7 +928,7 @@ int main(int argc, char** argv)
     // std::filesystem::relative(), which yields an empty path on Windows when the FMU sits on a different
     // drive than the working directory. The file resolver handles absolute path strings as-is.
     ss.add_model("f16", options.f16_fmu.string());
-    ss.add_model("gps", options.gps_fmu.string());
+    ss.add_model("gps", options.gps_fmu.string(), options.gps_period_s);  // NAV-PVT period, not the base step
     ss.add_model("imu", options.imu_fmu.string());
     ss.add_model("baro", options.baro_fmu.string());
     ss.add_model("mag", options.mag_fmu.string());
@@ -1058,6 +1081,8 @@ int main(int argc, char** argv)
     trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
     trim_point["gps::latency_s"] = options.gps_latency_s;
     trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
+    trim_point["gps::vertical_speed_noise_mps"] = receiver.vertical_speed_noise_mps;
+    trim_point["gps::vertical_speed_correlated_mps"] = receiver.vertical_speed_correlated_mps;
 
     // The plant's environment. Written unconditionally, because every one of
     // these defaults to the calm standard day: a run that asks for nothing gets
@@ -1091,51 +1116,51 @@ int main(int argc, char** argv)
     // these two ports were radians.
     TruthLogger truth_log(options.csv_path,
                           *sim,
-                          { "f16::out.alt_m",
-                            "f16::out.lat_deg",
-                            "f16::out.lon_deg",
-                            "f16::out.v_north_m_s",
-                            "f16::out.v_east_m_s",
-                            "f16::out.v_down_m_s",
-                            // Attitude is check-case content in its own right here, not
-                            // just an input to the magnetic-field computation: on an
-                            // open-loop trim flyout the Euler angles are where the drift
-                            // shows up first, and the published data tabulates all three.
-                            "f16::out.yaw_rad",
-                            "f16::out.pitch_rad",
-                            "f16::out.roll_rad",
-                            "f16::out.p_rad_s",
-                            "f16::out.q_rad_s",
-                            "f16::out.r_rad_s",
-                            "f16::out.vt_m_s",
-                            "f16::out.alpha_deg",
-                            "f16::out.beta_deg",
-                            "f16::out.mach",
-                            "f16::out.qbar_Pa",
-                            // The air the forces actually used: on a non-standard day
-                            // (atm.deltaT_K / atm.deltaP_sl_Pa) this is not ISA(alt), and it is
-                            // what the barometer is driven with.
-                            "f16::out.P_Pa",
-                            "f16::out.T_K",
-                            "f16::out.thrust_N",
-                            "f16::out.mass_kg",
-                            // What the IMU FMU actually receives: the plant's body-frame
-                            // specific force, one step behind plant truth like every
-                            // other connection.
-                            "imu::f_x_mps2",
-                            "imu::f_y_mps2",
-                            "imu::f_z_mps2",
-                            // Likewise for the magnetometer: the body-frame truth field
-                            // the host computed and wrote, so a decoded sample can be
-                            // compared against what the part was actually given.
-                            "mag::b_x_ut",
-                            "mag::b_y_ut",
-                            "mag::b_z_ut",
-                            // And the height the radar altimeter was handed, which on
-                            // this scenario is MSL altitude -- logged separately from
-                            // out.alt_m so the terrain approximation stays visible in
-                            // the data rather than only in the connection comment.
-                            "radalt::h_agl_m" },
+                          with_drawn_errors({ "f16::out.alt_m",
+                                              "f16::out.lat_deg",
+                                              "f16::out.lon_deg",
+                                              "f16::out.v_north_m_s",
+                                              "f16::out.v_east_m_s",
+                                              "f16::out.v_down_m_s",
+                                              // Attitude is check-case content in its own right here, not
+                                              // just an input to the magnetic-field computation: on an
+                                              // open-loop trim flyout the Euler angles are where the drift
+                                              // shows up first, and the published data tabulates all three.
+                                              "f16::out.yaw_rad",
+                                              "f16::out.pitch_rad",
+                                              "f16::out.roll_rad",
+                                              "f16::out.p_rad_s",
+                                              "f16::out.q_rad_s",
+                                              "f16::out.r_rad_s",
+                                              "f16::out.vt_m_s",
+                                              "f16::out.alpha_deg",
+                                              "f16::out.beta_deg",
+                                              "f16::out.mach",
+                                              "f16::out.qbar_Pa",
+                                              // The air the forces actually used: on a non-standard day
+                                              // (atm.deltaT_K / atm.deltaP_sl_Pa) this is not ISA(alt), and it is
+                                              // what the barometer is driven with.
+                                              "f16::out.P_Pa",
+                                              "f16::out.T_K",
+                                              "f16::out.thrust_N",
+                                              "f16::out.mass_kg",
+                                              // What the IMU FMU actually receives: the plant's body-frame
+                                              // specific force, one step behind plant truth like every
+                                              // other connection.
+                                              "imu::f_x_mps2",
+                                              "imu::f_y_mps2",
+                                              "imu::f_z_mps2",
+                                              // Likewise for the magnetometer: the body-frame truth field
+                                              // the host computed and wrote, so a decoded sample can be
+                                              // compared against what the part was actually given.
+                                              "mag::b_x_ut",
+                                              "mag::b_y_ut",
+                                              "mag::b_z_ut",
+                                              // And the height the radar altimeter was handed, which on
+                                              // this scenario is MSL altitude -- logged separately from
+                                              // out.alt_m so the terrain approximation stays visible in
+                                              // the data rather than only in the connection comment.
+                                              "radalt::h_agl_m" }),
                           {});
     write_run_config(options.csv_path, options);
 
@@ -1177,7 +1202,7 @@ int main(int argc, char** argv)
               << "[cosim] baro:   " << options.baro_fmu.string() << "\n"
               << "[cosim] mag:    " << options.mag_fmu.string() << "\n"
               << "[cosim] radalt: " << options.radalt_fmu.string() << "\n"
-              << "[cosim] step " << options.step_s << " s (" << 1.0 / options.step_s << " Hz GPS, "
+              << "[cosim] step " << options.step_s << " s (" << 1.0 / options.gps_period_s << " Hz GPS, "
               << options.imu_rate_hz << " Hz IMU, " << options.radalt_rate_hz
               << " Hz radalt; BMP390 and MMC5983MA at the rates the flight computer programs), stop " << options.stop_s
               << " s\n"
@@ -1276,7 +1301,8 @@ int main(int argc, char** argv)
     // outside its envelope keeps talking, it just stops claiming a solution.
     // On case 11 it never stops claiming one; on case 12 it never starts.
     // Either way the frame count is the step count, which is the point.
-    std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
+    std::cout << "[cosim] done: " << sim->iterations() << " steps, "
+              << std::lround(static_cast<double>(sim->iterations()) * options.step_s / options.gps_period_s)
               << " UBX-NAV-PVT frames emitted, " << sim->iterations() * std::max(1L, imu_frames_per_step)
               << " IMU samples buffered for the SPI controller and "
               << sim->iterations() * std::max(1L, radalt_returns_per_step) << " radar returns sent\n"

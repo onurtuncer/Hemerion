@@ -25,3 +25,30 @@ target_link_libraries(test_hemerion_example_environment PRIVATE hemerion_test_su
 
 add_test(NAME examples.environment COMMAND test_hemerion_example_environment)
 set_tests_properties(examples.environment PROPERTIES LABELS "unit")
+
+# The log contract with Aetherion's replay (sensor fusion step 2): the names the examples write, against a pinned copy
+# of the names Aetherion v0.18.0 binds. Pure, so it runs in CI like the test above.
+add_executable(test_hemerion_log_contract test_log_contract.cpp)
+target_include_directories(test_hemerion_log_contract PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
+target_link_libraries(test_hemerion_log_contract PRIVATE hemerion_test_support)
+
+add_test(NAME examples.log_contract COMMAND test_hemerion_log_contract)
+set_tests_properties(examples.log_contract PROPERTIES LABELS "unit")
+
+# The pinned copy against the real thing, where an Aetherion install is around to read it from. Registered only then, so
+# its absence in CI shows in the test count rather than scoring a skip as a pass.
+find_file(
+  HEMERION_AETHERION_LOG_CONTRACT
+  NAMES Aetherion/Estimation/LogContract.h
+  HINTS "${AETHERION_ROOT}" "$ENV{AETHERION_ROOT}"
+  PATHS "$ENV{ProgramFiles}/Aetherion" "/usr/local" "/opt/aetherion"
+  PATH_SUFFIXES include)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(HEMERION_AETHERION_LOG_CONTRACT AND Python3_Interpreter_FOUND)
+  add_test(NAME examples.log_contract_upstream
+           COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/check_log_contract.py" --aetherion-header
+                   "${HEMERION_AETHERION_LOG_CONTRACT}")
+  set_tests_properties(examples.log_contract_upstream PROPERTIES LABELS "unit")
+else()
+  message(STATUS "Aetherion LogContract.h not found (set AETHERION_ROOT) -- examples.log_contract_upstream not added")
+endif()

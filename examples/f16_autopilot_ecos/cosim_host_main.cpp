@@ -97,6 +97,7 @@
 #include "Hemerion/imu/imu_types.h"
 
 #include "environment.hpp"
+#include "log_contract.hpp"
 
 #include <algorithm>
 #include <array>
@@ -127,6 +128,8 @@ using hemerion::examples::GpsErrorModel;
 using hemerion::examples::kCorrelatedReceiver;
 using hemerion::examples::kFeetToMetres;
 using hemerion::examples::kWhiteReceiver;
+using hemerion::examples::with_drawn_errors;
+namespace log_contract = hemerion::examples::log_contract;
 using hemerion::examples::parse_csv_doubles;
 
 using hemerion::sensors::mag::to_body;
@@ -684,7 +687,7 @@ void write_run_config(const std::filesystem::path& csv_path,
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
       << "mag_date_year=" << options.mag_date_year << "\n"
-      << "gps_latency_s=" << options.gps_latency_s << "\n"
+      << log_contract::kGpsLatencyKey << '=' << options.gps_latency_s << "\n"
       << "mag_declination_deg=" << field_declination_deg << "\n"
       << "mag_inclination_deg=" << field_inclination_deg << "\n"
       << "mag_intensity_ut=" << field_intensity_ut << "\n"
@@ -705,6 +708,8 @@ void write_run_config(const std::filesystem::path& csv_path,
       << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
       << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
       << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
+      << "gps_vertical_speed_noise_mps=" << receiver.vertical_speed_noise_mps << "\n"
+      << "gps_vertical_speed_correlated_mps=" << receiver.vertical_speed_correlated_mps << "\n"
       << "wind_north_mps=" << options.wind_north_mps << "\n"
       << "wind_east_mps=" << options.wind_east_mps << "\n"
       << "wind_down_mps=" << options.wind_down_mps << "\n"
@@ -712,9 +717,9 @@ void write_run_config(const std::filesystem::path& csv_path,
       << "turbulence_seed=" << options.turbulence_seed << "\n"
       << "atmosphere_deltaT_K=" << options.atmosphere_delta_t_k << "\n"
       << "atmosphere_deltaP_sl_Pa=" << options.atmosphere_delta_p_pa << "\n"
-      << "lat0_deg=" << options.lat0_deg << "\n"
-      << "lon0_deg=" << options.lon0_deg << "\n"
-      << "alt0_ft=" << options.alt0_ft << "\n"
+      << log_contract::kLat0Key << '=' << options.lat0_deg << "\n"
+      << log_contract::kLon0Key << '=' << options.lon0_deg << "\n"
+      << log_contract::kAlt0FtKey << '=' << options.alt0_ft << "\n"
       << "vt0_fps=" << options.vt0_fps << "\n"
       << "heading0_deg=" << options.heading0_deg << "\n"
       << "roll0_deg=" << options.roll0_deg << "\n"
@@ -723,7 +728,7 @@ void write_run_config(const std::filesystem::path& csv_path,
       << "stop_s=" << options.stop_s << "\n"
       << "imu_rate_hz=" << options.imu_rate_hz << "\n"
       << "radalt_rate_hz=" << options.radalt_rate_hz << "\n"
-      << "realtime_factor=" << options.realtime_factor << "\n";
+      << log_contract::kRealtimeFactorKey << '=' << options.realtime_factor << "\n";
 }
 
 /// Truth log written by the host, not Ecos' csv_writer -- same class, same
@@ -936,6 +941,8 @@ int main(int argc, char** argv)
     trim_point["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
     trim_point["gps::latency_s"] = options.gps_latency_s;
     trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
+    trim_point["gps::vertical_speed_noise_mps"] = receiver.vertical_speed_noise_mps;
+    trim_point["gps::vertical_speed_correlated_mps"] = receiver.vertical_speed_correlated_mps;
 
     // The plant's environment. Written unconditionally, because every one of
     // these defaults to the calm standard day: a run that asks for nothing gets
@@ -1037,52 +1044,52 @@ int main(int argc, char** argv)
 
     TruthLogger truth_log(options.csv_path,
                           *sim,
-                          { "f16::out.alt_m",
-                            "f16::out.lat_deg",
-                            "f16::out.lon_deg",
-                            "f16::out.v_north_m_s",
-                            "f16::out.v_east_m_s",
-                            "f16::out.v_down_m_s",
-                            "f16::out.yaw_rad",
-                            "f16::out.pitch_rad",
-                            "f16::out.roll_rad",
-                            "f16::out.p_rad_s",
-                            "f16::out.q_rad_s",
-                            "f16::out.r_rad_s",
-                            "f16::out.vt_m_s",
-                            "f16::out.rho_kg_m3",
-                            "f16::out.alpha_deg",
-                            "f16::out.beta_deg",
-                            "f16::out.mach",
-                            "f16::out.qbar_Pa",
-                            // The air the forces actually used: on a non-standard day
-                            // (atm.deltaT_K / atm.deltaP_sl_Pa) this is not ISA(alt), and it is
-                            // what the barometer is driven with.
-                            "f16::out.P_Pa",
-                            "f16::out.T_K",
-                            "f16::out.thrust_N",
-                            "f16::out.mass_kg",
-                            // The loop itself: what the autopilot commanded the
-                            // surfaces to, and what this host commanded the
-                            // autopilot to -- so a response plot can carry its
-                            // own cause.
-                            "ap::ctrl.el_deg",
-                            "ap::ctrl.ail_deg",
-                            "ap::ctrl.rdr_deg",
-                            "ap::ctrl.pwr_pct",
-                            "ap::cmd.altCmd_ft",
-                            "ap::cmd.keasCmd_kt",
-                            "ap::cmd.baseChiCmd_deg",
-                            "ap::cmd.latOffset_ft",
-                            // What the sensor FMUs were actually given, as in
-                            // the trim example.
-                            "imu::f_x_mps2",
-                            "imu::f_y_mps2",
-                            "imu::f_z_mps2",
-                            "mag::b_x_ut",
-                            "mag::b_y_ut",
-                            "mag::b_z_ut",
-                            "radalt::h_agl_m" });
+                          with_drawn_errors({ "f16::out.alt_m",
+                                              "f16::out.lat_deg",
+                                              "f16::out.lon_deg",
+                                              "f16::out.v_north_m_s",
+                                              "f16::out.v_east_m_s",
+                                              "f16::out.v_down_m_s",
+                                              "f16::out.yaw_rad",
+                                              "f16::out.pitch_rad",
+                                              "f16::out.roll_rad",
+                                              "f16::out.p_rad_s",
+                                              "f16::out.q_rad_s",
+                                              "f16::out.r_rad_s",
+                                              "f16::out.vt_m_s",
+                                              "f16::out.rho_kg_m3",
+                                              "f16::out.alpha_deg",
+                                              "f16::out.beta_deg",
+                                              "f16::out.mach",
+                                              "f16::out.qbar_Pa",
+                                              // The air the forces actually used: on a non-standard day
+                                              // (atm.deltaT_K / atm.deltaP_sl_Pa) this is not ISA(alt), and it is
+                                              // what the barometer is driven with.
+                                              "f16::out.P_Pa",
+                                              "f16::out.T_K",
+                                              "f16::out.thrust_N",
+                                              "f16::out.mass_kg",
+                                              // The loop itself: what the autopilot commanded the
+                                              // surfaces to, and what this host commanded the
+                                              // autopilot to -- so a response plot can carry its
+                                              // own cause.
+                                              "ap::ctrl.el_deg",
+                                              "ap::ctrl.ail_deg",
+                                              "ap::ctrl.rdr_deg",
+                                              "ap::ctrl.pwr_pct",
+                                              "ap::cmd.altCmd_ft",
+                                              "ap::cmd.keasCmd_kt",
+                                              "ap::cmd.baseChiCmd_deg",
+                                              "ap::cmd.latOffset_ft",
+                                              // What the sensor FMUs were actually given, as in
+                                              // the trim example.
+                                              "imu::f_x_mps2",
+                                              "imu::f_y_mps2",
+                                              "imu::f_z_mps2",
+                                              "mag::b_x_ut",
+                                              "mag::b_y_ut",
+                                              "mag::b_z_ut",
+                                              "radalt::h_agl_m" }));
     write_run_config(options.csv_path, options, ap_case, keas_trim_kt);
 
     const auto current_keas_kt = [&]() {

@@ -138,6 +138,7 @@ void test_each_platform_limit_invalidates_the_fix()
     assert(fix.num_satellites == 0);
     assert(fix.horizontal_accuracy_m > 100.0F);  // receiver admits it has nothing
     assert(fix.vertical_accuracy_m > 100.0F);
+    assert(fix.speed_accuracy_mps >= 100.0F);  // for its velocity too
   };
 
   check(sample(6001.0F, 10.0F, 0.0F, 1000000), GpsDynamicsVerdict::kAltitudeLimit);

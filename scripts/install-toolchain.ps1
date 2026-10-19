@@ -40,14 +40,15 @@ function Test-ToolWorking {
     return -not ($raw -match "was not found")
 }
 
-# Version floor for examples/rocket_gps_ecos. Before 0.13.0 Aetherion's plant FMUs
-# published geodetic position as out.lat_rad/out.lon_rad, carrying the library's
-# internal radians straight to the FMI boundary; 0.13.0 renamed those ports to
-# out.lat_deg/out.lon_deg and converts inside the FMU. The co-simulation host binds
-# the new names, so an older install is a missing variable rather than a unit to
-# compensate for -- examples/rocket_gps_ecos/CMakeLists.txt enforces the same floor
-# at configure time, by reading modelDescription.xml out of the FMU it locates.
-$AetherionMinVersion = [version]"0.13.0"
+# Version floor for the co-simulation examples. The examples test the plant FMUs'
+# ports at configure time (out.lat_deg from 0.13.0, out.specificForce_* from 0.14.0,
+# wind.*/atm.* from 0.16.0), and since 0.18.0 the plant's dynamics too: 0.17.4
+# corrected the rigid body's spatial inertia and gravity-mass coupling and 0.18.0
+# moved the gravity wrench to the body origin, none of which changes a port, so an
+# older plant runs and quietly disagrees with every published figure. The examples'
+# CMake refuses one (cmake/aetherion_plant_version.cmake); this installer offers the
+# upgrade before it gets that far.
+$AetherionMinVersion = [version]"0.18.0"
 
 function Get-AetherionVersion {
     # $null when nothing is installed; a [version] when one can be read from the
@@ -77,12 +78,12 @@ function Install-Aetherion {
     }
 
     if ($installed -is [version]) {
-        Write-Host "Aetherion $installed -- older than the $AetherionMinVersion examples/rocket_gps_ecos needs [fmu co-simulation]" -ForegroundColor Yellow
-        Write-Host "  Its plant FMUs report geodetic position in radians, on ports the co-simulation host no longer binds." -ForegroundColor Yellow
+        Write-Host "Aetherion $installed -- older than the $AetherionMinVersion the co-simulation examples need [fmu co-simulation]" -ForegroundColor Yellow
+        Write-Host "  Its plant FMUs either lack ports the hosts bind or fly the rigid-body dynamics 0.17.4/0.18.0 corrected." -ForegroundColor Yellow
         $description = "Aetherion (upgrade $installed -> latest GitHub release)"
     } elseif ($installed) {
         Write-Host "Aetherion -- installed, but with no version to read [fmu co-simulation]" -ForegroundColor Yellow
-        Write-Host "  Cannot tell whether it is >= $AetherionMinVersion, which examples/rocket_gps_ecos requires." -ForegroundColor Yellow
+        Write-Host "  Cannot tell whether it is >= $AetherionMinVersion, which the co-simulation examples require." -ForegroundColor Yellow
         $description = "Aetherion (reinstall the latest GitHub release to be sure)"
     } else {
         Write-Host "Aetherion -- not found [fmu co-simulation]" -ForegroundColor Yellow
@@ -95,30 +96,46 @@ function Install-Aetherion {
     }
 
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/onurtuncer/Aetherion/releases/latest" -Headers @{ "User-Agent" = "Hemerion-installer" }
+        # Piped through ForEach-Object to unroll it: Windows PowerShell 5.1 emits a JSON
+        # array as one Object[], which @() alone would leave as a single element.
+        $releases = @(Invoke-RestMethod -Uri "https://api.github.com/repos/onurtuncer/Aetherion/releases?per_page=20" -Headers @{ "User-Agent" = "Hemerion-installer" } | ForEach-Object { $_ })
     } catch {
         Write-Host "Could not query the Aetherion releases API: $_" -ForegroundColor Red
         return
     }
 
-    $asset = $release.assets | Where-Object { $_.name -eq "Aetherion.msi" } | Select-Object -First 1
+    # The newest published release that carries an installer and is new enough. Not
+    # simply /releases/latest: a release is sometimes published before its assets are
+    # attached (v0.18.0 was re-published with none, for a while), and taking the
+    # latest then meant installing nothing at all.
+    #
+    # Releases name the installer for the version and platform (Aetherion-0.18.0-win64.msi,
+    # since 0.14.0); the plain Aetherion.msi of earlier ones is still accepted -- matching
+    # only that name is why this installer found nothing from 0.14.0 on. A 64-bit build
+    # is preferred when a release carries several.
+    $release = $null
+    $asset = $null
+    foreach ($candidate in $releases) {
+        if ($candidate.draft -or $candidate.prerelease) { continue }
+        # A tag that does not parse is not ruled out -- only one that parses and is
+        # demonstrably too old, which would otherwise install and fail at configure time.
+        if ($candidate.tag_name -match '([0-9]+(?:\.[0-9]+)+)') {
+            $candidateVersion = $null
+            try { $candidateVersion = [version]$Matches[1] } catch { $candidateVersion = $null }
+            if ($candidateVersion -and $candidateVersion -lt $AetherionMinVersion) { continue }
+        }
+        $msiAssets = @($candidate.assets | Where-Object { $_.name -match '^Aetherion([-_].*)?\.msi$' })
+        $found = @($msiAssets | Where-Object { $_.name -match 'win64|x64|amd64' }) + $msiAssets | Select-Object -First 1
+        if ($found) { $release = $candidate; $asset = $found; break }
+        Write-Host "Aetherion $($candidate.tag_name) has no installer attached (yet); looking further back." -ForegroundColor Yellow
+    }
     if (-not $asset) {
-        Write-Host "No Aetherion.msi asset found on the latest Aetherion release ($($release.tag_name)). Skipping." -ForegroundColor Red
+        Write-Host "No published Aetherion release >= $AetherionMinVersion carries an Aetherion*.msi. Skipping." -ForegroundColor Red
         return
     }
+    Write-Host "Aetherion $($release.tag_name): $($asset.name)" -ForegroundColor Cyan
 
-    # A tag that does not parse is not treated as a failure -- only a tag that parses and
-    # is demonstrably too old, which would otherwise install and then fail at configure time.
-    $releaseVersion = $null
-    if ($release.tag_name -match '([0-9]+(?:\.[0-9]+)+)') {
-        try { $releaseVersion = [version]$Matches[1] } catch { $releaseVersion = $null }
-    }
-    if ($releaseVersion -and $releaseVersion -lt $AetherionMinVersion) {
-        Write-Host "The latest Aetherion release ($($release.tag_name)) is older than the required $AetherionMinVersion. Skipping." -ForegroundColor Red
-        return
-    }
-
-    $msiPath = Join-Path $env:TEMP "Aetherion.msi"
+    $msiPath = Join-Path $env:TEMP $asset.name
     Write-Host "Downloading $($asset.browser_download_url)" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $msiPath
 

@@ -53,6 +53,8 @@ void test_gga_decodes_position_altitude_and_satellites()
   assert(error == GpsParseError::kNone);
   assert(near(fix.latitude_deg, 48.1173));
   assert(near(fix.longitude_deg, 11.516667, 1e-5));
+  // The sentence's MSL altitude, as GpsFix::altitude_m documents for NMEA --
+  // not 545.4 + 46.9, the ellipsoidal height UBX would have reported.
   assert(near(fix.altitude_m, 545.4));
   assert(fix.num_satellites == 8);
   assert(fix.fix_type == GpsFixType::kFix3D);
@@ -76,6 +78,7 @@ void test_rmc_decodes_speed_and_course()
 {
   NmeaParser parser;
   GpsFix fix;
+  fix.ned_velocity_valid = true;  // as a fix object last filled from UBX would be
   const GpsParseError error =
       feed_sentence(parser, "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A", 2000, fix);
 
@@ -86,6 +89,9 @@ void test_rmc_decodes_speed_and_course()
   assert(near(fix.course_deg, 84.4, 1e-3));
   assert(fix.fix_type == GpsFixType::kFix3D);
   assert(fix.timestamp_us == 2000);
+  // RMC carries speed and course, not an NED vector: the fix must say so
+  // rather than offer zeros a filter would fuse as a measurement.
+  assert(!fix.ned_velocity_valid);
 }
 
 void test_rmc_void_status_is_no_fix()

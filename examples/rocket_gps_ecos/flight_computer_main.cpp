@@ -63,6 +63,7 @@
 #include "Hemerion/imu/fmu/imu_noise_model.h"  // ImuNoiseConfig: the simulated part's register sensitivity
 #include "Hemerion/imu/imu_conversion.h"
 #include "Hemerion/imu/imu_spi_driver.h"
+#include "log_contract.hpp"
 #include "udpReceiver.hpp"
 
 #include <hemerion/sim/i2c_shm/i2c_shm_link.h>
@@ -98,6 +99,7 @@ using hemerion::sensors::baro::bmp390::Bmp390I2cBus;
 using hemerion::sensors::baro::bmp390::Bmp390ReadResult;
 using hemerion::sensors::baro::bmp390::kBmp390I2cAddressPrimary;
 using hemerion::sensors::gps::GpsDriver;
+namespace log_contract = hemerion::examples::log_contract;
 using hemerion::sensors::gps::GpsFix;
 using hemerion::sensors::gps::GpsFixType;
 using hemerion::sensors::gps::GpsParseError;
@@ -639,8 +641,9 @@ int main(int argc, char** argv)
     std::cerr << "error: cannot open " << options.gps_csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
-  gps_csv << "fix_index,nominal_time_s,host_time_s,latitude_deg,longitude_deg,altitude_m,ground_speed_mps,course_deg,"
-             "horizontal_accuracy_m,vertical_accuracy_m,num_satellites,fix_type\n";
+  // The column names are an interface Aetherion's replay binds by name, so
+  // they come from log_contract.hpp, which tests/unit pins against it.
+  gps_csv << log_contract::kGpsHeader << '\n';
   // Ten significant digits: at 36 deg of latitude the stream's default six put
   // the fix on a 0.0001 deg (11 m) grid, which is seven times the noise the
   // receiver model injects -- an error figure drawn from that log would be a
@@ -654,8 +657,7 @@ int main(int argc, char** argv)
     std::cerr << "error: cannot open " << options.imu_csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
-  imu_csv << "sample_index,part_time_s,host_time_s,accel_x_mps2,accel_y_mps2,accel_z_mps2,gyro_x_rad_s,gyro_y_rad_s,"
-             "gyro_z_rad_s\n";
+  imu_csv << log_contract::kImuHeader << '\n';
 
   std::ofstream baro_csv = open_csv(options.baro_csv_path);
   if (!baro_csv)
@@ -663,7 +665,7 @@ int main(int argc, char** argv)
     std::cerr << "error: cannot open " << options.baro_csv_path.string() << " for writing\n";
     return EXIT_FAILURE;
   }
-  baro_csv << "sample_index,part_time_s,host_time_s,pressure_pa,temperature_c\n";
+  baro_csv << log_contract::kBaroHeader << '\n';
 
   std::ofstream mag_csv = open_csv(options.mag_csv_path);
   if (!mag_csv)
@@ -773,7 +775,14 @@ int main(int argc, char** argv)
         // The epoch schedule, not a simulation clock and not the receiver's: a
         // u-blox NAV-PVT carries no time this parser reads, so the index is all
         // there is. host_time_s below is the real arrival stamp.
-        const double nominal_time_s = static_cast<double>(fix_count) * options.fix_period_s;
+        // The fix's *validity* time, which is one period before the step it was
+        // emitted at: the frame leaves at the end of step k, but the plant
+        // state in it is the one Ecos handed the FMU at the start of that step
+        // (connections propagate between steps). Fix 1 is the t = 0 state, so
+        // it is stamped 0. Stamping fix_count * period instead put every fix
+        // one period late -- see f16_flight_computer.cpp, where Aetherion's
+        // replay found it.
+        const double nominal_time_s = static_cast<double>(fix_count - 1) * options.fix_period_s;
         if (fix.fix_type == GpsFixType::kNoFix)
         {
           // The dynamics envelope took the fix away. A real receiver keeps
@@ -795,7 +804,7 @@ int main(int argc, char** argv)
           last_outage_s = nominal_time_s;
           gps_csv << fix_count << ',' << nominal_time_s << ',' << static_cast<double>(fix.timestamp_us) * 1e-6
                   << ",,,,,,,," << static_cast<unsigned>(fix.num_satellites) << ','
-                  << static_cast<unsigned>(fix.fix_type) << '\n';
+                  << static_cast<unsigned>(fix.fix_type) << ",,,,\n";
         }
         else
         {
@@ -810,7 +819,16 @@ int main(int argc, char** argv)
                   << fix.latitude_deg << ',' << fix.longitude_deg << ',' << fix.altitude_m << ','
                   << fix.ground_speed_mps << ',' << fix.course_deg << ',' << fix.horizontal_accuracy_m << ','
                   << fix.vertical_accuracy_m << ',' << static_cast<unsigned>(fix.num_satellites) << ','
-                  << static_cast<unsigned>(fix.fix_type) << '\n';
+                  << static_cast<unsigned>(fix.fix_type);
+          if (fix.ned_velocity_valid)
+          {
+            gps_csv << ',' << fix.vel_north_mps << ',' << fix.vel_east_mps << ',' << fix.vel_down_mps << ','
+                    << fix.speed_accuracy_mps << '\n';
+          }
+          else
+          {
+            gps_csv << ",,,,\n";
+          }
         }
       }
       else if (result == GpsParseError::kChecksumMismatch)

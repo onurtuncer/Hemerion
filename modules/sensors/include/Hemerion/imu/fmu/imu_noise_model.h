@@ -26,6 +26,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -249,6 +250,21 @@ public:
   /// @brief The gyroscope bias each axis currently carries [rad/s].
   [[nodiscard]] const float* gyro_bias_rad_s() const { return gyro_bias_rad_s_; }
 
+  /// @brief The accelerometer scale factor each axis was drawn with, as a
+  /// multiplier: 1.003 reads 0.3 % high, and 1 exactly when disabled.
+  [[nodiscard]] const float* accel_scale() const { return accel_scale_; }
+
+  /// @brief The gyroscope scale factor each axis was drawn with, as a multiplier.
+  [[nodiscard]] const float* gyro_scale() const { return gyro_scale_; }
+
+  /// @brief The accelerometer triad's misalignment angles (about x, y, z)
+  /// [rad]: the triad reads (I + skew(angles)) times the true vector, before
+  /// scale. Zero when disabled.
+  [[nodiscard]] std::array<float, 3> accel_misalignment_rad() const { return angles(accel_misalignment_); }
+
+  /// @brief The gyroscope triad's misalignment angles [rad], as above.
+  [[nodiscard]] std::array<float, 3> gyro_misalignment_rad() const { return angles(gyro_misalignment_); }
+
   /// The sensitivity this model quantizes with (what the consuming driver
   /// must pass to convert_raw_to_si()).
   [[nodiscard]] const ImuScale& scale() const { return config_.scale; }
@@ -309,6 +325,12 @@ private:
     matrix[1][2] = -ex;
     matrix[2][0] = -ey;
     matrix[2][1] = ex;
+  }
+
+  /// The angles draw_misalignment() put into a matrix, read back out of it.
+  [[nodiscard]] static std::array<float, 3> angles(const float (&matrix)[3][3])
+  {
+    return { matrix[2][1], matrix[0][2], matrix[1][0] };
   }
 
   /// truth -> what the (imperfect) triad senses, before bias and noise.

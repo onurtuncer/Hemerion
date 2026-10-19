@@ -188,6 +188,24 @@ public:
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
         .setDescription("Turn-on die-temperature bias 1-sigma, drawn once per run [degrees C]");
+
+    // The biases this instance actually drew -- the realisations of the two
+    // sigmas above -- so a filter's barometer-bias state can be scored against
+    // what the part did. Diagnostics like the counters: nothing on the I2C
+    // side changes, and reading them draws nothing. Fixed for the run, hence
+    // DISCRETE; set when initialisation mode is exited. Registered last so
+    // every earlier value reference keeps its number.
+    register_real("pressure_bias_pa", [this] { return static_cast<double>(measurement_model_.pressure_bias_pa()); })
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("Turn-on pressure bias this part was drawn with [Pa], added to the ambient pressure before "
+                        "conversion");
+    register_real("temperature_bias_c", [this] { return static_cast<double>(measurement_model_.temperature_bias_c()); })
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("Turn-on die-temperature bias this part was drawn with [degrees C]");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the

@@ -41,6 +41,16 @@
 /// The horizontal noise is generated in local metres (north/east) and
 /// converted to degrees with a flat-Earth approximation -- adequate for a
 /// sensor noise model; this is not a navigation-grade datum transform.
+///
+/// **NED velocity.** Horizontal velocity is the noisy speed and course
+/// resolved into north and east, so the four fields agree with each other as
+/// they do in a real NAV-PVT. Vertical velocity has its own white and
+/// correlated terms, drawn from a **second RNG stream** seeded from the same
+/// seed: adding them cannot move a single draw of the position, speed or
+/// course channels, so a seeded run reproduces every number it produced
+/// before velD existed. The reported `sAcc` is the per-axis 1-sigma that an
+/// isotropic covariance would need to carry the same total error as the
+/// velocity actually has -- see speed_accuracy_mps().
 
 #pragma once
 
@@ -62,7 +72,7 @@ struct GpsTruthSample
 {
   double latitude_deg = 0.0;       ///< True geodetic latitude [degrees].
   double longitude_deg = 0.0;      ///< True geodetic longitude [degrees].
-  float altitude_m = 0.0F;         ///< True altitude above mean sea level [m].
+  float altitude_m = 0.0F;         ///< True geodetic height [m]; see GpsFix::altitude_m.
   float ground_speed_mps = 0.0F;   ///< True speed over ground [m/s].
   float course_deg = 0.0F;         ///< True course over ground [degrees].
   float v_down_mps = 0.0F;         ///< True vertical velocity, NED convention: positive downwards [m/s].
@@ -87,7 +97,16 @@ struct GpsNoiseConfig
   float position_correlation_time_s = 100.0F;  ///< tau for the three position channels [s].
   float speed_correlated_mps = 0.0F;           ///< Stationary 1-sigma [m/s].
   float course_correlated_deg = 0.0F;          ///< Stationary 1-sigma [degrees].
-  float velocity_correlation_time_s = 10.0F;   ///< tau for speed and course [s].
+  float velocity_correlation_time_s = 10.0F;   ///< tau for speed, course and vertical velocity [s].
+
+  /// Vertical-velocity error, white and correlated 1-sigma [m/s]. On by
+  /// default, unlike the other correlated terms, because velD used to be a
+  /// hard-coded zero rather than a quiet default: there is no previous
+  /// behaviour to preserve. Twice speed_noise_mps, the same vertical-to-
+  /// horizontal ratio as the position defaults -- GNSS geometry is weaker in
+  /// the vertical for velocity as for position.
+  float vertical_speed_noise_mps = 0.2F;
+  float vertical_speed_correlated_mps = 0.0F;  ///< Stationary 1-sigma [m/s]; 0 disables the term.
 
   /// What the receiver *claims* over what it *does*: `hAcc`/`vAcc` are the
   /// total 1-sigma (white and correlated in quadrature) scaled by this.
@@ -107,7 +126,7 @@ public:
   /// @param seed   RNG seed; defaults to a nondeterministic seed. Pass a
   ///               fixed value for reproducible runs.
   explicit GpsNoiseModel(const GpsNoiseConfig& config = {}, std::uint64_t seed = std::random_device{}())
-    : config_(config), rng_(seed)
+    : config_(config), rng_(seed), vertical_velocity_rng_(seed ^ kVerticalVelocityStream)
   {
   }
 
@@ -119,7 +138,7 @@ public:
   /// the environment the previous run flew through, and does not.
   void reset_state()
   {
-    for (Channel* channel : { &north_, &east_, &vertical_, &speed_, &course_ })
+    for (Channel* channel : { &north_, &east_, &vertical_, &speed_, &course_, &vertical_velocity_ })
     {
       channel->primed = false;
       channel->state = 0.0F;
@@ -138,6 +157,30 @@ public:
   [[nodiscard]] float total_vertical_sigma_m() const
   {
     return std::hypot(config_.vertical_pos_noise_m, config_.vertical_pos_correlated_m);
+  }
+
+  /// @brief The NED velocity error as one per-axis 1-sigma [m/s], before
+  /// `accuracy_scale` -- what an honest receiver reports as `sAcc`.
+  ///
+  /// The error is not isotropic: speed error lies along the track, course
+  /// error across it at (speed x course error in radians), and vertical error
+  /// on its own. A consumer that weights a fix by `sAcc` uses it for all three
+  /// axes alike (Aetherion's replay builds sAcc^2 I), so the honest single
+  /// number is the one whose isotropic covariance has the same trace as the
+  /// real one: the root of the mean of the three variances. Then the expected
+  /// normalised innovation is right on average, even though no single axis is.
+  /// It grows with speed because the course term does: 1 deg of course error
+  /// is 3 m/s across track at 172 m/s.
+  ///
+  /// @param ground_speed_mps Speed over ground the course error is scaled by [m/s].
+  [[nodiscard]] float velocity_sigma_mps(float ground_speed_mps) const
+  {
+    constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+    const double along = std::hypot(config_.speed_noise_mps, config_.speed_correlated_mps);
+    const double across = static_cast<double>(ground_speed_mps) *
+                          std::hypot(config_.course_noise_deg, config_.course_correlated_deg) * kDegToRad;
+    const double down = std::hypot(config_.vertical_speed_noise_mps, config_.vertical_speed_correlated_mps);
+    return static_cast<float>(std::sqrt((along * along + across * across + down * down) / 3.0));
   }
 
   /// @brief Produces one noisy fix from one truth sample.
@@ -204,6 +247,31 @@ public:
     fix.course_deg = std::fmod(truth.course_deg + course_error_deg + 360.0F, 360.0F);
     fix.horizontal_accuracy_m = config_.accuracy_scale * total_horizontal_sigma_m();
     fix.vertical_accuracy_m = config_.accuracy_scale * total_vertical_sigma_m();
+
+    // NED velocity. Horizontal: the noisy speed and course resolved, so the
+    // fields agree as a real receiver's do. Vertical: its own terms, from its
+    // own stream and its own distribution objects -- a normal_distribution
+    // caches half of each pair, so even sharing `unit_` with the main stream
+    // would shift that stream's draws.
+    float vertical_velocity_error_mps = 0.0F;
+    if (config_.vertical_speed_noise_mps > 0.0F)
+    {
+      vertical_velocity_error_mps =
+          std::normal_distribution<float>(0.0F, config_.vertical_speed_noise_mps)(vertical_velocity_rng_);
+    }
+    vertical_velocity_error_mps += correlated(vertical_velocity_,
+                                              config_.vertical_speed_correlated_mps,
+                                              config_.velocity_correlation_time_s,
+                                              dt_s,
+                                              vertical_velocity_rng_,
+                                              vertical_velocity_unit_);
+    const double course_rad = static_cast<double>(fix.course_deg) * kDegToRad;
+    fix.vel_north_mps = static_cast<float>(static_cast<double>(fix.ground_speed_mps) * std::cos(course_rad));
+    fix.vel_east_mps = static_cast<float>(static_cast<double>(fix.ground_speed_mps) * std::sin(course_rad));
+    fix.vel_down_mps = truth.v_down_mps + vertical_velocity_error_mps;
+    fix.speed_accuracy_mps = config_.accuracy_scale * velocity_sigma_mps(fix.ground_speed_mps);
+    fix.ned_velocity_valid = true;
+
     fix.num_satellites = config_.num_satellites;
     fix.fix_type = config_.fix_type;
     fix.timestamp_us = truth.timestamp_us;
@@ -237,6 +305,18 @@ private:
   /// configuration's RNG sequence identical to the previous model's.
   float correlated(Channel& channel, float sigma, float tau_s, double dt_s)
   {
+    return correlated(channel, sigma, tau_s, dt_s, rng_, unit_);
+  }
+
+  /// The same, drawing from a given engine through a given unit normal --
+  /// which must be used with that engine only, for the reason in apply().
+  static float correlated(Channel& channel,
+                          float sigma,
+                          float tau_s,
+                          double dt_s,
+                          std::mt19937_64& engine,
+                          std::normal_distribution<float>& unit)
+  {
     if (sigma <= 0.0F)
     {
       return 0.0F;
@@ -245,7 +325,7 @@ private:
     {
       // Stationary start: the receiver has been tracking for a while before
       // the first fix this model sees, so its error is already "somewhere".
-      channel.state = sigma * unit_(rng_);
+      channel.state = sigma * unit(engine);
       channel.primed = true;
       return channel.state;
     }
@@ -256,9 +336,14 @@ private:
     // tau <= 0 degenerates to white (phi = 0): no memory at all.
     const double phi = (tau_s > 0.0F) ? std::exp(-dt_s / static_cast<double>(tau_s)) : 0.0;
     const double driving = std::sqrt(std::max(0.0, 1.0 - phi * phi));
-    channel.state = static_cast<float>(phi * channel.state + static_cast<double>(sigma) * driving * unit_(rng_));
+    channel.state = static_cast<float>(phi * channel.state + static_cast<double>(sigma) * driving * unit(engine));
     return channel.state;
   }
+
+  /// Mixed into the seed for the vertical-velocity stream. Any constant does;
+  /// this one only has to differ from the other per-part offsets in the tree
+  /// (the sensor clocks use 0x5DEECE66D).
+  static constexpr std::uint64_t kVerticalVelocityStream = 0x9E3779B97F4A7C15ULL;
 
   GpsNoiseConfig config_;
   std::mt19937_64 rng_;
@@ -268,11 +353,16 @@ private:
   // correlated sigmas are zero.
   std::normal_distribution<float> unit_{ 0.0F, 1.0F };
 
+  // The vertical-velocity channel's stream, and its own unit normal.
+  std::mt19937_64 vertical_velocity_rng_;
+  std::normal_distribution<float> vertical_velocity_unit_{ 0.0F, 1.0F };
+
   Channel north_;
   Channel east_;
   Channel vertical_;
   Channel speed_;
   Channel course_;
+  Channel vertical_velocity_;
 
   std::uint64_t last_timestamp_us_ = 0;
   bool have_last_timestamp_ = false;

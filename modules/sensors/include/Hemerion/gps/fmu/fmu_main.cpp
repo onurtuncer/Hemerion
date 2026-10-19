@@ -116,7 +116,7 @@ public:
         .setDescription("True geodetic longitude [degrees], east positive");
     register_real("altitude_m", &altitude_m_)
         .setCausality(causality_t::INPUT)
-        .setDescription("True altitude above mean sea level [m]");
+        .setDescription("True geodetic height [m]; encoded into both NAV-PVT height and hMSL (no geoid model)");
 
     register_real("ground_speed_mps", &ground_speed_mps_)
         .setCausality(causality_t::INPUT)
@@ -127,8 +127,8 @@ public:
 
     // NED truth velocity, the natural output set of a 6-DoF plant (e.g. Aetherion's TwoStageRocket FMU). Once any of
     // these is written, the ground_speed_mps/course_deg inputs above are ignored and the emitted speed-over-ground
-    // and course are derived from v_north/v_east instead. v_down feeds the dynamics envelope's vertical-rate check,
-    // but NAV-PVT's velD field is still encoded as 0 -- GpsFix carries no vertical velocity yet.
+    // and course are derived from v_north/v_east instead. v_down feeds the dynamics envelope's vertical-rate check and,
+    // with the vertical-velocity error added, NAV-PVT's velD.
     const auto onNedWritten = [this] { ned_velocity_set_ = true; };
     register_real("v_north_mps", &v_north_mps_, onNedWritten)
         .setCausality(causality_t::INPUT)
@@ -204,7 +204,16 @@ public:
                     "Correlation time of the speed and course errors [s]");
     noise_parameter("accuracy_scale",
                     &accuracy_scale_,
-                    "Reported hAcc/vAcc as a multiple of the true total 1-sigma; 1 = honest, <1 = optimistic");
+                    "Reported hAcc/vAcc/sAcc as a multiple of the true total 1-sigma; 1 = honest, <1 = optimistic");
+    // Registered last so every earlier value reference keeps the number it had before these existed.
+    noise_parameter("vertical_speed_noise_mps",
+                    &vertical_speed_noise_mps_,
+                    "White vertical-velocity (velD) error 1-sigma [m/s], drawn from its own stream so it moves no "
+                    "other channel's draws");
+    noise_parameter("vertical_speed_correlated_mps",
+                    &vertical_speed_correlated_mps_,
+                    "Time-correlated vertical-velocity error stationary 1-sigma [m/s], correlation time "
+                    "velocity_correlation_time_s; 0 = off");
   }
 
   /// Opens the UDP socket. Deliberately not done in the constructor: the
@@ -245,6 +254,8 @@ public:
     course_correlated_deg_ = kDefaultNoise.course_correlated_deg;
     velocity_correlation_time_s_ = kDefaultNoise.velocity_correlation_time_s;
     accuracy_scale_ = kDefaultNoise.accuracy_scale;
+    vertical_speed_noise_mps_ = kDefaultNoise.vertical_speed_noise_mps;
+    vertical_speed_correlated_mps_ = kDefaultNoise.vertical_speed_correlated_mps;
 
     truth_ = GpsTruthSample{};
     altitude_m_ = 0.0;
@@ -369,6 +380,8 @@ private:
     config.course_correlated_deg = static_cast<float>(course_correlated_deg_);
     config.velocity_correlation_time_s = static_cast<float>(velocity_correlation_time_s_);
     config.accuracy_scale = static_cast<float>(accuracy_scale_);
+    config.vertical_speed_noise_mps = static_cast<float>(vertical_speed_noise_mps_);
+    config.vertical_speed_correlated_mps = static_cast<float>(vertical_speed_correlated_mps_);
     noise_model_ = (seed_ == 0) ? GpsNoiseModel(config) : GpsNoiseModel(config, static_cast<std::uint64_t>(seed_));
   }
 
@@ -410,6 +423,8 @@ private:
   double course_correlated_deg_ = kDefaultNoise.course_correlated_deg;
   double velocity_correlation_time_s_ = kDefaultNoise.velocity_correlation_time_s;
   double accuracy_scale_ = kDefaultNoise.accuracy_scale;
+  double vertical_speed_noise_mps_ = kDefaultNoise.vertical_speed_noise_mps;
+  double vertical_speed_correlated_mps_ = kDefaultNoise.vertical_speed_correlated_mps;
 };
 
 }  // namespace hemerion::sensors::gps::fmu

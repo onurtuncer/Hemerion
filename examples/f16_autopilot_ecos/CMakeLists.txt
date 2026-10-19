@@ -94,6 +94,7 @@ endif()
 # The requirement is a set of FMI ports, tested by reading them out of each archive -- same approach and same helper
 # pattern as examples/f16_trim_ecos, one macro because there are now two archives to interrogate.
 set(HEMERION_AETHERION_MIN_VERSION 0.16.0)
+include("${CMAKE_SOURCE_DIR}/cmake/aetherion_plant_version.cmake")
 
 # Reads modelDescription.xml out of ${archive} into ${out_var}. `cmake -E tar` for the reasons documented in
 # examples/f16_trim_ecos/CMakeLists.txt (the pinned cmake-format cannot parse file(ARCHIVE_EXTRACT)).
@@ -139,6 +140,9 @@ if(HEMERION_F16_PLANT_FMU)
         "${HEMERION_AETHERION_MIN_VERSION} (https://github.com/onurtuncer/Aetherion) and reconfigure, or point "
         "AETHERION_ROOT at one.")
   endif()
+  # And the dynamics, which no port shows: see cmake/aetherion_plant_version.cmake.
+  hemerion_require_aetherion_plant_version("${HEMERION_F16_PLANT_FMU}" f16_autopilot_ecos)
+
   unset(_f16_ports)
   unset(_f16_lat_deg_at)
   unset(_f16_specific_force_at)

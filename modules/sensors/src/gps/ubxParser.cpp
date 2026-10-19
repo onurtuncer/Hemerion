@@ -151,11 +151,15 @@ GpsParseError UbxParser::decode_nav_pvt(std::uint16_t payload_length, std::uint6
   const std::uint8_t num_satellites = payload_[23];
   const std::int32_t lon_1e7 = read_i32(24);
   const std::int32_t lat_1e7 = read_i32(28);
-  const std::int32_t height_mm = read_i32(32);
+  const std::int32_t height_mm = read_i32(32);  // above the ellipsoid; hMSL (offset 36) is not read
   const std::uint32_t h_acc_mm = read_u32(40);
   const std::uint32_t v_acc_mm = read_u32(44);
+  const std::int32_t vel_north_mm_s = read_i32(48);
+  const std::int32_t vel_east_mm_s = read_i32(52);
+  const std::int32_t vel_down_mm_s = read_i32(56);
   const std::int32_t ground_speed_mm_s = read_i32(60);
   const std::int32_t heading_motion_1e5 = read_i32(64);
+  const std::uint32_t speed_acc_mm_s = read_u32(68);
 
   out.latitude_deg = static_cast<double>(lat_1e7) * 1e-7;
   out.longitude_deg = static_cast<double>(lon_1e7) * 1e-7;
@@ -164,6 +168,11 @@ GpsParseError UbxParser::decode_nav_pvt(std::uint16_t payload_length, std::uint6
   out.course_deg = static_cast<float>(heading_motion_1e5) * 1e-5F;
   out.horizontal_accuracy_m = static_cast<float>(h_acc_mm) / 1000.0F;
   out.vertical_accuracy_m = static_cast<float>(v_acc_mm) / 1000.0F;
+  out.vel_north_mps = static_cast<float>(vel_north_mm_s) / 1000.0F;
+  out.vel_east_mps = static_cast<float>(vel_east_mm_s) / 1000.0F;
+  out.vel_down_mps = static_cast<float>(vel_down_mm_s) / 1000.0F;
+  out.speed_accuracy_mps = static_cast<float>(speed_acc_mm_s) / 1000.0F;
+  out.ned_velocity_valid = true;
   out.num_satellites = num_satellites;
   out.fix_type = to_fix_type(fix_type_raw);
   out.timestamp_us = timestamp_us;

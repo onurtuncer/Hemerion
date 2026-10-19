@@ -177,6 +177,13 @@ public:
   /// The calibration burn, for handing to the device model's NVM.
   [[nodiscard]] const Bmp390CalibData& calibration() const { return config_.calibration; }
 
+  /// The turn-on pressure bias this part was drawn with [Pa]: added to the
+  /// ambient pressure before conversion, constant for the run.
+  [[nodiscard]] float pressure_bias_pa() const { return pressure_bias_pa_; }
+
+  /// The turn-on die-temperature bias this part was drawn with [°C].
+  [[nodiscard]] float temperature_bias_c() const { return temperature_bias_c_; }
+
 private:
   static constexpr std::uint32_t kAdcMax = 0x00FFFFFF;  // 24-bit conversion words
 

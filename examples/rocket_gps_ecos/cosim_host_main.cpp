@@ -77,6 +77,7 @@
 #include "Hemerion/mag/world_magnetic_model.h"
 
 #include "environment.hpp"
+#include "log_contract.hpp"
 
 #include <algorithm>
 #include <array>
@@ -103,6 +104,8 @@ namespace
 using hemerion::examples::GpsErrorModel;
 using hemerion::examples::kCorrelatedReceiver;
 using hemerion::examples::kWhiteReceiver;
+using hemerion::examples::with_drawn_errors;
+namespace log_contract = hemerion::examples::log_contract;
 
 using hemerion::sensors::mag::to_body;
 using hemerion::sensors::mag::WmmError;
@@ -179,7 +182,8 @@ struct Options
   double lat0_deg = 0.0;
   double lon0_deg = 0.0;
   double alt0_m = 0.0;
-  double step_s = 0.1;           // communication step == GPS output period (10 Hz)
+  double step_s = 0.1;           // communication step
+  double gps_period_s = 0.1;     // NAV-PVT period: the GPS FMU's step-size hint (10 Hz), independent of step_s
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double realtime_factor = 0.0;  // 0 = run as fast as possible
   // Receiver dynamics envelope. The platform model is off by default and
@@ -279,7 +283,10 @@ void print_usage()
                "              flight profile and does not reproduce the reference trajectory)\n"
                "  --lat0 --lon0 --alt0  launch site (default 0/0/0, Scenario 17's equatorial pad)\n"
                "  --stop      simulation stop time [s] (default 200 = the reference trajectory's window)\n"
-               "  --step      communication step size [s]; also the GPS fix period (default 0.1)\n"
+               "  --step      communication step size [s] (default 0.1)\n"
+               "  --gps-period  NAV-PVT period [s] (default 0.1: the 10 Hz the estimator is designed for). A whole\n"
+               "              number of steps, and independent of --step, so a finer step does not make a faster\n"
+               "              receiver; pass the same to the flight computer as --fix-period\n"
                "  --csv       rocket truth output CSV (default results/rocket_truth.csv)\n"
                "  --rtf       real-time factor pacing, e.g. 1 = wall-clock speed; 0 = unpaced (default)\n";
 }
@@ -294,7 +301,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 22> kValueOptions = { {
+constexpr std::array<ValueOption, 23> kValueOptions = { {
     { "--rocket", [](Options& o, const char* v) { o.rocket_fmu = v; } },
     { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
@@ -347,6 +354,7 @@ constexpr std::array<ValueOption, 22> kValueOptions = { {
     { "--alt0", [](Options& o, const char* v) { o.alt0_m = std::stod(v); } },
     { "--stop", [](Options& o, const char* v) { o.stop_s = std::stod(v); } },
     { "--step", [](Options& o, const char* v) { o.step_s = std::stod(v); } },
+    { "--gps-period", [](Options& o, const char* v) { o.gps_period_s = std::stod(v); } },
     { "--csv", [](Options& o, const char* v) { o.csv_path = v; } },
     { "--rtf", [](Options& o, const char* v) { o.realtime_factor = std::stod(v); } },
 } };
@@ -393,9 +401,21 @@ bool parse_args(int argc, char** argv, Options& options)
       return false;
     }
   }
+  // The GPS FMU is stepped once per NAV-PVT period, and Ecos steps a model only
+  // on base-step boundaries, so the period must be a whole number of steps. It
+  // is an option of its own rather than the step itself so that a finer step --
+  // what a manoeuvring case wants for the IMU -- does not quietly make a 100 Hz
+  // receiver; the flight computer's --fix-period has to match it either way.
+  const double steps_per_fix = options.gps_period_s / options.step_s;
+  if (!(options.step_s > 0.0) || steps_per_fix < 1.0 - 1e-9 ||
+      std::fabs(steps_per_fix - std::round(steps_per_fix)) > 1e-6)
+  {
+    std::cerr << "--gps-period " << options.gps_period_s << " must be a positive whole number of --step "
+              << options.step_s << " s steps\n";
+    return false;
+  }
   return true;
 }
-
 /// @brief Which external archiver Ecos will spawn to unpack an .fmu.
 ///
 /// Mirrors ecos::detail::make_args(): on Windows it uses `unzip` when SHELL
@@ -532,7 +552,7 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_error_model=" << receiver.name << "\n"
       << "seed=" << options.seed << "\n"
       << "mag_date_year=" << options.mag_date_year << "\n"
-      << "gps_latency_s=" << options.gps_latency_s << "\n"
+      << log_contract::kGpsLatencyKey << '=' << options.gps_latency_s << "\n"
       << "mag_declination_deg=" << field_declination_deg << "\n"
       << "mag_inclination_deg=" << field_inclination_deg << "\n"
       << "mag_intensity_ut=" << field_intensity_ut << "\n"
@@ -550,14 +570,22 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_course_correlated_deg=" << receiver.course_correlated_deg << "\n"
       << "gps_velocity_correlation_time_s=" << receiver.velocity_correlation_time_s << "\n"
       << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
+      << "gps_vertical_speed_noise_mps=" << receiver.vertical_speed_noise_mps << "\n"
+      << "gps_vertical_speed_correlated_mps=" << receiver.vertical_speed_correlated_mps << "\n"
       << "stg2_ignition_s=" << options.stg2_ignition_s << "\n"
-      << "lat0_deg=" << options.lat0_deg << "\n"
-      << "lon0_deg=" << options.lon0_deg << "\n"
-      << "alt0_m=" << options.alt0_m << "\n"
+      << log_contract::kLat0Key << '=' << options.lat0_deg << "\n"
+      << log_contract::kLon0Key << '=' << options.lon0_deg << "\n"
+      << "alt0_m=" << options.alt0_m
+      << "\n"
+      // The same pad height in the unit the F-16 hosts use, under the key
+      // Aetherion's replay requires to place its frame origin. The rocket
+      // logs could not be replayed at all without it.
+      << log_contract::kAlt0FtKey << '=' << options.alt0_m / hemerion::examples::kFeetToMetres << "\n"
       << "step_s=" << options.step_s << "\n"
+      << "gps_period_s=" << options.gps_period_s << "\n"
       << "stop_s=" << options.stop_s << "\n"
       << "imu_rate_hz=" << options.imu_rate_hz << "\n"
-      << "realtime_factor=" << options.realtime_factor << "\n";
+      << log_contract::kRealtimeFactorKey << '=' << options.realtime_factor << "\n";
 }
 
 /// @brief Truth log, written by the host rather than by Ecos' ``csv_writer``.
@@ -697,7 +725,7 @@ int main(int argc, char** argv)
     // std::filesystem::relative(), which yields an empty path on Windows when the FMU sits on a different
     // drive than the working directory. The file resolver handles absolute path strings as-is.
     ss.add_model("rocket", options.rocket_fmu.string());
-    ss.add_model("gps", options.gps_fmu.string());
+    ss.add_model("gps", options.gps_fmu.string(), options.gps_period_s);  // NAV-PVT period, not the base step
     ss.add_model("imu", options.imu_fmu.string());
     ss.add_model("baro", options.baro_fmu.string());
     ss.add_model("mag", options.mag_fmu.string());
@@ -807,6 +835,8 @@ int main(int argc, char** argv)
     launch_site["gps::velocity_correlation_time_s"] = receiver.velocity_correlation_time_s;
     launch_site["gps::latency_s"] = options.gps_latency_s;
     launch_site["gps::accuracy_scale"] = receiver.accuracy_scale;
+    launch_site["gps::vertical_speed_noise_mps"] = receiver.vertical_speed_noise_mps;
+    launch_site["gps::vertical_speed_correlated_mps"] = receiver.vertical_speed_correlated_mps;
     ss.add_parameter_set("launchSite", launch_site);
 
     const auto sim = ss.load(std::make_unique<ecos::fixed_step_algorithm>(options.step_s));
@@ -819,31 +849,38 @@ int main(int argc, char** argv)
     // these two ports were radians.
     TruthLogger truth_log(options.csv_path,
                           *sim,
-                          { "rocket::out.alt_m",
-                            "rocket::out.lat_deg",
-                            "rocket::out.lon_deg",
-                            "rocket::out.v_north_m_s",
-                            "rocket::out.v_east_m_s",
-                            "rocket::out.v_down_m_s",
-                            "rocket::out.p_rad_s",
-                            "rocket::out.q_rad_s",
-                            "rocket::out.r_rad_s",
-                            "rocket::out.mach",
-                            "rocket::out.qbar_Pa",
-                            "rocket::out.thrust_N",
-                            "rocket::out.mass_kg",
-                            // What the IMU FMU actually receives: the plant's body-frame
-                            // specific force, one step behind rocket truth like every
-                            // other connection.
-                            "imu::f_x_mps2",
-                            "imu::f_y_mps2",
-                            "imu::f_z_mps2",
-                            // Likewise for the magnetometer: the body-frame truth field
-                            // the host computed and wrote, so a decoded sample can be
-                            // compared against what the part was actually given.
-                            "mag::b_x_ut",
-                            "mag::b_y_ut",
-                            "mag::b_z_ut" },
+                          with_drawn_errors({ "rocket::out.alt_m",
+                                              "rocket::out.lat_deg",
+                                              "rocket::out.lon_deg",
+                                              "rocket::out.v_north_m_s",
+                                              "rocket::out.v_east_m_s",
+                                              "rocket::out.v_down_m_s",
+                                              // ZYX Euler, body -> NED: the attitude truth a filter's tilt and
+                                              // heading are scored against (singular at the 90 deg pitch a
+                                              // vertical launch starts from -- a quaternion output is Aetherion's
+                                              // to add).
+                                              "rocket::out.yaw_rad",
+                                              "rocket::out.pitch_rad",
+                                              "rocket::out.roll_rad",
+                                              "rocket::out.p_rad_s",
+                                              "rocket::out.q_rad_s",
+                                              "rocket::out.r_rad_s",
+                                              "rocket::out.mach",
+                                              "rocket::out.qbar_Pa",
+                                              "rocket::out.thrust_N",
+                                              "rocket::out.mass_kg",
+                                              // What the IMU FMU actually receives: the plant's body-frame
+                                              // specific force, one step behind rocket truth like every
+                                              // other connection.
+                                              "imu::f_x_mps2",
+                                              "imu::f_y_mps2",
+                                              "imu::f_z_mps2",
+                                              // Likewise for the magnetometer: the body-frame truth field
+                                              // the host computed and wrote, so a decoded sample can be
+                                              // compared against what the part was actually given.
+                                              "mag::b_x_ut",
+                                              "mag::b_y_ut",
+                                              "mag::b_z_ut" }),
                           { "rocket::out.staged" });
     write_run_config(options.csv_path, options);
 
@@ -881,7 +918,7 @@ int main(int argc, char** argv)
               << "[cosim] imu:    " << options.imu_fmu.string() << "\n"
               << "[cosim] baro:   " << options.baro_fmu.string() << "\n"
               << "[cosim] mag:    " << options.mag_fmu.string() << "\n"
-              << "[cosim] step " << options.step_s << " s (" << 1.0 / options.step_s << " Hz GPS, "
+              << "[cosim] step " << options.step_s << " s (" << 1.0 / options.gps_period_s << " Hz GPS, "
               << options.imu_rate_hz << " Hz IMU; BMP390 converts at the ODR the flight computer programs), stop "
               << options.stop_s << " s\n"
               << "[cosim] plant: launch " << options.lat0_deg << " deg N / " << options.lon0_deg << " deg E at "
@@ -969,7 +1006,8 @@ int main(int argc, char** argv)
     const long imu_frames_per_step = std::lround(options.step_s * options.imu_rate_hz);
     // One NAV-PVT frame per step regardless of fix validity -- a receiver
     // outside its envelope keeps talking, it just stops claiming a solution.
-    std::cout << "[cosim] done: " << sim->iterations() << " steps, " << sim->iterations()
+    std::cout << "[cosim] done: " << sim->iterations() << " steps, "
+              << std::lround(static_cast<double>(sim->iterations()) * options.step_s / options.gps_period_s)
               << " UBX-NAV-PVT frames emitted and " << sim->iterations() * std::max(1L, imu_frames_per_step)
               << " IMU samples buffered for the SPI controller\n"
               << "[cosim] the BMP390 and the MMC5983MA each answered at whatever rate the flight computer programmed "

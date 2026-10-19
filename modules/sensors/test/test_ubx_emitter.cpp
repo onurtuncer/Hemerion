@@ -118,12 +118,89 @@ void test_noisy_round_trip_stays_bounded()
   assert(decoded.timestamp_us == truth.timestamp_us);
 }
 
+// The NED velocity and sAcc a fix carries reach the wire and come back: both
+// signs, millimetre resolution, and the vertical component that used to be a
+// hard-coded zero.
+void test_ned_velocity_round_trip()
+{
+  GpsFix truth;
+  truth.ground_speed_mps = 172.0F;
+  truth.course_deg = 135.0F;
+  truth.vel_north_mps = -121.622F;
+  truth.vel_east_mps = 121.622F;
+  truth.vel_down_mps = -3.456F;
+  truth.speed_accuracy_mps = 1.737F;
+  truth.ned_velocity_valid = true;
+  truth.fix_type = GpsFixType::kFix3D;
+
+  UbxParser parser;
+  GpsFix decoded;
+  assert(feed_frame(parser, UbxEmitter::encode_nav_pvt(truth), 0, decoded) == GpsParseError::kNone);
+  assert(decoded.ned_velocity_valid);
+  assert(near(decoded.vel_north_mps, truth.vel_north_mps, 1e-3));
+  assert(near(decoded.vel_east_mps, truth.vel_east_mps, 1e-3));
+  assert(near(decoded.vel_down_mps, truth.vel_down_mps, 1e-3));
+  assert(near(decoded.speed_accuracy_mps, truth.speed_accuracy_mps, 1e-3));
+}
+
+// A fix built from speed and course alone -- no NED velocity of its own --
+// still encodes the way every fix did before GpsFix carried one: velN/velE
+// resolved from speed and course, velD zero, the placeholder sAcc.
+void test_fix_without_ned_velocity_falls_back()
+{
+  GpsFix truth;
+  truth.ground_speed_mps = 10.0F;
+  truth.course_deg = 90.0F;  // due east
+  truth.fix_type = GpsFixType::kFix3D;
+
+  UbxParser parser;
+  GpsFix decoded;
+  assert(feed_frame(parser, UbxEmitter::encode_nav_pvt(truth), 0, decoded) == GpsParseError::kNone);
+  assert(near(decoded.vel_north_mps, 0.0, 1e-3));
+  assert(near(decoded.vel_east_mps, 10.0, 1e-3));
+  assert(near(decoded.vel_down_mps, 0.0, 1e-9));
+  assert(near(decoded.speed_accuracy_mps, 0.2, 1e-6));
+}
+
+// Through the whole chain: noise model -> emitter -> the on-target parser.
+// The decoded velocity is the model's to the millimetre, its horizontal part
+// agrees with the decoded speed and course, and velD carries the truth's
+// climb rather than a zero.
+void test_noise_model_velocity_reaches_the_parser()
+{
+  GpsTruthSample truth;
+  truth.latitude_deg = 36.0;
+  truth.longitude_deg = -75.0;
+  truth.altitude_m = 3000.0F;
+  truth.ground_speed_mps = 172.0F;
+  truth.course_deg = 45.0F;
+  truth.v_down_mps = -12.0F;  // climbing
+  truth.timestamp_us = 100000;
+
+  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/11);
+  const GpsFix fix = model.apply(truth);
+  UbxParser parser;
+  GpsFix decoded;
+  assert(feed_frame(parser, UbxEmitter::encode_nav_pvt(fix), 0, decoded) == GpsParseError::kNone);
+
+  assert(decoded.ned_velocity_valid);
+  assert(near(decoded.vel_north_mps, fix.vel_north_mps, 1e-3));
+  assert(near(decoded.vel_east_mps, fix.vel_east_mps, 1e-3));
+  assert(near(decoded.vel_down_mps, fix.vel_down_mps, 1e-3));
+  assert(near(decoded.speed_accuracy_mps, fix.speed_accuracy_mps, 1e-3));
+  assert(near(std::hypot(decoded.vel_north_mps, decoded.vel_east_mps), decoded.ground_speed_mps, 2e-3));
+  assert(near(decoded.vel_down_mps, -12.0, 5.0 * 0.2));  // 5 sigma of the default velD noise
+}
+
 }  // namespace
 
 int main()
 {
   test_noiseless_round_trip();
   test_noisy_round_trip_stays_bounded();
+  test_ned_velocity_round_trip();
+  test_fix_without_ned_velocity_falls_back();
+  test_noise_model_velocity_reaches_the_parser();
 
   std::puts("test_ubx_emitter: all checks passed");
   return 0;

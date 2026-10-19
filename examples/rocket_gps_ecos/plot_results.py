@@ -132,6 +132,26 @@ def with_canonical_time(data: dict) -> dict:
     return data
 
 
+def fix_validity_times(index: list[float], stamp: list[float]) -> list[float]:
+    """GPS ``nominal_time_s`` as validity times, whichever convention wrote it.
+
+    The flight computers stamp a fix from its epoch index. They used to write
+    ``index * period``: the end of the step the frame left in, one period
+    after the plant state it carries. They now write ``(index - 1) * period``,
+    the validity time itself. The log tells the two apart on its own -- the
+    slope of stamp against index is the period, the intercept says which
+    convention -- so archived results, the published figures' among them,
+    align exactly as new ones do.
+    """
+    if len(index) < 2 or index[-1] == index[0]:
+        return list(stamp)
+    period = (stamp[-1] - stamp[0]) / (index[-1] - index[0])
+    if period <= 0.0:
+        return list(stamp)
+    late = round((stamp[0] - (index[0] - 1.0) * period) / period)
+    return [t - late * period for t in stamp]
+
+
 def read_fixes(path: Path) -> dict[str, list[float]]:
     """Reads a flight-computer log, keeping only epochs that carry a fix.
 
@@ -146,9 +166,18 @@ def read_fixes(path: Path) -> dict[str, list[float]]:
         reader = csv.DictReader(f)
         rows = list(reader)
     fields = reader.fieldnames
+    # Normalised over every epoch, before the no-fix ones are dropped: the
+    # slope needs the full index range, and a launch-vehicle envelope can
+    # leave a handful of valid fixes or none.
+    if "fix_index" in fields and "nominal_time_s" in fields:
+        valid = fix_validity_times([float(r["fix_index"]) for r in rows], [float(r["nominal_time_s"]) for r in rows])
+        for r, t in zip(rows, valid):
+            r["nominal_time_s"] = t
     if "fix_type" in fields:
         rows = [r for r in rows if float(r["fix_type"]) > 0.0]
-    return with_canonical_time({k: [float(r[k]) for r in rows] for k in fields})
+    # An empty cell -- a fix logged without NED velocity -- reads as NaN
+    # rather than failing the whole file.
+    return with_canonical_time({k: [float(r[k]) if r[k] != "" else math.nan for r in rows] for k in fields})
 
 
 def read_outages(path: Path) -> list[tuple[float, float]]:
@@ -170,6 +199,8 @@ def read_outages(path: Path) -> list[tuple[float, float]]:
     previous = 0.0
     step = 0.1
     times = [float(r[time_column(reader.fieldnames or [])]) for r in rows]
+    if "fix_index" in (reader.fieldnames or []):
+        times = fix_validity_times([float(r["fix_index"]) for r in rows], times)
     if len(times) > 1:
         step = min(b - a for a, b in zip(times, times[1:]))
     for row, t in zip(rows, times):
@@ -615,23 +646,21 @@ def plot_gps_availability(truth, outages, out: Path, caption: str, config: dict[
     plt.close(fig)
 
 
-def plot_gps_error(truth, fixes, step: float, out: Path, caption: str) -> None:
+def plot_gps_error(truth, fixes, out: Path, caption: str) -> None:
     # Truth rows and fixes share the 10 Hz grid (one NAV-PVT per step), so
     # align by rounded time rather than interpolating. The fix emitted at the
     # end of step k carries the truth sampled at the end of step k-1 -- the
-    # Ecos master propagates connections between steps, one communication
-    # step of transport delay -- so each fix is compared against the truth
-    # one step earlier. Comparing at equal timestamps instead would show
-    # speed x 0.1 s (hundreds of metres at rocket velocities), which is
+    # Ecos master propagates connections between steps -- and its stamp is
+    # that validity time (read_fixes normalises logs from before the flight
+    # computer stamped it so), so each fix is compared with the truth at its
+    # own stamp. Comparing against the step it was *emitted* at instead would
+    # show speed x 0.1 s (hundreds of metres at rocket velocities), which is
     # latency, not receiver error.
-    # `step` is the communication step, taken from the truth log: the fix
-    # stamps cannot supply it once the dynamics envelope drops whole runs of
-    # epochs, and with a launch-vehicle envelope it may drop nearly all of them.
     stamps = fixes["sim_time_s"]
     truth_by_time = {round(t, 3): i for i, t in enumerate(truth["time"])}
     times, horizontal, vertical = [], [], []
     for i, t in enumerate(stamps):
-        j = truth_by_time.get(round(t - step, 3))
+        j = truth_by_time.get(round(t, 3))
         if j is None:
             continue
         lat_t = truth["lat_deg"][j]
@@ -951,9 +980,6 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     print(caption)
 
-    times = truth["time"]
-    step = min(b - a for a, b in zip(times, times[1:])) if len(times) > 1 else 0.1
-
     epochs = sum(1 for _ in args.fixes.open(newline="")) - 1  # minus the header
     valid = len(fixes["sim_time_s"])
     if valid < epochs:
@@ -972,7 +998,7 @@ def main() -> None:
     if valid >= 2:
         plot_altitude(truth, fixes, outages, args.out, caption)
         plot_velocity(truth, fixes, outages, args.out, caption)
-        plot_gps_error(truth, fixes, step, args.out, caption)
+        plot_gps_error(truth, fixes, args.out, caption)
         figures += 3
     else:
         print(f"only {valid} epoch(s) carried a fix -- skipping the three fix-dependent figures. "

@@ -124,10 +124,12 @@ the verifier compares against whatever references reach each sample time and pri
 
 ## Building
 
-Needs the `examples-native` preset and an **Aetherion ≥ 0.14.1** install for both `F16Plant.fmu` and
+Needs the `examples-native` preset and an **Aetherion ≥ 0.18.0** install for both `F16Plant.fmu` and
 `F16Autopilot.fmu` (set `AETHERION_ROOT` if not in a default location; `--f16` / `--ap` override at
 runtime). Configure reads the ports this example binds out of both archives — the plant's `out.*`/`ctrl.*`
-and the autopilot's `cmd.*`/`fb.*`/`ctrl.*` — rather than trusting a version string.
+and the autopilot's `cmd.*`/`fb.*`/`ctrl.*` — rather than trusting a version string. It also reads the version
+of the install the plant came from, because 0.17.4 and 0.18.0 corrected its rigid-body dynamics without changing a
+port (`cmake/aetherion_plant_version.cmake`).
 
 ```
 cmake --preset examples-native

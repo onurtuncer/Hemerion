@@ -101,6 +101,45 @@ void test_nav_pvt_decodes_full_fix()
   assert(fix.timestamp_us == 5000);
 }
 
+void put_i32(std::vector<std::uint8_t>& payload, std::size_t offset, std::int32_t value)
+{
+  const auto bits = static_cast<std::uint32_t>(value);
+  for (std::size_t i = 0; i < 4; ++i)
+  {
+    payload[offset + i] = static_cast<std::uint8_t>((bits >> (8U * i)) & 0xFFU);
+  }
+}
+
+// NAV-PVT's NED velocity and its accuracy (sAcc) -- what Aetherion's
+// GNSS-velocity update needs, and what the parser used to drop. Signed fields
+// with both signs, so a sign-extension slip cannot pass. And the datum:
+// altitude_m is `height` (offset 32), above the ellipsoid; `hMSL` (offset 36)
+// is set to something else here and must not leak in.
+void test_nav_pvt_decodes_ned_velocity_and_ellipsoidal_height()
+{
+  auto payload = nav_pvt_payload();
+  put_i32(payload, 48, -1234);  // velN [mm/s]
+  put_i32(payload, 52, 5678);   // velE
+  put_i32(payload, 56, -90);    // velD: climbing at 0.09 m/s
+  put_i32(payload, 68, 345);    // sAcc [mm/s]
+  put_i32(payload, 36, 12000);  // hMSL 12 m, against height 50 m
+
+  UbxParser parser;
+  GpsFix fix;
+  const GpsParseError error = feed_message(parser, build_message(0x01, 0x07, payload), 0, fix);
+
+  assert(error == GpsParseError::kNone);
+  assert(fix.ned_velocity_valid);
+  assert(near(fix.vel_north_mps, -1.234F));
+  assert(near(fix.vel_east_mps, 5.678F));
+  assert(near(fix.vel_down_mps, -0.090F));
+  assert(near(fix.speed_accuracy_mps, 0.345F));
+  assert(near(fix.altitude_m, 50.0F));
+  // The fields it already decoded are untouched by the new ones.
+  assert(near(fix.ground_speed_mps, 1.5F));
+  assert(near(fix.course_deg, 90.0F));
+}
+
 void test_corrupted_checksum_is_rejected()
 {
   UbxParser parser;
@@ -137,6 +176,7 @@ void test_partial_message_is_incomplete()
 int main()
 {
   test_nav_pvt_decodes_full_fix();
+  test_nav_pvt_decodes_ned_velocity_and_ellipsoidal_height();
   test_corrupted_checksum_is_rejected();
   test_other_message_class_is_unsupported();
   test_partial_message_is_incomplete();

@@ -173,6 +173,9 @@ inline constexpr float kCocomSpeedLimitMps = 515.0F;
 /// there; the exact figure is meaningless, its magnitude is the point.
 inline constexpr float kNoFixAccuracyM = 1000.0F;
 
+/// The same fallback for the velocity accuracy, `sAcc` [m/s].
+inline constexpr float kNoFixSpeedAccuracyMps = 100.0F;
+
 /// Why a fix was (or was not) invalidated. Ordered checks: the first limit
 /// that trips is the one reported.
 enum class GpsDynamicsVerdict : std::uint8_t
@@ -226,6 +229,7 @@ public:
       fix.num_satellites = 0;
       fix.horizontal_accuracy_m = kNoFixAccuracyM;
       fix.vertical_accuracy_m = kNoFixAccuracyM;
+      fix.speed_accuracy_mps = kNoFixSpeedAccuracyMps;
     }
     return verdict;
   }

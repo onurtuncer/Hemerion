@@ -166,9 +166,13 @@ sets it explicitly (`--stg2-ignition`, default 131.8 s), along with Scenario 17'
 ## Building
 
 Requires: native toolchain (see the repo README), network access at configure time (Ecos and its FMU loader
-fmi4c are fetched from source), and an **Aetherion >= 0.13.0** install for `TwoStageRocket.fmu` (set
+fmi4c are fetched from source), and an **Aetherion >= 0.18.0** install for `TwoStageRocket.fmu` (set
 `AETHERION_ROOT` if it is not in a default location — the example still builds without it; you then pass
-`--rocket` at runtime).
+`--rocket` at runtime). Since 0.18.0 configure also reads the version of the install the FMU came from: 0.17.4
+and 0.18.0 corrected the plant's rigid-body dynamics — the spatial inertia's parallel-axis term (this rocket's
+Iyy was short by m·DXCG²), the gravity–mass coupling, where the gravity wrench is summed — without changing a
+port, so an older plant runs and disagrees with every figure here. `cmake/aetherion_plant_version.cmake` says
+what it checks.
 
 The version floor is a pair of port requirements that landed in two different releases. Before 0.13.0 the
 geodetic outputs were `out.lat_rad`/`out.lon_rad` and carried the library's internal radians straight to the
@@ -294,10 +298,16 @@ delayed-measurement handling in a filter has to absorb. Two parts report no time
 bullets below — and for those the first column says so in its name.
 
 * `gps_fixes.csv` — every NAV-PVT epoch the flight software decoded, valid or not. Epochs that carried a
-  solution get position, speed/course, receiver-reported accuracies and satellite count; epochs the dynamics
-  envelope invalidated get **empty** position fields, keeping only the index, both times and `fix_type`. Its first column is `nominal_time_s`, not
-  `part_time_s`: the receiver reports no time of its own (`ubxEmitter` leaves `iTOW` zero, and the
-  on-target parser never reads it), so that column is the epoch schedule the log assumes. `host_time_s` is
+  solution get position (`altitude_m` is NAV-PVT `height`, above the ellipsoid), speed/course, NED velocity
+  (`vel_north_mps`, `vel_east_mps`, `vel_down_mps`) with its per-axis accuracy `speed_accuracy_mps`,
+  receiver-reported accuracies and satellite count; epochs the dynamics envelope invalidated get **empty**
+  position and velocity fields, keeping only the index, both times and `fix_type`. Its first column is
+  `nominal_time_s`, not `part_time_s`: the receiver reports no time of its own (`ubxEmitter` leaves `iTOW` zero,
+  and the on-target parser never reads it), so that column is the epoch schedule the log assumes — the fix's
+  validity time, `(fix_index - 1)` × the fix period, since fix *k* carries the plant state from the start of the
+  step that emitted it. (Logs from before that was corrected stamp `fix_index` × the period;
+  `plot_results.py` detects and aligns both.) The column names are an interface that Aetherion's replay
+  reads; `ctest -R log_contract` pins them. `host_time_s` is
   the stamp `GpsDriver::feed()` already put on the fix. A real
   receiver does put numbers in those fields during a dropout and the parser does decode them, but they are
   not measurements of anything, so they are not logged as if they were.

@@ -398,7 +398,7 @@ Building
 
 Requires a native toolchain, network access at configure time (Ecos and its
 FMU loader fmi4c are fetched and built from source), and an **Aetherion
->= 0.13.0** install for ``TwoStageRocket.fmu`` (set ``AETHERION_ROOT`` if it
+>= 0.18.0** install for ``TwoStageRocket.fmu`` (set ``AETHERION_ROOT`` if it
 is not in a default location; without it the example still builds and
 ``--rocket <path>`` selects the FMU at runtime). The version floor buys the
 degree-valued geodetic ports described under `Signal wiring`_. It is checked
@@ -901,9 +901,13 @@ One detail matters when comparing fixes against truth: the Ecos master
 propagates connections *between* steps, so the fix emitted at the end of step
 *k* carries the truth sampled at the end of step *k−1* — one communication
 step (0.1 s) of transport delay, just like a real receiver's navigation-epoch
-latency. At 7 km/s that step is ~700 m of along-track motion, so the error
-plot aligns each fix with the truth one step earlier; naive equal-timestamp
-alignment would show latency, not receiver error. (The IMU plots need no such
+latency. At 7 km/s that step is ~700 m of along-track motion. The flight
+computer therefore stamps fix *k* with ``nominal_time_s`` = (*k* − 1) × 0.1 s,
+the time its content is valid for, and the error plot compares each fix with
+the truth at that stamp. (Logs written before that stamp was corrected say
+*k* × 0.1 s, one step late — Aetherion's replay measured it as a 17 m lag on
+the F-16. ``plot_results.py`` recognises them from the intercept of stamp
+against ``fix_index`` and aligns them the same way.) (The IMU plots need no such
 realignment: the truth CSV's ``f_x/f_y/f_z`` columns are the ``imu::`` input
 variables themselves — already the zero-order-held, one-step-delayed value
 the FMU actually sampled.)

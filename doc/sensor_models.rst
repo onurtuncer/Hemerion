@@ -272,6 +272,29 @@ receiver, and real ones run optimistic, reporting 50–80 % of the error they
 make. A filter that weights fixes by the reported accuracy under-weights the
 truth by that ratio, which is the point of modelling it.
 
+**NED velocity.** NAV-PVT's ``velN``/``velE`` are the noisy speed and course
+resolved, so they agree with ``gSpeed``/``headMot`` as a real receiver's do;
+``velD`` is the truth's vertical velocity plus its own white and correlated
+terms, drawn from a second RNG stream so that adding them moved no draw of any
+other channel (a seeded run's position, speed and course are bit-identical to
+before ``velD`` existed). ``sAcc`` is reported honestly, as the per-axis 1-sigma
+an *isotropic* covariance would need to carry the velocity error's true total:
+
+.. math::
+
+   \sigma_v = \sqrt{\tfrac{1}{3}\left(\sigma_s^2 + (v_h\,\sigma_\chi)^2
+              + \sigma_d^2\right)}
+
+with :math:`\sigma_s`, :math:`\sigma_\chi` (radians) and :math:`\sigma_d` the
+speed, course and vertical-velocity totals and :math:`v_h` the ground speed —
+because the course error is *across* track at :math:`v_h\sigma_\chi`, the
+error is not isotropic, and an isotropic consumer (Aetherion's replay uses
+:math:`\sigma_v^2 I`) gets the right normalised innovation only on average.
+It grows with speed: 1° of course noise is 3 m/s across track at 172 m/s, so
+the default receiver reports :math:`\sigma_v` ≈ 1.7 m/s on the F-16 cases.
+That is the speed/course parameterisation's property, not a Doppler
+receiver's, whose velocity error is per axis and speed-independent.
+
 .. list-table:: ``GpsNoiseConfig`` defaults (u-blox M9N, open sky)
    :header-rows: 1
    :widths: 40 20 40
@@ -308,10 +331,18 @@ truth by that ratio, which is the point of modelling it.
      - Gauss–Markov stationary 1-sigma, course
    * - ``velocity_correlation_time_s``
      - 10 s
-     - :math:`\tau` for speed and course
+     - :math:`\tau` for speed, course and vertical velocity
+   * - ``vertical_speed_noise_mps``
+     - 0.2 m/s
+     - 1-sigma ``velD`` noise — twice the speed noise, the position defaults'
+       vertical-to-horizontal ratio. On by default: ``velD`` used to be a
+       hard-coded zero, so there was no previous behaviour to keep
+   * - ``vertical_speed_correlated_mps``
+     - 0 (off)
+     - Gauss–Markov stationary 1-sigma, vertical velocity
    * - ``accuracy_scale``
      - 1.0
-     - reported ``hAcc``/``vAcc`` as a multiple of the true total 1-sigma
+     - reported ``hAcc``/``vAcc``/``sAcc`` as a multiple of the true total 1-sigma
    * - ``num_satellites``
      - 11
      - constant satellite count reported
@@ -349,6 +380,10 @@ flight — and a master that sets none of them gets the previous receiver.
      - 0.3°
      - 1.0°, :math:`\tau` = 10 s
      - total 1.044° — 4 % over the default
+   * - vertical velocity
+     - 0.1 m/s
+     - 0.2 m/s, :math:`\tau` = 10 s
+     - total 0.224 m/s — twice speed, as in the default
    * - ``accuracy_scale``
      - 0.7
      -
@@ -1131,7 +1166,11 @@ are:
    * - ``nominal_time_s``
      - GPS only: the epoch schedule the log assumes, since the receiver
        reports no time of its own. Named for what it is rather than called a
-       simulation time.
+       simulation time. It is the fix's **validity** time, (``fix_index`` − 1)
+       × the fix period: fix 1 carries the plant state at t = 0, because Ecos
+       hands the FMU its inputs at the start of the step whose end emits the
+       frame. Logs written before this was corrected stamp ``fix_index`` × the
+       period, one period late; the plot scripts detect and align both.
 
 Where the driver API already carries an arrival stamp — ``GpsFix`` and the
 MMC5983MA's ``now_us()``, both the caller's clock by contract — that stamp is

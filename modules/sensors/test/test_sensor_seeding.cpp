@@ -24,6 +24,7 @@
 //
 // Plain asserts + exit code, matching test_gps_noise.cpp.
 // ------------------------------------------------------------------------------
+#include <array>
 #include <cstdlib>
 #include <cmath>
 #include <cstdint>
@@ -325,6 +326,69 @@ void test_imu_scale_and_misalignment()
   CHECK(sensed_gyro_x(quiet, 0.0, 1.0) == 0.0);
 }
 
+// The drawn terms the FMU publishes (sensor fusion step 3) are the ones the
+// part actually applies: rebuilding every axis from the accessors -- scale x
+// ((I + skew(misalignment)) x truth) + bias -- reproduces what the part emits,
+// to the quantiser. A filter scored against these is scored against the truth
+// of the error, not a plausible-looking number beside it.
+void test_imu_drawn_terms_reconstruct_the_output()
+{
+  ImuNoiseConfig config;
+  config.accel_noise_mps2 = 0.0F;  // noise is the one term not published
+  config.gyro_noise_rad_s = 0.0F;
+  config.accel_bias_sigma_mps2 = 0.5F;
+  config.gyro_bias_sigma_rad_s = 0.05F;
+  config.accel_scale_sigma = 0.02F;
+  config.gyro_scale_sigma = 0.02F;
+  config.misalignment_sigma_rad = 0.01F;
+  ImuNoiseModel model(config, /*seed=*/31);
+
+  ImuTruthSample truth;
+  truth.specific_force_x_mps2 = 12.0;
+  truth.specific_force_y_mps2 = -7.0;
+  truth.specific_force_z_mps2 = -30.0;
+  truth.angular_rate_x_rad_s = 1.5;
+  truth.angular_rate_y_rad_s = -0.8;
+  truth.angular_rate_z_rad_s = 0.4;
+  truth.timestamp_us = 10000;
+  const auto raw = model.apply(truth);
+
+  using Triad = std::array<double, 3>;
+  const auto rebuild =
+      [](const Triad& v, const float* scale, const std::array<float, 3>& e, const float* bias, std::size_t axis) {
+        // (I + skew(e)) v, skew(e) = [[0,-ez,ey],[ez,0,-ex],[-ey,ex,0]]
+        const Triad rotated{ v[0] - (e[2] * v[1]) + (e[1] * v[2]),
+                             (e[2] * v[0]) + v[1] - (e[0] * v[2]),
+                             -(e[1] * v[0]) + (e[0] * v[1]) + v[2] };
+        return (static_cast<double>(scale[axis]) * rotated[axis]) + static_cast<double>(bias[axis]);
+      };
+  const Triad f{ truth.specific_force_x_mps2, truth.specific_force_y_mps2, truth.specific_force_z_mps2 };
+  const Triad w{ truth.angular_rate_x_rad_s, truth.angular_rate_y_rad_s, truth.angular_rate_z_rad_s };
+  const double accel_lsb_per_mps2 = static_cast<double>(config.scale.accel_lsb_per_g) / 9.80665;
+  const double gyro_lsb_per_rad_s = static_cast<double>(config.scale.gyro_lsb_per_dps) * (180.0 / std::numbers::pi);
+  const std::array<std::int32_t, 3> accel_counts{ raw.accel_x, raw.accel_y, raw.accel_z };
+  const std::array<std::int32_t, 3> gyro_counts{ raw.gyro_x, raw.gyro_y, raw.gyro_z };
+  for (std::size_t axis = 0; axis < 3; ++axis)
+  {
+    const double accel = rebuild(f, model.accel_scale(), model.accel_misalignment_rad(), model.accel_bias_mps2(), axis);
+    const double gyro = rebuild(w, model.gyro_scale(), model.gyro_misalignment_rad(), model.gyro_bias_rad_s(), axis);
+    CHECK(near(accel_counts[axis] / accel_lsb_per_mps2, accel, 0.51 / accel_lsb_per_mps2));
+    CHECK(near(gyro_counts[axis] / gyro_lsb_per_rad_s, gyro, 0.51 / gyro_lsb_per_rad_s));
+  }
+  // Every term was actually drawn -- this is not passing on identities.
+  CHECK(model.accel_scale()[0] != 1.0F && model.gyro_scale()[2] != 1.0F);
+  CHECK(model.accel_misalignment_rad()[1] != 0.0F && model.gyro_misalignment_rad()[0] != 0.0F);
+
+  // Disabled terms read back as the identity, which the FMU publishes as a
+  // zero scale error and zero angles.
+  ImuNoiseModel plain(ImuNoiseConfig{}, /*seed=*/31);
+  for (int axis = 0; axis < 3; ++axis)
+  {
+    CHECK(plain.accel_scale()[axis] == 1.0F && plain.gyro_scale()[axis] == 1.0F);
+    CHECK(plain.accel_misalignment_rad()[axis] == 0.0F && plain.gyro_misalignment_rad()[axis] == 0.0F);
+  }
+}
+
 // --- BMP390 ------------------------------------------------------------------
 
 void test_bmp390_seeding()
@@ -359,6 +423,23 @@ void test_bmp390_seeding()
   }
   CHECK(near(stddev(bias_pa), config.pressure_bias_sigma_pa, 0.2 * config.pressure_bias_sigma_pa));
   CHECK(std::fabs(mean(bias_pa)) < 0.3 * config.pressure_bias_sigma_pa);
+
+  // And the bias each part reports drawing is the one it applies: with the
+  // white noise off, a conversion reads the ambient plus exactly that, for
+  // pressure and die temperature both (sensor fusion step 3).
+  Bmp390MeasurementConfig quiet;
+  quiet.pressure_noise_pa = 0.0F;
+  quiet.temperature_noise_c = 0.0F;
+  for (int seed = 1; seed <= 20; ++seed)
+  {
+    Bmp390MeasurementModel model(quiet, static_cast<std::uint64_t>(seed));
+    const auto conversion = model.measure_ambient(70000.0, -5.0);
+    const double t_lin = model.compensator().compensate_temperature(conversion.uncomp_temp);
+    const double pressure = model.compensator().compensate_pressure(conversion.uncomp_press, t_lin);
+    CHECK(model.pressure_bias_pa() != 0.0F);
+    CHECK(near(pressure - 70000.0, model.pressure_bias_pa(), 0.05));
+    CHECK(near(t_lin - -5.0, model.temperature_bias_c(), 0.01));
+  }
 }
 
 // --- MMC5983MA ---------------------------------------------------------------
@@ -610,6 +691,7 @@ int main()
   test_imu_bias_random_walk();
   test_imu_noise_density();
   test_imu_scale_and_misalignment();
+  test_imu_drawn_terms_reconstruct_the_output();
   test_bmp390_seeding();
   test_mmc5983ma_seeding();
   test_radalt_seeding();

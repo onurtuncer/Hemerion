@@ -26,9 +26,10 @@ constexpr std::uint8_t kNavPvtId = 0x07;
 constexpr double kDegToRad = std::numbers::pi / 180.0;
 
 // Fixed placeholder accuracy/quality fields GpsFix has no source data for.
-// UbxParser never reads any of these; they exist only so a hex dump of the
-// frame looks like a real receiver's, not because anything downstream
-// consumes them.
+// UbxParser never reads headAcc or pDOP; they exist only so a hex dump of the
+// frame looks like a real receiver's. sAcc is read, and is the fix's own
+// whenever it carries one -- this value stands in only for a fix built
+// without NED velocity.
 constexpr std::uint32_t kSpeedAccuracyMmPerS = 200;       // 0.2 m/s
 constexpr std::uint32_t kHeadingAccuracy1e5Deg = 200000;  // 2.0 deg
 constexpr std::uint16_t kPositionDop = 150;               // 1.50, scale 0.01
@@ -89,6 +90,8 @@ UbxEmitter::Frame UbxEmitter::encode_nav_pvt(const GpsFix& fix)
   write_i32(payload, 24, static_cast<std::int32_t>(std::lround(fix.longitude_deg * 1e7)));
   write_i32(payload, 28, static_cast<std::int32_t>(std::lround(fix.latitude_deg * 1e7)));
 
+  // The plant's geodetic height goes into both fields: there is no geoid
+  // model on either side, and UbxParser reads `height`.
   const auto height_mm = static_cast<std::int32_t>(std::lround(static_cast<double>(fix.altitude_m) * 1000.0));
   write_i32(payload, 32, height_mm);  // height (ellipsoid)
   write_i32(payload, 36, height_mm);  // hMSL -- no geoid model here, reuse ellipsoid height
@@ -98,17 +101,35 @@ UbxEmitter::Frame UbxEmitter::encode_nav_pvt(const GpsFix& fix)
   write_u32(
       payload, 44, static_cast<std::uint32_t>(std::lround(static_cast<double>(fix.vertical_accuracy_m) * 1000.0)));
 
-  const double heading_rad = static_cast<double>(fix.course_deg) * kDegToRad;
   const double ground_speed_mm_s = static_cast<double>(fix.ground_speed_mps) * 1000.0;
-  write_i32(payload, 48, static_cast<std::int32_t>(std::lround(ground_speed_mm_s * std::cos(heading_rad))));  // velN
-  write_i32(payload, 52, static_cast<std::int32_t>(std::lround(ground_speed_mm_s * std::sin(heading_rad))));  // velE
-  write_i32(payload, 56, 0);                                                                                  // velD
+  const auto to_mm_s = [](float mps) {
+    return static_cast<std::int32_t>(std::lround(static_cast<double>(mps) * 1000.0));
+  };
+  if (fix.ned_velocity_valid)
+  {
+    write_i32(payload, 48, to_mm_s(fix.vel_north_mps));  // velN
+    write_i32(payload, 52, to_mm_s(fix.vel_east_mps));   // velE
+    write_i32(payload, 56, to_mm_s(fix.vel_down_mps));   // velD
+  }
+  else
+  {
+    // A fix with no NED velocity of its own (built from speed and course
+    // alone): resolve those horizontally, and say nothing vertically.
+    const double heading_rad = static_cast<double>(fix.course_deg) * kDegToRad;
+    write_i32(payload, 48, static_cast<std::int32_t>(std::lround(ground_speed_mm_s * std::cos(heading_rad))));  // velN
+    write_i32(payload, 52, static_cast<std::int32_t>(std::lround(ground_speed_mm_s * std::sin(heading_rad))));  // velE
+    write_i32(payload, 56, 0);                                                                                  // velD
+  }
 
   write_i32(payload, 60, static_cast<std::int32_t>(std::lround(ground_speed_mm_s)));  // gSpeed
   write_i32(payload, 64,
             static_cast<std::int32_t>(std::lround(static_cast<double>(fix.course_deg) * 1e5)));  // headMot
 
-  write_u32(payload, 68, kSpeedAccuracyMmPerS);
+  write_u32(payload,
+            68,
+            fix.ned_velocity_valid ?
+                static_cast<std::uint32_t>(std::lround(static_cast<double>(fix.speed_accuracy_mps) * 1000.0)) :
+                kSpeedAccuracyMmPerS);  // sAcc
   write_u32(payload, 72, kHeadingAccuracy1e5Deg);
   write_u16(payload, 76, kPositionDop);
   // payload[78..83] reserved1, payload[88..91] magDec/magAcc: left zero.

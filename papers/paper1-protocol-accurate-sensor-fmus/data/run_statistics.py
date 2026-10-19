@@ -20,6 +20,21 @@ def load(name):
     return cols
 
 
+def fix_validity_times(index, stamp):
+    """nominal_time_s as validity times, under either stamping convention.
+
+    The flight computer used to write index * H, one period after the plant state a fix carries,
+    and this script compensated with a fixed -H. It now writes (index - 1) * H. The intercept of
+    stamp against index says which a log used, so the results this paper was computed from and
+    any regenerated since give the same alignment. Same function as the examples' plot scripts.
+    """
+    if len(index) < 2 or index[-1] == index[0]:
+        return list(stamp)
+    period = (stamp[-1] - stamp[0]) / (index[-1] - index[0])
+    late = round((stamp[0] - (index[0] - 1.0) * period) / period)
+    return [s - late * period for s in stamp]
+
+
 def rms(xs):
     return math.sqrt(sum(x * x for x in xs) / len(xs))
 
@@ -50,12 +65,13 @@ g = load("gps_fixes.csv")
 n_epochs = len(g["fix_index"])
 valid = [i for i in range(n_epochs) if not math.isnan(g["latitude_deg"][i])]
 print(f"\nGPS epochs {n_epochs}  with fix {len(valid)}  without {n_epochs - len(valid)}")
-print(f"last fix t={g['nominal_time_s'][valid[-1]]:.1f}  first no-fix t={g['nominal_time_s'][valid[-1] + 1]:.1f}")
+t_fix = fix_validity_times(g["fix_index"], g["nominal_time_s"])
+print(f"last fix t={t_fix[valid[-1]]:.1f}  first no-fix t={t_fix[valid[-1] + 1]:.1f}  (validity times)")
 by_time = {round(tt, 3): i for i, tt in enumerate(t)}
 MPD = 111_319.49
 hor, ver, dn, de = [], [], [], []
 for i in valid:
-    j = by_time.get(round(g["nominal_time_s"][i] - H, 3))
+    j = by_time.get(round(t_fix[i], 3))
     if j is None:
         continue
     lat_t, lon_t = T["out.lat_deg"][j], T["out.lon_deg"][j]
