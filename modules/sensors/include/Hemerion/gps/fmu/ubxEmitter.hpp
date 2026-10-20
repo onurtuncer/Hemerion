@@ -16,11 +16,14 @@
 ///
 /// Only the fields UbxParser actually reads are derived from GpsFix
 /// (fixType, numSV, lon, lat, height, hAcc, vAcc, velN/E/D, gSpeed,
-/// headMot). Calendar/time fields (iTOW, year/month/day, ...) are left zero
-/// -- the on-target parser never reads them, and fabricating a plausible
-/// date adds complexity with no consumer. sAcc, headAcc and pDOP are filled
-/// with fixed, plausible placeholder values since GpsFix has no
-/// corresponding noise terms to derive them from.
+/// headMot, sAcc). Calendar/time fields (iTOW, year/month/day, ...) are left
+/// zero -- the on-target parser never reads them, and fabricating a plausible
+/// date adds complexity with no consumer. headAcc and pDOP are filled with
+/// fixed, plausible placeholder values since GpsFix has no corresponding
+/// noise terms to derive them from. A fix without NED velocity
+/// (`ned_velocity_valid` false) gets velN/velE resolved from speed and
+/// course, velD zero and a placeholder sAcc, as every fix did before GpsFix
+/// carried velocity.
 
 #pragma once
 

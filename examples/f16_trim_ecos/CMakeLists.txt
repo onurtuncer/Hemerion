@@ -96,6 +96,7 @@ endif()
 # cosim_host_main.cpp binds both sets by name, so an older plant is a missing variable rather than a unit to compensate
 # for.
 set(HEMERION_AETHERION_MIN_VERSION 0.16.0)
+include("${CMAKE_SOURCE_DIR}/cmake/aetherion_plant_version.cmake")
 
 if(HEMERION_F16_PLANT_FMU)
   # Re-check when the FMU is replaced under an already-configured build tree -- what happens when Aetherion is rebuilt
@@ -163,6 +164,9 @@ if(HEMERION_F16_PLANT_FMU)
   endif()
   unset(_f16_wind_at)
 
+  # And the dynamics, which no port shows: see cmake/aetherion_plant_version.cmake.
+  hemerion_require_aetherion_plant_version("${HEMERION_F16_PLANT_FMU}" f16_trim_ecos)
+
   unset(_f16_unpack_dir)
   unset(_f16_unpack_result)
   unset(_f16_description)
@@ -207,6 +211,8 @@ add_dependencies(
 # radar altimeter's serial links -- two sockets, one class.
 add_executable(f16_flight_computer f16_flight_computer.cpp udpReceiver.cpp)
 target_link_libraries(f16_flight_computer PRIVATE hemerion_sensors hemerion_spi_shm hemerion_i2c_shm)
+# examples/common/ for log_contract.hpp: the log headers Aetherion's replay binds by name.
+target_include_directories(f16_flight_computer PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
 target_compile_features(f16_flight_computer PRIVATE cxx_std_23)
 if(WIN32)
   target_link_libraries(f16_flight_computer PRIVATE ws2_32)

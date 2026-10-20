@@ -154,6 +154,26 @@ def with_canonical_time(data: dict) -> dict:
     return data
 
 
+def fix_validity_times(index: list[float], stamp: list[float]) -> list[float]:
+    """GPS ``nominal_time_s`` as validity times, whichever convention wrote it.
+
+    The flight computer stamps a fix from its epoch index. It used to write
+    ``index * period``: the end of the step the frame left in, one period
+    after the plant state it carries. It now writes ``(index - 1) * period``,
+    the validity time itself. The log tells the two apart on its own -- the
+    slope of stamp against index is the period, the intercept says which
+    convention -- so archived results, the published figures' among them,
+    align exactly as new ones do.
+    """
+    if len(index) < 2 or index[-1] == index[0]:
+        return list(stamp)
+    period = (stamp[-1] - stamp[0]) / (index[-1] - index[0])
+    if period <= 0.0:
+        return list(stamp)
+    late = round((stamp[0] - (index[0] - 1.0) * period) / period)
+    return [t - late * period for t in stamp]
+
+
 # ---------------------------------------------------------------------------
 # Readers
 # ---------------------------------------------------------------------------
@@ -200,6 +220,14 @@ def read_samples(path: Path) -> dict[str, list[float]]:
         # touches it, and reaching for fieldnames after the close raises.
         fields = reader.fieldnames or []
         rows = list(reader)
+    # Normalised over every epoch, before any are dropped: the slope needs the
+    # full index range, and case 12 leaves no valid fix at all.
+    if "fix_index" in fields and "nominal_time_s" in fields:
+        complete = [r for r in rows if r.get("fix_index") and r.get("nominal_time_s")]
+        valid = fix_validity_times([float(r["fix_index"]) for r in complete],
+                                   [float(r["nominal_time_s"]) for r in complete])
+        for r, t in zip(complete, valid):
+            r["nominal_time_s"] = str(t)
     # A run still in progress leaves a half-written final line, and a reader
     # that trips over it cannot be used to look at a long run while it flies.
     # Drop any row with a missing or empty cell rather than guessing at it.
@@ -232,6 +260,8 @@ def read_gaps(path: Path) -> list[tuple[float, float]]:
         return []
 
     times = [float(r[time_column(fields)]) for r in rows]
+    if "fix_index" in fields:
+        times = fix_validity_times([float(r["fix_index"]) for r in rows], times)
     step = min((b - a for a, b in zip(times, times[1:])), default=0.1)
     intervals: list[tuple[float, float]] = []
     start: float | None = None
@@ -1320,23 +1350,23 @@ def plot_gps_error(truth, fixes, config: dict[str, str], out: Path, prefix: str,
     filter that weights fixes by the reported accuracy will under-weight the
     truth by exactly that ratio.
 
-    Alignment: the fix stamped at the end of step k carries the truth from
-    the end of step k-1 -- Ecos propagates connections between steps -- so
-    each fix is compared with truth one communication step earlier, as the
-    rocket script does. Compared at equal times instead, the figure would show
-    17 m of latency at 172 m/s and call it receiver error.
+    Alignment: the fix emitted at the end of step k carries the truth from
+    the end of step k-1 -- Ecos propagates connections between steps -- and
+    its stamp is that validity time (read_samples normalises logs from before
+    the flight computer stamped it so), so each fix is compared with truth at
+    its own stamp, as the rocket script does. Compared against the step it was
+    emitted at instead, the figure would show 17 m of latency at 172 m/s and
+    call it receiver error.
     """
     times = truth["time"]
-    step = min((b - a for a, b in zip(times, times[1:])), default=0.1)
 
     stamps, north, east, vertical, reported_h, reported_v = [], [], [], [], [], []
     for i, t in enumerate(fixes["sim_time_s"]):
-        t_truth = t - step
-        if t_truth < times[0] or t_truth > times[-1]:
+        if t < times[0] or t > times[-1]:
             continue
-        lat_t = interpolate(times, truth["lat_deg"], t_truth)
-        lon_t = interpolate(times, truth["lon_deg"], t_truth)
-        alt_t = interpolate(times, truth["alt_m"], t_truth)
+        lat_t = interpolate(times, truth["lat_deg"], t)
+        lon_t = interpolate(times, truth["lon_deg"], t)
+        alt_t = interpolate(times, truth["alt_m"], t)
         stamps.append(t)
         north.append((fixes["latitude_deg"][i] - lat_t) * METERS_PER_DEG_LAT)
         east.append((fixes["longitude_deg"][i] - lon_t) * METERS_PER_DEG_LAT * math.cos(math.radians(lat_t)))

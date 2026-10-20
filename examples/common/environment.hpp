@@ -19,9 +19,12 @@
 ///   documentation wrong about at least one of them;
 /// * the **Dryden rules** are a formula out of a standard, which is exactly
 ///   the kind of thing that is silently wrong in a copy;
-/// * the **parser** has a grammar worth testing once.
+/// * the **parser** has a grammar worth testing once;
+/// * the **drawn-error columns** are an interface -- FMU variable names that
+///   become truth-log column names Aetherion's replay reads -- and a host that
+///   forgot one would publish a log that silently cannot score that state.
 ///
-/// All three are pure: no FMI, no Ecos, no sockets. That is what lets
+/// All four are pure: no FMI, no Ecos, no sockets. That is what lets
 /// `tests/unit` cover them in CI, where no Aetherion install exists and no
 /// co-simulation can run.
 
@@ -34,6 +37,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 /// @namespace hemerion::examples
 /// @brief Host-side helpers shared by the co-simulation examples.
@@ -166,12 +171,15 @@ struct GpsErrorModel
   double course_correlated_deg;
   double velocity_correlation_time_s;
   double accuracy_scale;
+  double vertical_speed_noise_mps;       ///< velD white 1-sigma; appended last, as the FMU registers it.
+  double vertical_speed_correlated_mps;  ///< velD Gauss-Markov stationary 1-sigma, tau velocity_correlation_time_s.
 };
 
-/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc. Written to
-/// the parameter set explicitly even though the FMU would default to them, so
-/// the sidecar is always a complete record.
-inline constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0, 0.0, 100.0, 0.0, 0.0, 10.0, 1.0 };
+/// The FMU's own defaults: white per epoch, an honest hAcc/vAcc/sAcc. Written
+/// to the parameter set explicitly even though the FMU would default to them,
+/// so the sidecar is always a complete record.
+inline constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1,  1.0, 0.0, 0.0,
+                                               100.0,   0.0, 0.0, 10.0, 1.0, 0.2, 0.0 };
 
 /// The realistic receiver. Each position channel's total 1-sigma stays within
 /// 2 % of the default's -- nothing on a published figure moves by magnitude,
@@ -182,10 +190,61 @@ inline constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1, 1.0, 0.0,
 /// default and course 1.044 deg against 1.0, because rounding those to hit a
 /// total exactly would have meant quoting receiver characteristics chosen to
 /// flatter an arithmetic claim rather than to be plausible. The values are tabulated in doc/sensor_models.rst.
-inline constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3,   0.6, 0.05, 0.3,  1.5,
-                                                    3.0,          100.0, 0.1, 1.0,  10.0, 0.7 };
+/// Vertical velocity follows speed at twice the size, white and correlated
+/// alike (0.1 + 0.2 m/s, total 0.224 against the white receiver's 0.2).
+inline constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0,
+                                                    100.0,        0.1, 1.0, 10.0, 0.7, 0.1, 0.2 };
 
 /// @brief Total 1-sigma of a channel whose error is white plus correlated.
 [[nodiscard]] inline double total_sigma(double white, double correlated) { return std::hypot(white, correlated); }
+
+// ---------------------------------------------------------------------------
+// Drawn sensor errors
+// ---------------------------------------------------------------------------
+
+/// @brief The sensor FMUs' drawn-error outputs, as the Ecos identifiers the
+/// hosts log beside plant truth (sensor fusion step 3).
+///
+/// A filter's consistency on its bias states (NEES) can only be computed
+/// against the errors the parts actually carried, not against their sigmas.
+/// The IMU's biases walk, so they are logged every step like truth; the rest
+/// are drawn once per run and their columns are constant. Instance names are
+/// the hosts' own: `imu` (hemerion_imu_fmu) and `baro` (hemerion_bmp390_fmu).
+/// The magnetometer's hard and soft iron are deferred with the magnetometer.
+[[nodiscard]] inline std::vector<std::string> drawn_error_variables()
+{
+  std::vector<std::string> names;
+  for (const char* term : { "accel_bias_",
+                            "gyro_bias_",
+                            "accel_scale_error_",
+                            "gyro_scale_error_",
+                            "accel_misalignment_",
+                            "gyro_misalignment_" })
+  {
+    const std::string_view kind(term);
+    const char* unit = kind == "accel_bias_"           ? "_mps2" :
+                       kind == "gyro_bias_"            ? "_rad_s" :
+                       kind.ends_with("misalignment_") ? "_rad" :
+                                                         "";
+    for (const char* axis : { "x", "y", "z" })
+    {
+      names.push_back(std::string("imu::") + term + axis + unit);
+    }
+  }
+  names.emplace_back("baro::pressure_bias_pa");
+  names.emplace_back("baro::temperature_bias_c");
+  return names;
+}
+
+/// @brief `variables` with drawn_error_variables() appended -- what a host
+/// hands its truth logger.
+[[nodiscard]] inline std::vector<std::string> with_drawn_errors(std::vector<std::string> variables)
+{
+  for (std::string& name : drawn_error_variables())
+  {
+    variables.push_back(std::move(name));
+  }
+  return variables;
+}
 
 }  // namespace hemerion::examples

@@ -7,8 +7,11 @@
 /// @file fmu_main.cpp
 /// @brief IMU hardware simulator, exported as an FMI Co-Simulation FMU.
 ///
-/// This FMU has no FMI output variables -- its effect is a **SPI side
-/// channel**. Each step turns the current body-frame truth inputs (specific
+/// This FMU carries no sensor data on FMI output variables -- its effect is a
+/// **SPI side channel**. (Its outputs are diagnostics the silicon cannot offer:
+/// the error terms this instance drew and is carrying, so a filter's bias
+/// states can be scored against what the part actually did -- see the end of
+/// the constructor.) Each step turns the current body-frame truth inputs (specific
 /// force + angular rate) into noisy raw register counts (ImuNoiseModel),
 /// encodes them as Hemerion IMU raw-sample frames (ImuPacketEmitter), and
 /// pushes them into the simulated part's sample FIFO (ImuSpiSlave). A
@@ -63,10 +66,13 @@
 #include <fmu4cpp/fmu_base.hpp>
 #include <fmu4cpp/fmu_except.hpp>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <random>
+#include <string>
 #include <thread>
 
 namespace hemerion::sensors::imu::fmu
@@ -80,6 +86,7 @@ namespace
 constexpr ImuNoiseConfig kDefaultNoise{};
 
 using fmu4cpp::causality_t;
+using fmu4cpp::initial_t;
 using fmu4cpp::variability_t;
 
 constexpr double kDefaultSampleRateHz = 100.0;
@@ -208,6 +215,78 @@ public:
         .setVariability(variability_t::FIXED)
         .setDescription("Gyroscope white noise density, the angle random walk [rad/s per sqrt(Hz)]; nonzero replaces "
                         "gyro_noise_rad_s the same way. 1 deg/sqrt(h) is about 2.9e-4");
+
+    // Diagnostics, not sensor data: the error terms this instance drew and is
+    // carrying. A replay can compute bias-state consistency (NEES) only
+    // against what the part actually did, and the sigmas above say what it
+    // *might* do. Each axis reads
+    //   measured = scale * ((I + skew(misalignment)) * truth) + bias + noise,
+    // so these are exactly the terms of that equation. The biases walk, so
+    // they are continuous and read after each step (the value the step's last
+    // sample used); the rest are drawn once, when initialisation mode is
+    // exited. Nothing on the SPI side changes, and the defaults' sample stream
+    // is bit-identical: reading a term draws nothing. Registered last so every
+    // earlier value reference keeps the number it had before these existed.
+    constexpr std::array<const char*, 3> kAxes{ "x", "y", "z" };
+    const auto diagnostic = [this](const std::string& name,
+                                   const std::function<double()>& getter,
+                                   variability_t variability,
+                                   const std::string& description) {
+      register_real(name, getter)
+          .setCausality(causality_t::OUTPUT)
+          .setVariability(variability)
+          .setInitial(initial_t::CALCULATED)
+          .setDescription(description);
+    };
+    for (std::size_t i = 0; i < kAxes.size(); ++i)
+    {
+      diagnostic(
+          std::string("accel_bias_") + kAxes[i] + "_mps2",
+          [this, i] { return static_cast<double>(noise_model_.accel_bias_mps2()[i]); },
+          variability_t::CONTINUOUS,
+          "Accelerometer bias this axis currently carries, turn-on plus random walk [m/s^2]");
+    }
+    for (std::size_t i = 0; i < kAxes.size(); ++i)
+    {
+      diagnostic(
+          std::string("gyro_bias_") + kAxes[i] + "_rad_s",
+          [this, i] { return static_cast<double>(noise_model_.gyro_bias_rad_s()[i]); },
+          variability_t::CONTINUOUS,
+          "Gyroscope bias this axis currently carries, turn-on plus random walk [rad/s]");
+    }
+    for (std::size_t i = 0; i < kAxes.size(); ++i)
+    {
+      diagnostic(
+          std::string("accel_scale_error_") + kAxes[i],
+          [this, i] { return static_cast<double>(noise_model_.accel_scale()[i]) - 1.0; },
+          variability_t::DISCRETE,
+          "Accelerometer scale-factor error this axis was drawn with [fraction]; 0.003 reads 0.3 % high");
+    }
+    for (std::size_t i = 0; i < kAxes.size(); ++i)
+    {
+      diagnostic(
+          std::string("gyro_scale_error_") + kAxes[i],
+          [this, i] { return static_cast<double>(noise_model_.gyro_scale()[i]) - 1.0; },
+          variability_t::DISCRETE,
+          "Gyroscope scale-factor error this axis was drawn with [fraction]");
+    }
+    for (std::size_t i = 0; i < kAxes.size(); ++i)
+    {
+      diagnostic(
+          std::string("accel_misalignment_") + kAxes[i] + "_rad",
+          [this, i] { return static_cast<double>(noise_model_.accel_misalignment_rad()[i]); },
+          variability_t::DISCRETE,
+          "Accelerometer triad misalignment angle about this axis [rad]; the triad reads (I + skew(angles)) "
+          "times the truth, before scale");
+    }
+    for (std::size_t i = 0; i < kAxes.size(); ++i)
+    {
+      diagnostic(
+          std::string("gyro_misalignment_") + kAxes[i] + "_rad",
+          [this, i] { return static_cast<double>(noise_model_.gyro_misalignment_rad()[i]); },
+          variability_t::DISCRETE,
+          "Gyroscope triad misalignment angle about this axis [rad]");
+    }
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the

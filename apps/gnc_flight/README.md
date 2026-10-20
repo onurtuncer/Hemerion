@@ -22,13 +22,20 @@ Priorities follow `apps/README.md`'s band scheme
 (`TASK_PRIO_LOW`=1–3, `TASK_PRIO_MID`=4–6, `TASK_PRIO_HIGH`=7–9,
 `TASK_PRIO_CRITICAL`=10).
 
+The sensor and estimator rows follow the rates decided for the filter (`modules/gnc/README.md`, step 4 of
+`TODO-sensor-fusion.md`): a 100 Hz IMU driving one strapdown step per sample, and 10 Hz GNSS. They replace the 4 kHz /
+500 Hz / 18 Hz of the early notes, which no co-simulation could verify -- the FMUs zero-order-hold the plant between
+communication points, so a part rate above 1/step adds samples, not information. The control rate is the F-16
+autopilot's loop in `examples/f16_autopilot_ecos` (0.01 s), which a controller cannot usefully outrun on estimates
+refreshed at 100 Hz.
+
 | Task | Priority | Period/trigger | Stack |
 |---|---|---|---|
-| `ImuDrvTask` | 7 | 250 µs (4 kHz ISR-fed) | 1024 w |
-| `EkfTask` | 7 | 500 Hz | 2048 w |
-| `GncControlTask` | 6 | 200 Hz | 2048 w |
+| `ImuDrvTask` | 7 | 10 ms (100 Hz, data-ready ISR-fed) | 1024 w |
+| `EkfTask` | 7 | 100 Hz, one propagation per IMU sample | 2048 w |
+| `GncControlTask` | 6 | 100 Hz | 2048 w |
 | `PwmOutputTask` | 6 | 400 Hz | 512 w |
-| `GpsDrvTask` | 5 | 18 Hz | 1024 w |
+| `GpsDrvTask` | 5 | 10 Hz (UART idle-line) | 1024 w |
 | `CanBusTask` | 5 | event-driven | 1024 w |
 | `TelemetryTask` | 3 | 50 Hz | 2048 w |
 | `AetherionBridgeTask` | 3 | 100 Hz, UDP | 2048 w |

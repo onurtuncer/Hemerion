@@ -260,6 +260,19 @@ void test_gps_presets_keep_their_promise()
   // Position decorrelates over minutes, velocity over seconds -- the two
   // timescales the model exists to tell apart.
   CHECK(kCorrelatedReceiver.position_correlation_time_s >= 10.0 * kCorrelatedReceiver.velocity_correlation_time_s);
+
+  // Vertical velocity (velD) is twice speed in both presets, white and
+  // correlated alike -- the vertical-to-horizontal ratio of the position
+  // defaults, and what doc/sensor_models.rst tabulates. The white receiver's
+  // value is the FMU's own default, so the sidecar records the part as built.
+  CHECK(kWhiteReceiver.vertical_speed_noise_mps == 2.0 * kWhiteReceiver.speed_noise_mps);
+  CHECK(kWhiteReceiver.vertical_speed_correlated_mps == 0.0);
+  CHECK(kCorrelatedReceiver.vertical_speed_noise_mps == 2.0 * kCorrelatedReceiver.speed_noise_mps);
+  CHECK(kCorrelatedReceiver.vertical_speed_correlated_mps == 2.0 * kCorrelatedReceiver.speed_correlated_mps);
+  CHECK(
+      near(total_sigma(kCorrelatedReceiver.vertical_speed_noise_mps, kCorrelatedReceiver.vertical_speed_correlated_mps),
+           0.224,
+           0.0005));
 }
 
 }  // namespace

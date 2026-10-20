@@ -274,6 +274,9 @@ NmeaParser::decode_gga(const FieldArray& fields, std::size_t field_count, std::u
   // GGA's fix-quality field only distinguishes GPS/DGPS/RTK fixes from no
   // fix, not 2D vs. 3D -- treat any non-zero quality as a 3D fix.
   out.fix_type = (quality == 0) ? GpsFixType::kNoFix : GpsFixType::kFix3D;
+  // NMEA carries no NED velocity. Cleared rather than left alone, so a fix
+  // object that last held a UBX solution does not offer its stale velocity.
+  out.ned_velocity_valid = false;
   out.timestamp_us = timestamp_us;
   return GpsParseError::kNone;
 }
@@ -315,6 +318,7 @@ NmeaParser::decode_rmc(const FieldArray& fields, std::size_t field_count, std::u
   // RMC carries no satellite count or fix-quality field; status A/V (valid /
   // void) is the only fix indicator it provides.
   out.fix_type = (fields[2] == "A") ? GpsFixType::kFix3D : GpsFixType::kNoFix;
+  out.ned_velocity_valid = false;  // speed and course only; see decode_gga()
   out.timestamp_us = timestamp_us;
   return GpsParseError::kNone;
 }

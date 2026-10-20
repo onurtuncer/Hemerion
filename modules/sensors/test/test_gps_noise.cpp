@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <numbers>
 #include <vector>
 
 #include "Hemerion/gps/fmu/gpsNoiseModel.hpp"
@@ -272,11 +273,136 @@ void test_speed_floor_and_course_wrap()
   }
 }
 
+// The vertical-velocity channel draws from its own stream, so turning it on
+// -- white and correlated -- moves no draw of any other channel. Every other
+// correlated term is on too: that is the case a shared normal_distribution
+// would break, since it caches half of each pair across calls.
+void test_vertical_velocity_moves_no_other_channel()
+{
+  GpsNoiseConfig without;
+  without.horizontal_pos_correlated_m = 1.5F;
+  without.vertical_pos_correlated_m = 3.0F;
+  without.speed_correlated_mps = 0.1F;
+  without.course_correlated_deg = 1.0F;
+  without.vertical_speed_noise_mps = 0.0F;
+  without.vertical_speed_correlated_mps = 0.0F;
+  GpsNoiseConfig with = without;
+  with.vertical_speed_noise_mps = 0.3F;
+  with.vertical_speed_correlated_mps = 0.4F;
+
+  GpsNoiseModel a(without, /*seed=*/21);
+  GpsNoiseModel b(with, /*seed=*/21);
+  bool vertical_differs = false;
+  for (int k = 1; k <= 2000; ++k)
+  {
+    GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    truth.v_down_mps = -4.0F;
+    const GpsFix fa = a.apply(truth);
+    const GpsFix fb = b.apply(truth);
+    assert(fa.latitude_deg == fb.latitude_deg);
+    assert(fa.longitude_deg == fb.longitude_deg);
+    assert(fa.altitude_m == fb.altitude_m);
+    assert(fa.ground_speed_mps == fb.ground_speed_mps);
+    assert(fa.course_deg == fb.course_deg);
+    assert(fa.vel_north_mps == fb.vel_north_mps);
+    assert(fa.vel_east_mps == fb.vel_east_mps);
+    assert(fa.vel_down_mps == -4.0F);  // off: exactly the truth
+    vertical_differs = vertical_differs || (fb.vel_down_mps != fa.vel_down_mps);
+  }
+  assert(vertical_differs);
+}
+
+// NAV-PVT's fields agree with each other, as a real receiver's do: the
+// horizontal velocity is the speed along the course.
+void test_velocity_agrees_with_speed_and_course()
+{
+  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/22);
+  for (int k = 1; k <= 500; ++k)
+  {
+    const GpsFix fix = model.apply(truth_at(static_cast<std::uint64_t>(k) * kEpochUs));
+    assert(fix.ned_velocity_valid);
+    assert(near(std::hypot(fix.vel_north_mps, fix.vel_east_mps), fix.ground_speed_mps, 1e-3));
+    double course = std::atan2(fix.vel_east_mps, fix.vel_north_mps) * 180.0 / std::numbers::pi;
+    course = std::fmod(course + 360.0, 360.0);
+    assert(near(course, fix.course_deg, 1e-3));
+  }
+}
+
+// velD is the truth's vertical velocity plus the configured noise: unbiased,
+// white at the default sigma, and Gauss-Markov when the correlated term is on.
+void test_vertical_velocity_statistics()
+{
+  std::vector<double> errors;
+  GpsNoiseModel white(GpsNoiseConfig{}, /*seed=*/23);
+  for (int k = 1; k <= kSamples; ++k)
+  {
+    GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    truth.v_down_mps = -5.0F;
+    errors.push_back(static_cast<double>(white.apply(truth).vel_down_mps) + 5.0);
+  }
+  assert(near(rms(errors), 0.2, 0.007));
+  assert(near(mean(errors), 0.0, 0.005));
+  assert(std::fabs(autocorrelation(errors, 1)) < 0.03);
+
+  GpsNoiseConfig config;
+  config.vertical_speed_noise_mps = 0.0F;
+  config.vertical_speed_correlated_mps = 0.5F;
+  config.velocity_correlation_time_s = 10.0F;  // 100 epochs
+  GpsNoiseModel correlated(config, /*seed=*/24);
+  errors.clear();
+  for (int k = 1; k <= kSamples; ++k)
+  {
+    const GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    errors.push_back(static_cast<double>(correlated.apply(truth).vel_down_mps));
+  }
+  assert(near(rms(errors), 0.5, 0.05));
+  assert(near(autocorrelation(errors, 100), std::exp(-1.0), 0.06));
+}
+
+// sAcc is honest in the sense an isotropic consumer needs: sAcc^2 is the mean
+// per-axis variance of the actual NED velocity error. Measured, not asserted
+// from the formula -- at 172 m/s, where the course term dominates (1 deg is
+// 3 m/s across track) and the error is far from isotropic.
+void test_speed_accuracy_is_honest_on_average()
+{
+  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/25);
+  constexpr double kDeg = std::numbers::pi / 180.0;
+  double sum_squared = 0.0;
+  double reported = 0.0;
+  for (int k = 1; k <= kSamples; ++k)
+  {
+    GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    truth.v_down_mps = 2.0F;
+    const GpsFix fix = model.apply(truth);
+    const double dn = fix.vel_north_mps - (172.0 * std::cos(45.0 * kDeg));
+    const double de = fix.vel_east_mps - (172.0 * std::sin(45.0 * kDeg));
+    const double dd = fix.vel_down_mps - 2.0;
+    sum_squared += (dn * dn) + (de * de) + (dd * dd);
+    reported += fix.speed_accuracy_mps;
+  }
+  const double per_axis = std::sqrt(sum_squared / (3.0 * kSamples));
+  reported /= kSamples;
+  assert(near(reported, 1.737, 0.01));                // sqrt((0.1^2 + (172 * 1 deg)^2 + 0.2^2) / 3)
+  assert(near(per_axis, reported, 0.02 * reported));  // what it does, to 2 %
+
+  // An optimistic receiver scales sAcc like hAcc and vAcc; a slow one
+  // reports little more than its speed and vertical terms.
+  GpsNoiseConfig optimistic;
+  optimistic.accuracy_scale = 0.7F;
+  GpsNoiseModel scaled(optimistic, /*seed=*/25);
+  assert(near(scaled.apply(truth_at(kEpochUs)).speed_accuracy_mps, 0.7 * model.velocity_sigma_mps(172.0F), 0.01));
+  assert(near(model.velocity_sigma_mps(0.0F), std::sqrt((0.01 + 0.04) / 3.0), 1e-6));
+}
+
 }  // namespace
 
 int main()
 {
   test_seed_reproduces_the_sequence();
+  test_vertical_velocity_moves_no_other_channel();
+  test_velocity_agrees_with_speed_and_course();
+  test_vertical_velocity_statistics();
+  test_speed_accuracy_is_honest_on_average();
   test_defaults_are_white();
   test_correlated_term_is_gauss_markov();
   test_terms_add_in_quadrature();

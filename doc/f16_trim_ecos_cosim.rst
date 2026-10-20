@@ -260,7 +260,7 @@ heading difference — and the NESC sanity bound passes.
 Building
 --------
 
-Needs the ``examples-native`` preset and an **Aetherion ≥ 0.14.0** install for
+Needs the ``examples-native`` preset and an **Aetherion ≥ 0.18.0** install for
 ``F16Plant.fmu`` (set ``AETHERION_ROOT`` if it is not in a default location;
 ``--f16`` overrides the path at runtime):
 
@@ -273,7 +273,12 @@ The version floor is a pair of port requirements that landed in different
 releases — 0.13.0 put geodetic position into degrees, 0.14.0 added
 ``out.specificForce_{x,y,z}_m_s2`` — and configure tests for each separately,
 reading ``modelDescription.xml`` out of the located FMU rather than trusting a
-version number that ``AETHERION_ROOT`` could aim at a stale build tree.
+version number that ``AETHERION_ROOT`` could aim at a stale build tree. Since
+0.18.0 it also reads the version of the install that FMU came from: 0.17.4 and
+0.18.0 corrected the plant's rigid-body dynamics (the spatial inertia's
+parallel-axis term, the gravity–mass coupling, where the gravity wrench is
+summed) without changing a port, so an older plant runs and disagrees with
+every figure here. ``cmake/aetherion_plant_version.cmake`` says what it checks.
 :ref:`rocket_gps_ecos_setup` covers setting up Ecos and Aetherion on a bare
 machine.
 

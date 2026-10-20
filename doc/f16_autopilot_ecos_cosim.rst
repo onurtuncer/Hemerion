@@ -207,7 +207,7 @@ Two terminals, from ``build/examples-native/examples/``:
 The trim example's pacing caveat applies unchanged to the polled I2C parts
 (``--rtf 1`` if their sample counts matter).
 
-Building needs the ``examples-native`` preset and an **Aetherion ≥ 0.14.1**
+Building needs the ``examples-native`` preset and an **Aetherion ≥ 0.18.0**
 install for both ``F16Plant.fmu`` and ``F16Autopilot.fmu`` (``AETHERION_ROOT``
 if not in a default location; ``--f16`` / ``--ap`` override at runtime).
 Configure reads the ports this example binds out of both archives rather

@@ -101,6 +101,7 @@ endif()
 # So HEMERION_AETHERION_MIN_VERSION is the release this floor corresponds to, and the one place that number is written
 # down for the diagnostics and the docs to quote -- the tests below are against the ports, not against it.
 set(HEMERION_AETHERION_MIN_VERSION 0.14.0)
+include("${CMAKE_SOURCE_DIR}/cmake/aetherion_plant_version.cmake")
 
 if(HEMERION_TWO_STAGE_ROCKET_FMU)
   # Re-check when the FMU is replaced under an already-configured build tree -- what happens when Aetherion is rebuilt
@@ -163,6 +164,9 @@ if(HEMERION_TWO_STAGE_ROCKET_FMU)
         "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
   endif()
 
+  # And the dynamics, which no port shows: see cmake/aetherion_plant_version.cmake.
+  hemerion_require_aetherion_plant_version("${HEMERION_TWO_STAGE_ROCKET_FMU}" rocket_gps_ecos)
+
   unset(_rocket_unpack_dir)
   unset(_rocket_unpack_result)
   unset(_rocket_description)
@@ -204,6 +208,8 @@ add_dependencies(
 # the equivalent stand-in for the GPS receiver's UART.
 add_executable(gps_flight_computer flight_computer_main.cpp udpReceiver.cpp)
 target_link_libraries(gps_flight_computer PRIVATE hemerion_sensors hemerion_spi_shm hemerion_i2c_shm)
+# examples/common/ for log_contract.hpp: the log headers Aetherion's replay binds by name.
+target_include_directories(gps_flight_computer PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
 target_compile_features(gps_flight_computer PRIVATE cxx_std_23)
 if(WIN32)
   target_link_libraries(gps_flight_computer PRIVATE ws2_32)

@@ -143,6 +143,23 @@ def with_canonical_time(data: dict) -> dict:
     return data
 
 
+def fix_validity_times(index: list[float], stamp: list[float]) -> list[float]:
+    """GPS ``nominal_time_s`` as validity times, whichever convention wrote it.
+
+    Same function as examples/f16_trim_ecos/plot_results.py: the flight
+    computer used to stamp ``index * period``, one period late, and now stamps
+    ``(index - 1) * period``; the slope and intercept of stamp against index
+    tell the two apart, so archived runs read the same as new ones.
+    """
+    if len(index) < 2 or index[-1] == index[0]:
+        return list(stamp)
+    period = (stamp[-1] - stamp[0]) / (index[-1] - index[0])
+    if period <= 0.0:
+        return list(stamp)
+    late = round((stamp[0] - (index[0] - 1.0) * period) / period)
+    return [t - late * period for t in stamp]
+
+
 def read_samples(path: Path) -> dict[str, list[float]]:
     """Reads a flight-computer log, dropping rows that carry no measurement."""
     if not path.exists():
@@ -153,6 +170,12 @@ def read_samples(path: Path) -> dict[str, list[float]]:
         # touches it, and reaching for fieldnames after the close raises.
         fields = reader.fieldnames or []
         rows = list(reader)
+    if "fix_index" in fields and "nominal_time_s" in fields:
+        complete = [r for r in rows if r.get("fix_index") and r.get("nominal_time_s")]
+        valid = fix_validity_times([float(r["fix_index"]) for r in complete],
+                                   [float(r["nominal_time_s"]) for r in complete])
+        for r, t in zip(complete, valid):
+            r["nominal_time_s"] = str(t)
     # A run still in progress leaves a half-written final line, and a reader
     # that trips over it cannot be used to look at a long run while it flies.
     # Drop any row with a missing or empty cell rather than guessing at it.
