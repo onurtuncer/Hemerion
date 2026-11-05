@@ -92,6 +92,26 @@ Not built:
   commit still builds `EkfReplay`; the workflow builds whichever target exists
   and installs it as `bin/EKFReplay`. Renaming the target in Aetherion is a
   follow-up, and it moves the pin.
+- [x] **Baseline step 1 — the pipeline — closed (2026-11-05)** by the
+      post-merge integration run on `main`
+      ([run 42022694154](https://github.com/onurtuncer/Hemerion/actions/runs/42022694154),
+      Hemerion `a97e152`, Aetherion `49e75b8`): configure confirmed the pinned
+      build, case 11 flew, EKFReplay replayed it (199 GNSS position, 199 GNSS
+      velocity, 999 barometer updates) and every check passed; the
+      `integration-case11` artifact holds the logs, the replay output and both
+      commits. (Not the "Step 1 housekeeping" further down, which is the
+      README work.)
+
+      **What this proves: the pipeline works** — sensors to logs to contract
+      to replay, from pinned sources, reproducibly in CI. **It does not prove
+      estimator accuracy.** One seed and 20 s are not a consistency test, and
+      the figures the run prints (second-half ANEES 0.49, position RMS
+      0.64 m) are a smoke reading, not a result. The same case on Windows gave
+      185 barometer updates against Linux's 999, because the polled BMP390's
+      rate is the flight computer's loop rate: the run is not even
+      measurement-for-measurement identical across hosts. Accuracy is
+      Aetherion's step 7 (tuning and consistency over seeds) and this repo's
+      step 10 (Monte Carlo over the hosts).
 
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
