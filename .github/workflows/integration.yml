@@ -28,6 +28,8 @@ jobs:
     name: case 11 -> EKFReplay (pinned Aetherion)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      AETHERION_RECIPE: 1
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,17 +53,21 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-13 g++-14 ninja-build unzip
+          # libtbb-dev: Ecos links -ltbb on Linux (doc/rocket_gps_ecos_cosim.rst lists the same packages).
+          sudo apt-get install -y g++-13 g++-14 ninja-build unzip libtbb-dev
 
       # ── Aetherion at the pinned commit ──────────────────────────────────────
-      # Cached by commit and by this file, so a change to either the pin or the
-      # build recipe rebuilds it, and nothing else does.
+      # Cached by commit and AETHERION_RECIPE: bump the recipe number whenever
+      # the "Build and install Aetherion" step changes, so the pin or the recipe
+      # rebuilds it and nothing else does (an apt package for Hemerion's side
+      # must not cost an Aetherion build). Restored and saved as separate steps,
+      # so a build that succeeds is kept even when the case after it fails.
       - name: Restore the pinned Aetherion build
         id: aetherion-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: aetherion-install
-          key: aetherion-${{ runner.os }}-${{ steps.pin.outputs.commit }}-${{ hashFiles('hemerion/.github/workflows/integration.yml') }}
+          key: aetherion-${{ runner.os }}-${{ steps.pin.outputs.commit }}-recipe-${{ env.AETHERION_RECIPE }}
 
       - name: Check out Aetherion at the pin
         if: steps.aetherion-cache.outputs.cache-hit != 'true'
@@ -71,15 +77,12 @@ jobs:
           ref: ${{ steps.pin.outputs.commit }}
           path: aetherion
 
-      - name: vcpkg binary cache
+      - name: Restore the vcpkg binary cache
         if: steps.aetherion-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}-${{ github.sha }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
 
       # Aetherion's own Linux release recipe (its gcc-release preset, gcc-13),
       # with the FMUs and install rules of the baseline build, plus the
@@ -116,6 +119,21 @@ jobs:
             echo "Toolchain     $(g++-13 --version | head -n 1); $(cmake --version | head -n 1)"
             echo "Replay        $replay, installed as bin/EKFReplay"
           } > "$GITHUB_WORKSPACE/aetherion-install/BUILDINFO.txt"
+
+      - name: Save the vcpkg binary cache
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
+        continue-on-error: true  # already saved by an earlier run with the same manifest
+
+      - name: Save the pinned Aetherion build
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: aetherion-install
+          key: ${{ steps.aetherion-cache.outputs.cache-primary-key }}
 
       - name: Show the Aetherion build
         run: |
