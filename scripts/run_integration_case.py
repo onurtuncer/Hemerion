@@ -185,6 +185,11 @@ def main() -> int:
                         help="the Aetherion commit EKFReplay and the plant FMU were built from")
     parser.add_argument("--timeout-s", type=float, default=600.0, help="wall-clock cap per process")
     args = parser.parse_args()
+    # The child processes run in --out, so every path given relative to the caller's directory is resolved first.
+    args.bin = args.bin.resolve()
+    args.ekfreplay = args.ekfreplay.resolve()
+    if args.aetherion_header:
+        args.aetherion_header = args.aetherion_header.resolve()
 
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -205,7 +210,7 @@ def main() -> int:
     failures: list[str] = manifest["failures"]
 
     flight_computer = [
-        str(args.bin.resolve() / f"f16_flight_computer{EXE}"),
+        str(args.bin / f"f16_flight_computer{EXE}"),
         "--csv", str(out / "gps_fixes.csv"),
         "--imu-csv", str(out / "imu_samples.csv"),
         "--baro-csv", str(out / "baro_samples.csv"),
@@ -215,7 +220,7 @@ def main() -> int:
         "--max-wall-s", str(int(args.timeout_s)),
     ]
     cosim = [
-        str(args.bin.resolve() / f"f16_trim_cosim{EXE}"),
+        str(args.bin / f"f16_trim_cosim{EXE}"),
         "--case", CASE["case"],
         "--seed", str(CASE["seed"]),
         "--stop", str(CASE["stop_s"]),
@@ -264,7 +269,7 @@ def main() -> int:
     manifest["checks"]["gnss_3d_fixes"] = check_gnss_velocity(out / "gps_fixes.csv", failures)
 
     # 4. The reference filter over the logs.
-    replay = [str(args.ekfreplay.resolve()), "--logs", str(out), "--truth", str(out / "f16_truth.csv"), "--config",
+    replay = [str(args.ekfreplay), "--logs", str(out), "--truth", str(out / "f16_truth.csv"), "--config",
               CASE["replay_config"], "--output", str(out / "EKFReplay")]
     manifest["commands"]["ekfreplay"] = replay
     summary = out / "EKFReplay_summary.txt"
