@@ -434,7 +434,7 @@ Windows machines need.
 
 | Project | Description |
 |---|---|
-| [Aetherion](https://github.com/onurtuncer/Aetherion) | C++23 host-side GNC simulation framework — the plant-side sibling of Hemerion. **≥ 0.18.0** for the co-simulation examples: earlier releases lack ports the hosts bind (geodetic degrees, specific force, the environment) or fly the rigid-body dynamics 0.17.4/0.18.0 corrected |
+| [Aetherion](https://github.com/onurtuncer/Aetherion) | C++23 host-side GNC simulation framework — the plant-side sibling of Hemerion. **≥ 0.18.0** for the co-simulation examples: earlier releases lack ports the hosts bind (geodetic degrees, specific force, the environment) or fly the rigid-body dynamics 0.17.4/0.18.0 corrected. The sensor-fusion baseline and its integration gate are **pinned** to 0.18.2 at `49e75b8` (`cmake/aetherion_plant_version.cmake`); configure warns on any other build |
 | CellForge | Offline robot programming platform (separate repository) |
 
 ---

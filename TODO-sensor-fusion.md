@@ -59,6 +59,22 @@ Not built:
   origin. No port changed, so the configure-time port tests could not see it;
   `cmake/aetherion_plant_version.cmake` reads the install's version instead.
 
+## Decided (2026-11-05)
+
+- **Aetherion pinned at v0.18.2, `49e75b814534e6d58c9216a52df2fb7151dfd2f9`**
+  (main at the merge of PR #120) for the baseline at IMU 100 Hz, GNSS 10 Hz
+  and a 0.01 s step. `cmake/aetherion_plant_version.cmake` holds
+  `HEMERION_AETHERION_PIN_VERSION` and `HEMERION_AETHERION_PIN_COMMIT` beside
+  the 0.18.0 floor. Configure compares the install's version, and the commit
+  named in the prefix's `BUILDINFO.txt`, and warns on either mismatch; the
+  floor still decides refusal. Locally `AETHERION_ROOT` is
+  `D:/dev/aetherion-install-0.18.2`, the clean build Aetherion's
+  `TODO-sensor-fusion.md` records; the older `D:/dev/aetherion-install` has
+  FMUs of unknown origin and no version file, so it is not used for baseline
+  runs. `examples.log_contract_upstream` passes against that install's
+  `LogContract.h`: Hemerion's names and the pinned copy in
+  `tests/unit/test_log_contract.cpp` are unchanged from v0.18.0.
+
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
 - **GPS validity time.** Both flight computers stamped `nominal_time_s` =

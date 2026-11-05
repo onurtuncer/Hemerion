@@ -24,9 +24,21 @@
 # An FMU that is not inside an install (copied, or a build tree's) has no version to read. That is reported and let
 # through: the port tests still run, and the floor is a statement about what the published figures were made with, not a
 # reason to refuse a deliberately pointed-at plant.
+#
+# The pin is narrower than the floor. The sensor-fusion baseline (IMU 100 Hz, GNSS 10 Hz, 0.01 s step) and the
+# integration gate run against one Aetherion revision, HEMERION_AETHERION_PIN_COMMIT, and the CI gate builds exactly
+# that commit. An install whose version differs, or whose BUILDINFO.txt names another commit, still configures -- it is
+# above the floor -- but says it is not the pinned build, because baseline figures from it are not comparable. An
+# install without a BUILDINFO.txt cannot name its commit, so only its version is compared. To move the pin, change both
+# lines together and re-run the baseline.
 # ------------------------------------------------------------------------------
 
 set(HEMERION_AETHERION_DYNAMICS_VERSION 0.18.0)
+
+# The pinned revision: Aetherion main at the v0.18.2 merge (PR #120). Read by .github/workflows as well, so keep each on
+# one line in this form.
+set(HEMERION_AETHERION_PIN_VERSION 0.18.2)
+set(HEMERION_AETHERION_PIN_COMMIT 49e75b814534e6d58c9216a52df2fb7151dfd2f9)
 
 # Fails configure if the plant FMU at <fmu_path> comes from an Aetherion install older than
 # HEMERION_AETHERION_DYNAMICS_VERSION; <example> names the caller in the messages.
@@ -63,4 +75,56 @@ function(hemerion_require_aetherion_plant_version fmu_path example)
         "(https://github.com/onurtuncer/Aetherion) and reconfigure, or point AETHERION_ROOT at one.")
   endif()
   message(STATUS "${example}: plant FMU from Aetherion ${_version}")
+  hemerion_check_aetherion_pin("${_prefix}" "${_version}" "${example}")
+endfunction()
+
+# Reports whether the install at <prefix> (whose version is <version>) is the pinned Aetherion build. Never fatal: see
+# the header for why the pin warns where the floor refuses.
+function(
+  hemerion_check_aetherion_pin
+  prefix
+  version
+  example)
+  if(NOT
+     version
+     VERSION_EQUAL
+     HEMERION_AETHERION_PIN_VERSION)
+    message(WARNING "${example}: Aetherion ${version} is not the pinned ${HEMERION_AETHERION_PIN_VERSION} "
+                    "(${HEMERION_AETHERION_PIN_COMMIT}); sensor-fusion baseline figures from it are not comparable.")
+    return()
+  endif()
+
+  set(_buildinfo "${prefix}/BUILDINFO.txt")
+  if(NOT EXISTS "${_buildinfo}")
+    message(STATUS "${example}: Aetherion ${version} matches the pinned version; no BUILDINFO.txt, so its commit "
+                   "cannot be compared with ${HEMERION_AETHERION_PIN_COMMIT}")
+    return()
+  endif()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_buildinfo}")
+  file(READ "${_buildinfo}" _text)
+  # The first full SHA-1 in the file is the source commit; CMake regexes have no {40}, hence the REPEAT.
+  string(
+    REPEAT
+    "[0-9a-f]"
+    40
+    _sha1)
+  string(
+    REGEX MATCH
+          "${_sha1}"
+          _commit
+          "${_text}")
+  if(NOT _commit)
+    message(
+      WARNING "${example}: ${_buildinfo} names no 40-digit commit, so the build cannot be compared with the pinned "
+              "${HEMERION_AETHERION_PIN_COMMIT}")
+  elseif(
+    NOT
+    _commit
+    STREQUAL
+    HEMERION_AETHERION_PIN_COMMIT)
+    message(WARNING "${example}: Aetherion ${version} was built from ${_commit}, not the pinned "
+                    "${HEMERION_AETHERION_PIN_COMMIT}; sensor-fusion baseline figures from it are not comparable.")
+  else()
+    message(STATUS "${example}: Aetherion build is the pinned ${HEMERION_AETHERION_PIN_COMMIT}")
+  endif()
 endfunction()
