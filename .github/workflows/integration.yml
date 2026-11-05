@@ -1,0 +1,189 @@
+name: Integration (sensor fusion)
+
+# One small end-to-end case as a gate: NESC check-case 11 in calm air, seed 11,
+# 20 simulated seconds at the baseline rates (IMU 100 Hz, GNSS 10 Hz, 0.01 s
+# step), through the five sensor FMUs and the on-target drivers, then replayed
+# by Aetherion's reference filter (EKFReplay, nav-baro-gnss16). The plant FMU,
+# the replay and LogContract.h all come from the Aetherion commit pinned in
+# cmake/aetherion_plant_version.cmake, built here from source.
+#
+# Fails on: a missing log header or sidecar key, a 3D fix without finite GNSS
+# velocity, a replay that does not exit 0, or any NaN/Inf in its output.
+# scripts/run_integration_case.py does the checking; this file only builds.
+#
+# The logs, the replay summary and tables, and both repositories' commits are
+# uploaded whether the gate passes or not.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  case11:
+    name: case 11 -> EKFReplay (pinned Aetherion)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      AETHERION_RECIPE: 1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: hemerion
+          submodules: recursive
+
+      - name: Read the Aetherion pin
+        id: pin
+        run: |
+          f=hemerion/cmake/aetherion_plant_version.cmake
+          commit=$(sed -n 's/^set(HEMERION_AETHERION_PIN_COMMIT \([0-9a-f]\{40\}\))$/\1/p' "$f")
+          version=$(sed -n 's/^set(HEMERION_AETHERION_PIN_VERSION \([0-9.]*\))$/\1/p' "$f")
+          if [ -z "$commit" ] || [ -z "$version" ]; then
+            echo "::error file=$f::cannot read HEMERION_AETHERION_PIN_COMMIT / _VERSION"
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Aetherion pin: $version at $commit"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          # libtbb-dev: Ecos links -ltbb on Linux (doc/rocket_gps_ecos_cosim.rst lists the same packages).
+          sudo apt-get install -y g++-13 g++-14 ninja-build unzip libtbb-dev
+
+      # ── Aetherion at the pinned commit ──────────────────────────────────────
+      # Cached by commit and AETHERION_RECIPE: bump the recipe number whenever
+      # the "Build and install Aetherion" step changes, so the pin or the recipe
+      # rebuilds it and nothing else does (an apt package for Hemerion's side
+      # must not cost an Aetherion build). Restored and saved as separate steps,
+      # so a build that succeeds is kept even when the case after it fails.
+      - name: Restore the pinned Aetherion build
+        id: aetherion-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: aetherion-install
+          key: aetherion-${{ runner.os }}-${{ steps.pin.outputs.commit }}-recipe-${{ env.AETHERION_RECIPE }}
+
+      - name: Check out Aetherion at the pin
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: onurtuncer/Aetherion
+          ref: ${{ steps.pin.outputs.commit }}
+          path: aetherion
+
+      - name: Restore the vcpkg binary cache
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
+
+      # Aetherion's own Linux release recipe (its gcc-release preset, gcc-13),
+      # with the FMUs and install rules of the baseline build, plus the
+      # simulation layer and examples EKFReplay needs. Only the targets the
+      # install and the replay use are built.
+      - name: Build and install Aetherion
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        working-directory: aetherion
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.commit }}"
+          # The target is EkfReplay at the pinned commit; Hemerion calls it EKFReplay, and so will Aetherion.
+          replay=EkfReplay
+          if grep -qs 'add_executable(EKFReplay' src/Examples/*/CMakeLists.txt; then replay=EKFReplay; fi
+          cmake --preset=gcc-release -B build/pinned \
+            -DAETHERION_BUILD_TESTS=OFF -DAETHERION_BUILD_FMUS=ON -DAETHERION_INSTALL=ON \
+            -DAETHERION_BUILD_SIMULATION=ON -DAETHERION_BUILD_EXAMPLES=ON \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/aetherion-install"
+          cmake --build build/pinned --target \
+            Aetherion aetherion_fmu4cpp_base aetherion_fmu4cpp_fmi2 aetherion_fmu4cpp_fmi3 descriptionGenerator \
+            F16Plant_fmi2 F16Autopilot_fmi2 TwoStageRocket_fmi2 "$replay"
+          cmake --install build/pinned
+          install -m 755 "$(find build/pinned -type f -name "$replay" -perm -u+x | head -n 1)" \
+            "$GITHUB_WORKSPACE/aetherion-install/bin/EKFReplay"
+          # Names the commit, so Hemerion's configure can say whether this is the pinned build.
+          {
+            echo "Aetherion build for Hemerion's integration gate"
+            echo "Source        onurtuncer/Aetherion @ $(git rev-parse HEAD) (v${{ steps.pin.outputs.version }})"
+            echo "Configure     --preset=gcc-release, FMUS/INSTALL/SIMULATION/EXAMPLES ON, TESTS OFF"
+            echo "Toolchain     $(g++-13 --version | head -n 1); $(cmake --version | head -n 1)"
+            echo "Replay        $replay, installed as bin/EKFReplay"
+          } > "$GITHUB_WORKSPACE/aetherion-install/BUILDINFO.txt"
+
+      - name: Save the vcpkg binary cache
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
+        continue-on-error: true  # already saved by an earlier run with the same manifest
+
+      - name: Save the pinned Aetherion build
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: aetherion-install
+          key: ${{ steps.aetherion-cache.outputs.cache-primary-key }}
+
+      - name: Show the Aetherion build
+        run: |
+          cat aetherion-install/BUILDINFO.txt
+          ls -l aetherion-install/share/Aetherion/fmu aetherion-install/bin
+          grep -q "${{ steps.pin.outputs.commit }}" aetherion-install/BUILDINFO.txt
+
+      # ── Hemerion ────────────────────────────────────────────────────────────
+      - name: Configure Hemerion examples
+        working-directory: hemerion
+        env:
+          AETHERION_ROOT: ${{ github.workspace }}/aetherion-install
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake --preset=examples-native 2>&1 | tee configure.log
+          # The plant must be the pinned build, not merely above the floor.
+          grep -q "f16_trim_ecos: Aetherion build is the pinned ${{ steps.pin.outputs.commit }}" configure.log
+
+      - name: Build case 11
+        working-directory: hemerion
+        run: cmake --build build/examples-native --target f16_trim_cosim f16_flight_computer
+
+      - name: Run case 11 and replay it
+        run: >
+          python3 hemerion/scripts/run_integration_case.py
+          --bin hemerion/build/examples-native/examples/f16_trim_ecos
+          --ekfreplay aetherion-install/bin/EKFReplay
+          --aetherion-header aetherion-install/include/Aetherion/Estimation/LogContract.h
+          --aetherion-commit ${{ steps.pin.outputs.commit }}
+          --out integration-case11
+
+      - name: Record both commits
+        if: always()
+        run: |
+          mkdir -p integration-case11
+          {
+            echo "hemerion_commit=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "hemerion_ref_tested=${{ github.sha }}"
+            echo "aetherion_commit=${{ steps.pin.outputs.commit }}"
+            echo "aetherion_version=${{ steps.pin.outputs.version }}"
+          } > integration-case11/commits.txt
+          cp aetherion-install/BUILDINFO.txt integration-case11/aetherion-BUILDINFO.txt 2>/dev/null || true
+          cp hemerion/configure.log integration-case11/hemerion-configure.log 2>/dev/null || true
+          cat integration-case11/commits.txt
+
+      - name: Upload logs, replay and commits
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-case11
+          path: integration-case11
+          if-no-files-found: error
