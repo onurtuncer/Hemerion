@@ -75,6 +75,24 @@ Not built:
   `LogContract.h`: Hemerion's names and the pinned copy in
   `tests/unit/test_log_contract.cpp` are unchanged from v0.18.0.
 
+- **Integration gate: case 11 through EKFReplay, in CI.**
+  `scripts/run_integration_case.py` flies case 11 in calm air, seed 11, 20 s,
+  at IMU 100 Hz / GNSS 10 Hz / `--step 0.01` (`--rtf 1`, so the polled
+  BMP390 is not starved), then checks the log headers and sidecar against the
+  installed `LogContract.h`, requires finite GNSS velocity and a positive
+  `sAcc` on every 3D fix (at least 150 of the 200), runs Aetherion's
+  EKFReplay with `nav-baro-gnss16`, and requires exit 0 and no NaN/Inf in its
+  summary, states or updates. `.github/workflows/integration.yml` builds
+  Aetherion at the pinned commit (cached by commit), runs it, and uploads the
+  logs, the replay output and both commits. Locally, with EKFReplay built
+  from the same clean source (`D:/dev/aetherion-plant-0.18.2/build-replay`):
+  199 GNSS position, 199 GNSS velocity and 185 barometer updates, second-half
+  ANEES 0.46, NIS/dim 0.94 / 1.09, position RMS 0.58 m.
+- **EKFReplay is Hemerion's name for Aetherion's `EkfReplay`.** The pinned
+  commit still builds `EkfReplay`; the workflow builds whichever target exists
+  and installs it as `bin/EKFReplay`. Renaming the target in Aetherion is a
+  follow-up, and it moves the pin.
+
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
 - **GPS validity time.** Both flight computers stamped `nominal_time_s` =
