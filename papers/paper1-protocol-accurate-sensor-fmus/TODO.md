@@ -21,11 +21,6 @@ when. Branch `papers/paper1-smpt-resync`, as of 2026-10-09.
       unpaced runs (~25 s each) suffice; the magnetometer needs paced runs.
       Mechanics: `rocket_gps_cosim --seed <n>` + `run_statistics.py` per
       results directory.
-- [ ] **Radar altimeter.** Still the one sensor with a model and no case-study
-      run in this paper. `examples/f16_trim_ecos` carries a radalt residual
-      figure (commit `fb74c9b`): check whether that is an end-to-end run of the
-      same FMU through the on-target parser and, if so, cite its numbers in a
-      short subsection rather than leaving the Limitations sentence.
 - [ ] **SIL → HWIL on physical hardware.** The paper now claims only
       co-simulation and Renode. Put the same decoders on an STM32H743 with a
       measured byte-level comparison across the three tiers. First step is
