@@ -128,6 +128,17 @@ Not built:
 - [ ] Hemerion task, not a blocker for step 7: the Windows `--rtf 1`
       pacing and the polled BMP390's starvation. Fixing it changes what the
       barometer logs on Windows.
+- **Licence of the generated filter C: it ships only here, under
+  GPL-3.0-only.** Aetherion's generator uses CppADCodeGen, which is
+  dual-licensed EPL-1.0 or GPL-3.0 and says nothing about its output.
+  Rather than rely on the reading that the output is Aetherion's own work,
+  the generated C and header are never published by Aetherion: not
+  committed there, not installed, not in a release. They are checked in
+  under `modules/gnc/src/` with this repository's banner and
+  `SPDX-License-Identifier: GPL-3.0-only`, plus a line naming the generator,
+  its Aetherion commit, CppADCodeGen's version and the configuration hash.
+  Aetherion keeps the generator source (MIT) and the golden vectors (data).
+  Step 9 checks the banner on delivery.
 
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
