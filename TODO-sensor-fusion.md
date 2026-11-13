@@ -113,6 +113,22 @@ Not built:
       Aetherion's step 7 (tuning and consistency over seeds) and this repo's
       step 10 (Monte Carlo over the hosts).
 
+## Decided (2026-11-13)
+
+- **Logs for Aetherion's step 7 come from Linux.** A local MSVC build of
+  the pinned v0.18.2 (2026-11-13, branch `ci/local-pinned-baseline`) passes
+  the case-11 gate, but on Windows three runs at seed 11 gave 122 / 111 /
+  101 barometer updates in 20 s (Linux CI: 999), a BMP390 log with no
+  sample times in common between runs, and `host_time_s` running 1.16–1.24×
+  simulation time (fit residual 161–411 ms rms). GPS values are identical
+  across the runs and IMU values agree at every shared `part_time_s`. So
+  tuning logs are produced on Linux (CI or a Linux host) at the baseline
+  settings, with the Aetherion build at the pinned commit. Windows runs stay
+  usable for smoke checks and for the GPS and IMU channels only.
+- [ ] Hemerion task, not a blocker for step 7: the Windows `--rtf 1`
+      pacing and the polled BMP390's starvation. Fixing it changes what the
+      barometer logs on Windows.
+
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
 - **GPS validity time.** Both flight computers stamped `nominal_time_s` =
