@@ -31,7 +31,7 @@ work, and do not contradict a "Decided" entry without stopping to ask.
 
 Everything a sensor or a target touches:
 
-- The five sensor FMUs (GPS, IMU, BMP390, MMC5983MA, radar altimeter) and their error models.
+- The four sensor FMUs (GPS, IMU, BMP390, MMC5983MA) and their error models.
 - The on-target drivers, which run unchanged in the host flight computers.
 - Timing: part clocks, host clocks, arrival stamping, latency.
 - The co-simulation hosts and flight computers under `examples/`, and the logs they write.

@@ -13,9 +13,8 @@ Sensors
 =======
 
 ``hemerion::sensors`` is the largest module and the one with the most regular
-shape. Five sensor families are built — IMU, barometer, magnetometer, GPS and
-radar altimeter — and, GPS aside, they are all the same six pieces in the same
-arrangement. Reading one stack teaches the others.
+shape. Four sensor families are built — IMU, barometer, magnetometer and GPS
+— and, GPS aside, they are all the same six pieces in the same arrangement. Reading one stack teaches the others.
 
 The shared shape
 ================
@@ -61,8 +60,8 @@ Two ways a sensor is simulated
 The ``fmu/`` half comes in two flavours, and the difference matters when
 reading these pages.
 
-A **signal-level** simulator (the generic barometer, magnetometer and radar
-altimeter FMUs, and the GPS one) applies a noise model to truth, quantizes the
+A **signal-level** simulator (the generic barometer and magnetometer FMUs,
+and the GPS one) applies a noise model to truth, quantizes the
 result to register counts, and emits a framed packet over UDP. What is
 exercised is the wire protocol and the conversion, not the driver.
 
@@ -162,7 +161,6 @@ Sensor families
    sensors_baro
    sensors_mag
    sensors_gps
-   sensors_radalt
 
 .. seealso::
 

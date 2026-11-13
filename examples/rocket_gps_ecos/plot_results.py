@@ -801,7 +801,7 @@ def plot_baro_altitude(truth, baro, out: Path, caption: str) -> None:
     # What the flight software would do with these samples: invert the ISA.
     # Above the part's range floor the derived altitude flatlines while the
     # vehicle keeps climbing -- the honest failure mode of a pressure
-    # altimeter on a rocket, and the reason the radar altimeter and GPS exist.
+    # altimeter on a rocket, and the reason GPS exists.
     fig, ax = new_figure()
     ax.plot(baro["sim_time_s"], [isa_altitude_m(p) / 1000.0 for p in baro["pressure_pa"]],
             linestyle="none", marker=".", markersize=3, alpha=0.5, color=GPS,

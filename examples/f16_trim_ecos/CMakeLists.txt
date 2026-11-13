@@ -4,16 +4,15 @@
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # examples/f16_trim_ecos -- Ecos co-simulation of Aetherion's F16Plant.fmu (NASA TM-2015-218675 check-case 11: F-16
-# subsonic trim flyout over Kitty Hawk) feeding all five of Hemerion's hardware-simulator FMUs. The sensor buses
-# (UBX-NAV-PVT and radar returns over UDP, shared-memory SPI and I2C) are driven by the same driver stacks that run on
-# the STM32H743 flight computer. See README.md.
+# subsonic trim flyout over Kitty Hawk) feeding all four of Hemerion's hardware-simulator FMUs. The sensor buses
+# (UBX-NAV-PVT over UDP, shared-memory SPI and I2C) are driven by the same driver stacks that run on the STM32H743
+# flight computer. See README.md.
 #
-# Two host executables: f16_trim_cosim     -- Ecos master: loads all six FMUs, wires truth -> sensors, logs plant truth
-# f16_flight_computer -- drives all five sensor buses with the on-target stacks, logs decoded samples
+# Two host executables: f16_trim_cosim     -- Ecos master: loads all five FMUs, wires truth -> sensors, logs plant truth
+# f16_flight_computer -- drives all four sensor buses with the on-target stacks, logs decoded samples
 #
 # This example is deliberately self-contained rather than sharing a flight computer with examples/rocket_gps_ecos: each
-# example in this directory is meant to be readable end to end, and the two scenarios exercise different sensor sets
-# (this one adds the radar altimeter, which the rocket leaves behind within seconds of the pad).
+# example in this directory is meant to be readable end to end, even where the two scenarios use the same sensors.
 # ------------------------------------------------------------------------------
 
 # The sensor FMUs are exported for both FMI generations; Ecos imports through fmi4c, so this example consumes the FMI
@@ -22,9 +21,8 @@
 if(NOT TARGET hemerion_gps_fmu_fmi2
    OR NOT TARGET hemerion_imu_fmu_fmi2
    OR NOT TARGET hemerion_bmp390_fmu_fmi2
-   OR NOT TARGET hemerion_mmc5983ma_fmu_fmi2
-   OR NOT TARGET hemerion_radalt_fmu_fmi2)
-  message(FATAL_ERROR "examples/f16_trim_ecos requires the FMI 2.0 GPS, IMU, BMP390, MMC5983MA and radalt FMU "
+   OR NOT TARGET hemerion_mmc5983ma_fmu_fmi2)
+  message(FATAL_ERROR "examples/f16_trim_ecos requires the FMI 2.0 GPS, IMU, BMP390 and MMC5983MA FMU "
                       "targets -- configure with HEMERION_BUILD_FMU=ON (use the examples-native preset)")
 endif()
 
@@ -32,7 +30,6 @@ set(HEMERION_GPS_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_gps_fmu.f
 set(HEMERION_IMU_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_imu_fmu.fmu")
 set(HEMERION_BMP390_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_bmp390_fmu.fmu")
 set(HEMERION_MMC5983MA_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_mmc5983ma_fmu.fmu")
-set(HEMERION_RADALT_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_radalt_fmu.fmu")
 
 # Ecos is fetched by whichever example directory CMake reaches first; the guard makes this one buildable on its own
 # rather than only when examples/rocket_gps_ecos happens to precede it in examples/CMakeLists.txt.
@@ -189,8 +186,7 @@ target_compile_definitions(
           HEMERION_GPS_FMU_PATH="${HEMERION_GPS_FMU_ARCHIVE}"
           HEMERION_IMU_FMU_PATH="${HEMERION_IMU_FMU_ARCHIVE}"
           HEMERION_BMP390_FMU_PATH="${HEMERION_BMP390_FMU_ARCHIVE}"
-          HEMERION_MMC5983MA_FMU_PATH="${HEMERION_MMC5983MA_FMU_ARCHIVE}"
-          HEMERION_RADALT_FMU_PATH="${HEMERION_RADALT_FMU_ARCHIVE}")
+          HEMERION_MMC5983MA_FMU_PATH="${HEMERION_MMC5983MA_FMU_ARCHIVE}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # ecos/logger/logger.hpp pulls the bundled fmt into consumers too -- same consteval workaround as above.
   target_compile_definitions(f16_trim_cosim PRIVATE FMT_CONSTEVAL=)
@@ -200,15 +196,13 @@ add_dependencies(
   hemerion_gps_fmu_fmi2
   hemerion_imu_fmu_fmi2
   hemerion_bmp390_fmu_fmi2
-  hemerion_mmc5983ma_fmu_fmi2
-  hemerion_radalt_fmu_fmi2)
+  hemerion_mmc5983ma_fmu_fmi2)
 
 # hemerion_sensors supplies the on-target stacks (GpsDriver/UbxParser, ImuSpiDriver, ImuPacketParser, convert_raw_to_si,
-# Bmp390Driver/Bmp390Compensator, Mmc5983maDriver, RadAltPacketParser); hemerion_spi_shm and hemerion_i2c_shm supply
-# only the *board* under the IMU, BMP390 and MMC5983MA drivers -- the controller ends of the shared-memory buses their
-# FMUs answer on. The two I2C parts get one bus each rather than sharing one as they would on a real board: sim/i2c_shm
-# models a bus with a single peripheral on it. udpReceiver.cpp is the equivalent stand-in for the GPS receiver's and the
-# radar altimeter's serial links -- two sockets, one class.
+# Bmp390Driver/Bmp390Compensator, Mmc5983maDriver); hemerion_spi_shm and hemerion_i2c_shm supply only the *board* under
+# the IMU, BMP390 and MMC5983MA drivers -- the controller ends of the shared-memory buses their FMUs answer on. The two
+# I2C parts get one bus each rather than sharing one as they would on a real board: sim/i2c_shm models a bus with a
+# single peripheral on it. udpReceiver.cpp is the equivalent stand-in for the GPS receiver's serial link.
 add_executable(f16_flight_computer f16_flight_computer.cpp udpReceiver.cpp)
 target_link_libraries(f16_flight_computer PRIVATE hemerion_sensors hemerion_spi_shm hemerion_i2c_shm)
 # examples/common/ for log_contract.hpp: the log headers Aetherion's replay binds by name.

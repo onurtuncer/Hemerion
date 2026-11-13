@@ -110,23 +110,16 @@ target_link_libraries(test_hemerion_sensors_imu_spi PRIVATE hemerion_sensors hem
 add_test(NAME sensors.imu_spi COMMAND test_hemerion_sensors_imu_spi)
 set_tests_properties(sensors.imu_spi PROPERTIES LABELS "unit")
 
-# Round-trip tests for the barometer, radar altimeter and magnetometer FMU simulators (baro/fmu/, radalt/fmu/,
-# mag/fmu/). Like ubxEmitter.cpp and imu_packet_emitter.cpp above, each emitter is compiled directly into its test
-# binary rather than via hemerion_sensors, since the emitters are sim-only code gated behind HEMERION_BUILD_FMU and must
-# not be linked into cross-compiled firmware.
+# Round-trip tests for the barometer and magnetometer FMU simulators (baro/fmu/, mag/fmu/). Like ubxEmitter.cpp and
+# imu_packet_emitter.cpp above, each emitter is compiled directly into its test binary rather than via hemerion_sensors,
+# since the emitters are sim-only code gated behind HEMERION_BUILD_FMU and must not be linked into cross-compiled
+# firmware.
 add_executable(test_hemerion_sensors_baro_packet test_baro_packet.cpp
                                                  "${CMAKE_CURRENT_SOURCE_DIR}/../src/baro/fmu/baro_packet_emitter.cpp")
 target_link_libraries(test_hemerion_sensors_baro_packet PRIVATE hemerion_sensors hemerion_test_support)
 
 add_test(NAME sensors.baro_packet COMMAND test_hemerion_sensors_baro_packet)
 set_tests_properties(sensors.baro_packet PROPERTIES LABELS "unit")
-
-add_executable(test_hemerion_sensors_radalt_packet
-               test_radalt_packet.cpp "${CMAKE_CURRENT_SOURCE_DIR}/../src/radalt/fmu/radalt_packet_emitter.cpp")
-target_link_libraries(test_hemerion_sensors_radalt_packet PRIVATE hemerion_sensors hemerion_test_support)
-
-add_test(NAME sensors.radalt_packet COMMAND test_hemerion_sensors_radalt_packet)
-set_tests_properties(sensors.radalt_packet PROPERTIES LABELS "unit")
 
 add_executable(test_hemerion_sensors_mag_packet test_mag_packet.cpp
                                                 "${CMAKE_CURRENT_SOURCE_DIR}/../src/mag/fmu/mag_packet_emitter.cpp")

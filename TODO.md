@@ -27,6 +27,7 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   - GPS with `--dyn-model -1`: **300 of 300** fixes (30 s run) at 609.8 m/s and 9214 m — COCOM's AND
     holds; the one NESC case that tells AND from OR.
   - Radar altimeter: 6003 of 6003 returns "no ground return" (9148 m > 6000 m range).
+    *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
   - BMP390: **253 of 286** conversions below the part's 300 hPa rated floor (min 290.9 hPa), and the
     die at **−45.9 °C, below the −40 °C rating** (the FMU uses ambient air as die temperature). The
     part model only saturates at the ADC rails; it models neither rating.
@@ -54,6 +55,7 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   a pre-existing property, the counters carry the result; and the `--aetherion` standalone bar was
   not re-measured — the install ships no example executables and the local Aetherion checkout is
   v0.11.3-era, so regenerating `f16_s12` still needs a ≥ 0.14.1 build tree.
+  *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
 
 * **Regenerating the Aetherion standalone references** (needed for `verify_trajectory.py
   --aetherion`, must be a build that includes 0.14.1's `TrimWeight.h`), from the Aetherion root:
@@ -70,6 +72,7 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   flight-computer smoke confirms the two-rate sensors: exactly 10 Hz GPS, exactly 25 Hz radalt,
   ≈100 Hz IMU, both I2C parts polling, all fixes valid. The investigation record below is what the
   design implements; it stays here because it documents *why* the example looks the way it does.
+  *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
 
   `F16Plant` + `F16Autopilot` + the five sensor FMUs; plant `out.*` → autopilot `fb.*` (11
   connections: alt, vt, rho, alpha, beta, roll/pitch/yaw, p/q/r — every source verified present on
@@ -100,6 +103,7 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
     stream. **The radalt is the one that bites**: it emits `max(1, lround(dt·rate))` frames, so at
     dt = 0.01 and 25 Hz it clamps to 1/step = 100 Hz — give it `stepSizeHint 0.04`. IMU at base is
     exactly 1 frame/step (100 Hz); BMP390/MMC5983MA convert at programmed ODR, dt-independent.
+    *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
 
   **Command schedules, from the standalone sources** (`src/Examples/F16{Altitude,Airspeed,Heading,
   LateralSideStep}Change*.cpp` — all four start from the case-11 trim; initial KEAS = (vt/0.5144444)
@@ -273,6 +277,9 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   `sensors.seeding` against the geometry rather than against a recorded value. The default beam
   half-angle is 0, which ignores attitude exactly as the part did before. Documented in
   `sensor_models.rst`.
+  **Closed — 2026-11-13: removed from Hemerion by maintainer decision.** The radar altimeter FMU,
+  its conversion and packet layers, the host wiring, the `--radalt*` and `--terrain` flags, the
+  flight-computer decoding and the radar figure panels are gone; nothing in this entry remains to do.
 
 * **Sensor timing is exact and phase-locked.** `sensor_cadence.png` shows 100.00 / 40.00 /
   10.00 ms intervals with zero jitter, because every FMU steps on the master's clock. Real
@@ -287,6 +294,7 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   `.config` sidecar: one magnitude per run, a separate draw per part. And the flight computers
   now stamp on arrival — every sensor log carries `host_time_s` beside the part's own
   `part_time_s`, with the GPS's index-derived column renamed `nominal_time_s` for what it is.
+  *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
 
   **Two parts deliberately have no clock, and working out why was the substance of the item.**
   The MMC5983MA has no time register at all, which is why its driver already took a `now_us()`
@@ -326,6 +334,7 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   **0.7 gyro counts to 47.4**, overturning this section's headline finding; ISA + 20 K puts the
   barometer **195 m** below truth while GNSS and radar hold it; a 10 m/s crosswind opens **2.28°**
   between GNSS course and yaw. All three were invisible in calm, standard-day air.
+  *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
 
 * **Still open in 3b:** the field model is still a centred dipole, whose declination at Kitty Hawk
   is +0.69° against the real field's ≈ −11°. WMM/IGRF needs an authoritative coefficient set — it
@@ -405,6 +414,7 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   by hemisphere, `to_body` being a rotation, the centre-of-the-Earth guard) plus one that is
   *meant* to break: the +0.69° Kitty Hawk declination the docs quote as wrong, pinned so that
   swapping in real coefficients fails loudly rather than leaving three doc passages stale.
+  *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
 
 * **What is left, as of 2026-09-28.** Everything this section originally called for is built and
   in use by the examples. What remains was deferred rather than called for:

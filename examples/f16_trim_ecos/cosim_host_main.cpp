@@ -6,7 +6,7 @@
 
 /// @file cosim_host_main.cpp
 /// @brief Ecos co-simulation host coupling Aetherion's F16Plant.fmu to all
-/// five of Hemerion's hardware-simulator FMUs.
+/// four of Hemerion's hardware-simulator FMUs.
 ///
 /// The scenarios are NASA TM-2015-218675's two open-loop **trim flyouts**,
 /// selected with --case. Check-case 11 (the default): an F-16 trimmed for
@@ -33,33 +33,27 @@
 ///                                       ├───────────> hemerion_bmp390_fmu.fmu
 ///                                       │                 ISA + inverse compensation
 ///                                       │                       │ I2C over shared memory
-///                                       ├───────────> hemerion_mmc5983ma_fmu.fmu
-///                                       │                 SET/RESET + hard iron
-///                                       │                       │ I2C over shared memory
-///                                       └───────────> hemerion_radalt_fmu.fmu
-///                                                         AGL return + dropout
-///                                                               │ UDP 127.0.0.1:5765
+///                                       └───────────> hemerion_mmc5983ma_fmu.fmu
+///                                                         SET/RESET + hard iron
+///                                                               │ I2C over shared memory
 ///                                                               v
 ///                                                      f16_flight_computer
 ///
 /// **Why these two check-cases.** Case 11 is the only scenario in the set
-/// where all four environment-dependent sensor stacks are valid at the same
+/// where all three environment-dependent sensor stacks are valid at the same
 /// time. The receiver holds a fix for the whole run (172 m/s and 3.05 km
 /// clear every limit it has); 10 013 ft is squarely inside the barometer's
-/// useful band; 36 deg N gives the magnetometer a healthy horizontal field
-/// component to find a heading in; and 3052 m AGL is inside the radar
-/// altimeter's 6000 m tracking range. Scenario 17 -- the two-stage rocket in
-/// examples/rocket_gps_ecos -- can do none of that: it loses the fix at 31 s,
-/// leaves the atmosphere, and is out of radalt range within seconds of the
-/// pad. That makes the case-11 run the cross-sensor consistency reference:
-/// baro altitude against GPS altitude against radar height, magnetic heading
+/// useful band; and 36 deg N gives the magnetometer a healthy horizontal field
+/// component to find a heading in. Scenario 17 -- the two-stage rocket in
+/// examples/rocket_gps_ecos -- can do none of that: it loses the fix at 31 s
+/// and leaves the atmosphere. That makes the case-11 run the cross-sensor
+/// consistency reference: baro altitude against GPS altitude, magnetic heading
 /// against GPS course, all on one trajectory.
 ///
 /// Case 12 is the same wiring with two different numbers -- an altitude and
 /// an airspeed -- and nearly the opposite sensor story: at 610 m/s the
 /// receiver is past dynModel 8's 500 m/s platform limit from the very first
-/// epoch and never reports a fix; at 9148 m the radar altimeter is past its
-/// 6000 m tracking range and every return says so; and the barometer spends
+/// epoch and never reports a fix; and the barometer spends
 /// most of the flight below the BMP390's 300 hPa rated pressure floor with
 /// its die below the -40 C rating. Only the magnetometer stays in band. The
 /// point is that all of this arrives through exactly the code paths case 11
@@ -74,18 +68,11 @@
 /// requirements are version floors on Aetherion; CMakeLists.txt tests for the
 /// ports rather than for a version string.
 ///
-/// **The radar altimeter measures height above ground, and there is no
-/// terrain model here.** Its `h_agl_m` input is fed the plant's MSL altitude,
-/// which is correct to within the terrain elevation at Kitty Hawk -- a few
-/// metres of coastal North Carolina. On a scenario over mountains this
-/// connection would be wrong, and it is wired directly rather than through a
-/// terrain lookup precisely so that the assumption is visible in one line.
-///
 /// None of the sensor FMUs has FMI outputs -- their effect is the sensor bus
-/// each part really uses: UDP stand-ins for the GPS receiver's and radar
-/// altimeter's serial links, a shared-memory SPI bus (sim/spi_shm) the IMU
-/// answers as a peripheral, and shared-memory I2C buses (sim/i2c_shm) the
-/// BMP390 and MMC5983MA answer on as register-accurate parts. All five are
+/// each part really uses: a UDP stand-in for the GPS receiver's serial link,
+/// a shared-memory SPI bus (sim/spi_shm) the IMU answers as a peripheral, and
+/// shared-memory I2C buses (sim/i2c_shm) the BMP390 and MMC5983MA answer on as
+/// register-accurate parts. All four are
 /// consumed by f16_flight_computer. Neither I2C part takes a rate parameter:
 /// each converts at whatever ODR the flight computer programs into its
 /// registers, which is the point of simulating the part instead of the
@@ -105,7 +92,7 @@
 /// each other and cannot. See --dyn-model / --no-cocom.
 ///
 /// Plant truth is logged so the flight computer's decoded fixes, IMU samples,
-/// pressures, fields and radar heights can be compared against it.
+/// pressures and fields can be compared against it.
 
 #include "ecos/algorithm/fixed_step_algorithm.hpp"
 #include "ecos/logger/logger.hpp"
@@ -184,14 +171,11 @@ using hemerion::sensors::mag::WorldMagneticModel;
 #ifndef HEMERION_MMC5983MA_FMU_PATH
 #define HEMERION_MMC5983MA_FMU_PATH ""
 #endif
-#ifndef HEMERION_RADALT_FMU_PATH
-#define HEMERION_RADALT_FMU_PATH ""
-#endif
 
 /// @brief A distinct, reproducible seed per sensor from one run seed.
 ///
 /// Seeding every part with the same number would hand the barometer and the
-/// radar altimeter the same first draw -- a correlation between independent
+/// magnetometer the same first draw -- a correlation between independent
 /// parts that no real hardware has, and a coincidence a figure should never
 /// rest on. A cheap integer hash (splitmix64's finaliser) decorrelates them
 /// while keeping the whole run a function of the one number the user typed.
@@ -223,7 +207,6 @@ struct Options
   std::filesystem::path imu_fmu = HEMERION_IMU_FMU_PATH;
   std::filesystem::path baro_fmu = HEMERION_BMP390_FMU_PATH;
   std::filesystem::path mag_fmu = HEMERION_MMC5983MA_FMU_PATH;
-  std::filesystem::path radalt_fmu = HEMERION_RADALT_FMU_PATH;
   std::filesystem::path csv_path = "results/f16_truth.csv";
   // Which NASA TM-2015-218675 check-case to fly. Both trim flyouts run to 200 s, the window their reference
   // trajectories in Aetherion's data/Atmos_1{1,2}_*/ are tabulated over. --case only sets defaults: see
@@ -250,12 +233,7 @@ struct Options
   double step_s = 0.1;           // communication step
   double gps_period_s = 0.1;     // NAV-PVT period: the GPS FMU's step-size hint (10 Hz), independent of step_s
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
-  double radalt_rate_hz = 25.0;  // radar altimeter pulse rate
-
-  // The world under the aircraft, and the beam that looks at it.
-  double terrain_elevation_m = 0.0;
-  double radalt_beam_half_angle_deg = 0.0;  // 0 = ignore attitude, as the part did before
-  double realtime_factor = 0.0;             // 0 = run as fast as possible
+  double realtime_factor = 0.0;  // 0 = run as fast as possible
   // Receiver dynamics envelope. Both mechanisms are left in force, and the
   // setting is deliberately the same for both check-cases: it is a property
   // of the receiver bolted to the aircraft, not of the flight, and changing it
@@ -330,7 +308,7 @@ struct Options
 /// Both are "trim the aircraft at a point, then let it go for 200 s" from the
 /// same place on the same heading, so the whole difference between them is an
 /// altitude and an airspeed. Everything that makes case 12 interesting -- no
-/// GPS fix, no radar return, a barometer at the edge of its datasheet range --
+/// GPS fix, a barometer at the edge of its datasheet range --
 /// follows from those two numbers rather than from any wiring change, which is
 /// why it is a row here and not a second example.
 struct TrimCase
@@ -352,8 +330,7 @@ void print_usage()
 {
   std::cout << "usage: f16_trim_cosim [--case 11|12] [--f16 <F16Plant.fmu>] [--gps <hemerion_gps_fmu.fmu>]\n"
                "                      [--imu <hemerion_imu_fmu.fmu>] [--baro <hemerion_bmp390_fmu.fmu>]\n"
-               "                      [--mag <hemerion_mmc5983ma_fmu.fmu>] [--radalt <hemerion_radalt_fmu.fmu>]\n"
-               "                      [--imu-rate <hz>] [--radalt-rate <hz>]\n"
+               "                      [--mag <hemerion_mmc5983ma_fmu.fmu>] [--imu-rate <hz>]\n"
                "                      [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                      [--gps-errors white|correlated] [--gps-seed <n>]\n"
                "                      [--wind <n,e,d>] [--turbulence <w20>] [--atmosphere <dT,dP>]\n"
@@ -372,9 +349,7 @@ void print_usage()
                "  --mag       path to the packaged hemerion_mmc5983ma_fmu.fmu (default: build-tree artifact;\n"
                "              no rate option either -- the part measures at the rate the flight computer\n"
                "              programs into Internal control 2, and on command during its bring-up)\n"
-               "  --radalt    path to the packaged hemerion_radalt_fmu.fmu (default: build-tree artifact)\n"
                "  --imu-rate  IMU output data rate [Hz] (default 100)\n"
-               "  --radalt-rate  radar altimeter pulse rate [Hz] (default 25)\n"
                "  --dyn-model u-blox dynModel code for the receiver's platform model (default 8 = airborne <4 g,\n"
                "              which is what this aircraft is; it never trips, so the receiver holds a fix for\n"
                "              the whole run. -1 disables the platform envelope entirely)\n"
@@ -383,10 +358,6 @@ void print_usage()
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
-               "  --terrain   ground elevation under the flight [m] (default 0: the part is handed MSL\n"
-               "              altitude, this example's long-standing approximation)\n"
-               "  --radalt-beam  antenna beam half-angle [deg]; 0 (default) ignores attitude, otherwise\n"
-               "              the part reports slant range and drops lock past this bank angle\n"
                "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
                "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
                "              on the wire, so both ends must be configured alike\n"
@@ -437,7 +408,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 35> kValueOptions = { {
+constexpr std::array<ValueOption, 31> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -445,9 +416,7 @@ constexpr std::array<ValueOption, 35> kValueOptions = { {
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
     { "--baro", [](Options& o, const char* v) { o.baro_fmu = v; } },
     { "--mag", [](Options& o, const char* v) { o.mag_fmu = v; } },
-    { "--radalt", [](Options& o, const char* v) { o.radalt_fmu = v; } },
     { "--imu-rate", [](Options& o, const char* v) { o.imu_rate_hz = std::stod(v); } },
-    { "--radalt-rate", [](Options& o, const char* v) { o.radalt_rate_hz = std::stod(v); } },
     { "--dyn-model", [](Options& o, const char* v) { o.dynamic_platform = std::stoi(v); } },
     { "--reacq", [](Options& o, const char* v) { o.reacquisition_time_s = std::stod(v); } },
     { "--gps-errors",
@@ -478,8 +447,6 @@ constexpr std::array<ValueOption, 35> kValueOptions = { {
         o.sensor_clock_skew_ppm = clock[0];
         o.sensor_clock_jitter_s = clock[1];
       } },
-    { "--terrain", [](Options& o, const char* v) { o.terrain_elevation_m = std::stod(v); } },
-    { "--radalt-beam", [](Options& o, const char* v) { o.radalt_beam_half_angle_deg = std::stod(v); } },
     { "--imu-range",
       [](Options& o, const char* v) {
         if (!hemerion::sensors::imu::imu_range_from_name(v, o.imu_range))
@@ -752,8 +719,6 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "mag_intensity_ut=" << field_intensity_ut << "\n"
       << "sensor_clock_skew_ppm=" << options.sensor_clock_skew_ppm << "\n"
       << "sensor_clock_jitter_s=" << options.sensor_clock_jitter_s << "\n"
-      << "terrain_elevation_m=" << options.terrain_elevation_m << "\n"
-      << "radalt_beam_half_angle_deg=" << options.radalt_beam_half_angle_deg << "\n"
       << "imu_gyro_lsb_per_dps=" << hemerion::sensors::imu::imu_scale_for(options.imu_range).gyro_lsb_per_dps << "\n"
       << "gps_seed=" << options.gps_seed << "\n"
       << "gps_horizontal_pos_noise_m=" << receiver.horizontal_pos_noise_m << "\n"
@@ -786,7 +751,6 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_period_s=" << options.gps_period_s << "\n"
       << "stop_s=" << options.stop_s << "\n"
       << "imu_rate_hz=" << options.imu_rate_hz << "\n"
-      << "radalt_rate_hz=" << options.radalt_rate_hz << "\n"
       << log_contract::kRealtimeFactorKey << '=' << options.realtime_factor << "\n";
 }
 
@@ -902,8 +866,7 @@ int main(int argc, char** argv)
                                      std::pair{ "gps", options.gps_fmu },
                                      std::pair{ "imu", options.imu_fmu },
                                      std::pair{ "baro", options.baro_fmu },
-                                     std::pair{ "mag", options.mag_fmu },
-                                     std::pair{ "radalt", options.radalt_fmu } })
+                                     std::pair{ "mag", options.mag_fmu } })
   {
     if (path.empty() || !std::filesystem::exists(path))
     {
@@ -932,7 +895,6 @@ int main(int argc, char** argv)
     ss.add_model("imu", options.imu_fmu.string());
     ss.add_model("baro", options.baro_fmu.string());
     ss.add_model("mag", options.mag_fmu.string());
-    ss.add_model("radalt", options.radalt_fmu.string());
 
     // Geodetic position needs no modifier: Aetherion >= 0.13.0 publishes
     // out.lat_deg/out.lon_deg in the degrees the GPS FMU's inputs are named
@@ -976,28 +938,6 @@ int main(int argc, char** argv)
     const std::function<double(const double&)> kelvin2celsius = [](const double& kelvin) { return kelvin - 273.15; };
     ss.make_connection<double>("f16::out.T_K", "baro::T_degC", kelvin2celsius);
 
-    // The radar altimeter measures height above *ground*, and this scenario
-    // carries no terrain model, so MSL altitude goes in unmodified. At Kitty
-    // Hawk that is right to within a few metres of coastal elevation; over
-    // terrain it would not be, and the connection is left bare rather than
-    // routed through a nominal offset so that the approximation is one
-    // readable line instead of a buried constant. Case 11's 10 013 ft is
-    // 3052 m, well inside the part's 6000 m tracking range. Case 12's
-    // 30 013 ft is 9148 m, well outside it, and the part reports loss of track
-    // for the whole flight -- a sensor that is working and has nothing to say.
-    // Height above ground, not above the sea: --terrain makes the ground's
-    // elevation a number rather than an assumption. Still the simplest possible
-    // terrain -- one elevation, no relief -- because inventing a height field
-    // would be inventing data, and the part only needs to be told where the
-    // ground is.
-    const std::function<double(const double&)> subtract_terrain =
-        [elevation = options.terrain_elevation_m](const double& msl) { return msl - elevation; };
-    ss.make_connection<double>("f16::out.alt_m", "radalt::h_agl_m", subtract_terrain);
-    // And the attitude its beam is fixed to: with --radalt-beam set the part
-    // reports slant range and loses the ground past the beam's half-angle.
-    ss.make_connection<double>("f16::out.roll_rad", "radalt::roll_rad");
-    ss.make_connection<double>("f16::out.pitch_rad", "radalt::pitch_rad");
-
     // The magnetometer's die temperature: ambient air, near enough for a part
     // whose temperature channel quantizes at 0.8 C. The field itself has no
     // plant output to connect -- it is computed in the stepping loop below,
@@ -1036,8 +976,6 @@ int main(int argc, char** argv)
     const hemerion::sensors::imu::ImuScale imu_scale = hemerion::sensors::imu::imu_scale_for(options.imu_range);
     trim_point["imu::accel_lsb_per_g"] = imu_scale.accel_lsb_per_g;
     trim_point["imu::gyro_lsb_per_dps"] = imu_scale.gyro_lsb_per_dps;
-    trim_point["radalt::sample_rate_hz"] = options.radalt_rate_hz;
-    trim_point["radalt::beam_half_angle_deg"] = options.radalt_beam_half_angle_deg;
     // Written explicitly even though these match the GPS FMU's own defaults:
     // whether the receiver keeps a fix through this flight is the scenario's
     // most consequential setting, and it should be readable here rather than
@@ -1056,7 +994,6 @@ int main(int argc, char** argv)
     trim_point["imu::seed"] = derived_seed(options.seed, 1);
     trim_point["baro::seed"] = derived_seed(options.seed, 2);
     trim_point["mag::seed"] = derived_seed(options.seed, 3);
-    trim_point["radalt::seed"] = derived_seed(options.seed, 4);
     // Each part's own oscillator, same magnitude and a different draw per part
     // (each FMU seeds its clock from its own seed). The magnetometer is absent
     // because the MMC5983MA has no time register to skew, and so is the
@@ -1067,8 +1004,6 @@ int main(int argc, char** argv)
     trim_point["imu::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
     trim_point["baro::clock_skew_sigma_ppm"] = options.sensor_clock_skew_ppm;
     trim_point["baro::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
-    trim_point["radalt::clock_skew_sigma_ppm"] = options.sensor_clock_skew_ppm;
-    trim_point["radalt::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
     trim_point["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
     trim_point["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
     trim_point["gps::speed_noise_mps"] = receiver.speed_noise_mps;
@@ -1155,12 +1090,7 @@ int main(int argc, char** argv)
                                               // compared against what the part was actually given.
                                               "mag::b_x_ut",
                                               "mag::b_y_ut",
-                                              "mag::b_z_ut",
-                                              // And the height the radar altimeter was handed, which on
-                                              // this scenario is MSL altitude -- logged separately from
-                                              // out.alt_m so the terrain approximation stays visible in
-                                              // the data rather than only in the connection comment.
-                                              "radalt::h_agl_m" }),
+                                              "mag::b_z_ut" }),
                           {});
     write_run_config(options.csv_path, options);
 
@@ -1201,10 +1131,9 @@ int main(int argc, char** argv)
               << "[cosim] imu:    " << options.imu_fmu.string() << "\n"
               << "[cosim] baro:   " << options.baro_fmu.string() << "\n"
               << "[cosim] mag:    " << options.mag_fmu.string() << "\n"
-              << "[cosim] radalt: " << options.radalt_fmu.string() << "\n"
               << "[cosim] step " << options.step_s << " s (" << 1.0 / options.gps_period_s << " Hz GPS, "
-              << options.imu_rate_hz << " Hz IMU, " << options.radalt_rate_hz
-              << " Hz radalt; BMP390 and MMC5983MA at the rates the flight computer programs), stop " << options.stop_s
+              << options.imu_rate_hz
+              << " Hz IMU; BMP390 and MMC5983MA at the rates the flight computer programs), stop " << options.stop_s
               << " s\n"
               << "[cosim] check-case " << options.check_case << ": "
               << std::ranges::find(kTrimCases, std::string_view(options.check_case), &TrimCase::id)->summary
@@ -1296,7 +1225,6 @@ int main(int argc, char** argv)
     sim->terminate();
 
     const long imu_frames_per_step = std::lround(options.step_s * options.imu_rate_hz);
-    const long radalt_returns_per_step = std::lround(options.step_s * options.radalt_rate_hz);
     // One NAV-PVT frame per step regardless of fix validity -- a receiver
     // outside its envelope keeps talking, it just stops claiming a solution.
     // On case 11 it never stops claiming one; on case 12 it never starts.
@@ -1304,8 +1232,7 @@ int main(int argc, char** argv)
     std::cout << "[cosim] done: " << sim->iterations() << " steps, "
               << std::lround(static_cast<double>(sim->iterations()) * options.step_s / options.gps_period_s)
               << " UBX-NAV-PVT frames emitted, " << sim->iterations() * std::max(1L, imu_frames_per_step)
-              << " IMU samples buffered for the SPI controller and "
-              << sim->iterations() * std::max(1L, radalt_returns_per_step) << " radar returns sent\n"
+              << " IMU samples buffered for the SPI controller\n"
               << "[cosim] the BMP390 and the MMC5983MA each answered at whatever rate the flight computer programmed "
                  "them to\n"
               << "[cosim] the BMP390 latched " << baro_conversions << " conversions, " << baro_out_of_rating

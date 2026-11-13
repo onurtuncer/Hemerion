@@ -12,7 +12,7 @@
 //
 // This is what makes a run reproducible, and it is worth its own file because
 // it is the property the FMUs' `seed` parameters sell. Before those existed
-// every run of these four parts drew a fresh instance from std::random_device,
+// every run of these three parts drew a fresh instance from std::random_device,
 // so two runs of the same scenario differed by the whole turn-on bias -- 3.4 m
 // of indicated altitude on the BMP390 -- and no figure could separate a
 // systematic effect from the draw.
@@ -32,15 +32,12 @@
 #include <iostream>
 #include <numbers>
 #include <random>
-#include <utility>
 #include <vector>
 
 #include "Hemerion/sensor_clock.h"
 #include "Hemerion/baro/bmp390/fmu/bmp390_measurement_model.h"
 #include "Hemerion/imu/fmu/imu_noise_model.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_measurement_model.h"
-#include "Hemerion/radalt/fmu/radalt_noise_model.h"
-#include "Hemerion/radalt/radalt_types.h"
 
 using hemerion::sensors::baro::bmp390::fmu::Bmp390MeasurementConfig;
 using hemerion::sensors::baro::bmp390::fmu::Bmp390MeasurementModel;
@@ -50,9 +47,6 @@ using hemerion::sensors::imu::fmu::ImuTruthSample;
 using hemerion::sensors::mag::mmc5983ma::Mmc5983maSensingState;
 using hemerion::sensors::mag::mmc5983ma::fmu::Mmc5983maMeasurementConfig;
 using hemerion::sensors::mag::mmc5983ma::fmu::Mmc5983maMeasurementModel;
-using hemerion::sensors::radalt::fmu::RadAltNoiseConfig;
-using hemerion::sensors::radalt::fmu::RadAltNoiseModel;
-using hemerion::sensors::radalt::fmu::RadAltTruthSample;
 
 #define CHECK(condition) check((condition), #condition, __FILE__, __LINE__)
 
@@ -477,104 +471,6 @@ void test_mmc5983ma_seeding()
   CHECK(std::fabs(mean(hard_iron_x)) < 0.3 * config.hard_iron_sigma_ut);
 }
 
-// --- Radar altimeter ---------------------------------------------------------
-
-void test_radalt_seeding()
-{
-  RadAltTruthSample truth;
-  truth.height_agl_m = 3052.0;
-
-  RadAltNoiseModel a(RadAltNoiseConfig{}, /*seed=*/31);
-  RadAltNoiseModel b(RadAltNoiseConfig{}, /*seed=*/31);
-  RadAltNoiseModel c(RadAltNoiseConfig{}, /*seed=*/32);
-  bool any_difference = false;
-  for (int k = 0; k < 200; ++k)
-  {
-    const auto ra = a.apply(truth);
-    const auto rb = b.apply(truth);
-    const auto rc = c.apply(truth);
-    CHECK(ra.range == rb.range && ra.status == rb.status);
-    any_difference = any_difference || (ra.range != rc.range);
-  }
-  CHECK(any_difference);
-
-  RadAltNoiseConfig config;
-  RadAltNoiseModel model(config, /*seed=*/3);
-  std::vector<double> range_m;
-  range_m.reserve(kDraws);
-  for (int k = 0; k < kDraws; ++k)
-  {
-    range_m.push_back(model.apply(truth).range / static_cast<double>(config.scale.range_lsb_per_m));
-  }
-  CHECK(near(stddev(range_m), config.range_noise_m, 0.15 * config.range_noise_m));
-  CHECK(std::fabs(mean(range_m) - truth.height_agl_m) < 4.0 * config.range_bias_sigma_m);
-
-  // Past the tracking range the part reports no ground, whatever the seed.
-  truth.height_agl_m = config.max_range_m + 1000.0;
-  CHECK(model.apply(truth).status == hemerion::sensors::radalt::kRadAltStatusNoReturn);
-}
-
-// The beam geometry: a radar altimeter measures along an axis fixed to the
-// airframe, so over flat ground it reads h / (cos roll cos pitch) -- always
-// longer than the height, never shorter -- and past the beam's half-angle it
-// has no ground in its footprint at all.
-void test_radalt_beam_geometry()
-{
-  RadAltNoiseConfig config;
-  config.range_noise_m = 0.0F;  // isolate the geometry
-  config.range_bias_sigma_m = 0.0F;
-  config.beam_half_angle_rad = static_cast<float>(20.0 * std::numbers::pi / 180.0);
-
-  const auto range_at = [&config](double roll_deg, double pitch_deg) {
-    RadAltNoiseModel model(config, /*seed=*/1);
-    RadAltTruthSample truth;
-    truth.height_agl_m = 1000.0;
-    truth.roll_rad = roll_deg * std::numbers::pi / 180.0;
-    truth.pitch_rad = pitch_deg * std::numbers::pi / 180.0;
-    const auto raw = model.apply(truth);
-    return std::pair<double, bool>{ raw.range / static_cast<double>(config.scale.range_lsb_per_m),
-                                    raw.status == hemerion::sensors::radalt::kRadAltStatusTrackValid };
-  };
-
-  // Level: the slant range is the height.
-  const auto level = range_at(0.0, 0.0);
-  CHECK(level.second);
-  CHECK(near(level.first, 1000.0, 0.02));
-
-  // Banked 15 degrees: 1000 / cos(15 deg) = 1035.3 m. Longer, and by the
-  // amount the geometry says rather than by an arbitrary fudge.
-  const auto banked = range_at(15.0, 0.0);
-  CHECK(banked.second);
-  CHECK(near(banked.first, 1000.0 / std::cos(15.0 * std::numbers::pi / 180.0), 0.02));
-  CHECK(banked.first > level.first);
-
-  // Pitch counts the same way, and the two combine through the product of
-  // their cosines rather than by adding.
-  const auto pitched = range_at(0.0, 15.0);
-  CHECK(near(pitched.first, banked.first, 0.02));
-  const auto both = range_at(10.0, 10.0);
-  const double cos_tilt = std::cos(10.0 * std::numbers::pi / 180.0) * std::cos(10.0 * std::numbers::pi / 180.0);
-  CHECK(near(both.first, 1000.0 / cos_tilt, 0.02));
-
-  // Past the beam: no ground in the footprint, reported exactly as an
-  // out-of-range return is, because the firmware cannot tell them apart.
-  CHECK(!range_at(25.0, 0.0).second);
-  CHECK(!range_at(0.0, -25.0).second);  // nose-up counts too
-  CHECK(range_at(19.0, 0.0).second);    // and it is the half-angle, not a rounding of it
-
-  // With the beam disabled the part ignores attitude entirely, which is what
-  // it did before this existed.
-  RadAltNoiseConfig flat = config;
-  flat.beam_half_angle_rad = 0.0F;
-  RadAltNoiseModel blind(flat, /*seed=*/1);
-  RadAltTruthSample tilted;
-  tilted.height_agl_m = 1000.0;
-  tilted.roll_rad = 60.0 * std::numbers::pi / 180.0;
-  const auto ignored = blind.apply(tilted);
-  CHECK(ignored.status == hemerion::sensors::radalt::kRadAltStatusTrackValid);
-  CHECK(near(ignored.range / static_cast<double>(flat.scale.range_lsb_per_m), 1000.0, 0.02));
-}
-
 // A part's own clock. Skew is a rate error and accumulates; jitter is a
 // per-sample error and does not. Telling them apart matters to a filter: one
 // slides two sensors' streams against each other over a flight and has to be
@@ -694,8 +590,6 @@ int main()
   test_imu_drawn_terms_reconstruct_the_output();
   test_bmp390_seeding();
   test_mmc5983ma_seeding();
-  test_radalt_seeding();
-  test_radalt_beam_geometry();
   test_sensor_clock_skew_and_jitter();
   test_sensor_clock_off_draws_nothing();
 

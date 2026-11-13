@@ -10,15 +10,15 @@
 /// and 12).
 ///
 /// Runs the exact sensor stacks the STM32H743 target runs, over host
-/// transports, driving **all five** of them at once. Which check-case is
+/// transports, driving **all four** of them at once. Which check-case is
 /// flying is the co-simulation host's business (`f16_trim_cosim --case`);
 /// this program decodes whatever arrives, unchanged between the two -- which
 /// is itself the result. Case 11 is the one check-case where every
 /// environment-dependent part stays in band for the whole flight, so the
 /// stacks can be checked against each other rather than one at a time.
-/// Case 12 (Mach 2.01 at 30 013 ft) puts three of the four outside their
-/// envelopes at once -- no GPS fix, no radar return, a barometer below its
-/// rated pressure floor -- and the same decode paths carry that story too.
+/// Case 12 (Mach 2.01 at 30 013 ft) puts two of the three outside their
+/// envelopes at once -- no GPS fix and a barometer below its rated pressure
+/// floor -- and the same decode paths carry that story too.
 ///
 /// * **GPS** -- the GPS FMU's UBX-NAV-PVT stream arrives over UDP and goes
 ///   through the unmodified GpsDriver/UbxParser. On hardware those bytes come
@@ -51,18 +51,14 @@
 ///   whose bring-up blocks: its bridge offset is specified only to
 ///   +/-0.5 gauss, the size of Earth's whole field, so a SET/measure/RESET/
 ///   measure/SET sequence has to run before the first useful reading exists.
-/// * **Radar altimeter** -- a talker like the GPS, on its own UDP port, fed
-///   byte-at-a-time to the unmodified RadAltPacketParser and converted with
-///   the part's register sensitivity. Its frames carry their own timestamp,
-///   so unlike the GPS there is no epoch-index-to-time mapping to maintain.
 ///
 /// **The two I2C parts are polled, and they sample at this program's loop
 /// rate, not at the ODR programmed into their registers.** Their data
 /// registers are not FIFOs, so a conversion the loop does not come back for is
 /// overwritten. Running the co-simulation unpaced starves them badly -- 200 s
 /// of flight yields ~37 barometer conversions -- while `f16_trim_cosim --rtf 1`
-/// gives them wall-clock time and roughly 23x the rate. The GPS, IMU and radar
-/// altimeter are unaffected, because a socket queue and a FIFO both remember.
+/// gives them wall-clock time and roughly 23x the rate. The GPS and IMU are
+/// unaffected, because a socket queue and a FIFO both remember.
 ///
 /// Everything *around* those two stacks is harness, not firmware, and has no
 /// counterpart on the target: the command line, the UDP socket, std::filesystem
@@ -79,7 +75,7 @@
 ///
 /// Every decoded sample is appended to a CSV so what the flight software
 /// *believes* can be compared against the plant truth the co-simulation
-/// logged -- and, on this scenario, against the other four stacks.
+/// logged -- and, on this scenario, against the other three stacks.
 ///
 /// Exits on its own once both streams go quiet (the co-simulation finished)
 /// or a hard wall-clock cap is reached, so a scripted run never hangs.
@@ -94,10 +90,6 @@
 #include "Hemerion/imu/fmu/imu_noise_model.h"  // ImuNoiseConfig: the simulated part's register sensitivity
 #include "Hemerion/imu/imu_conversion.h"
 #include "Hemerion/imu/imu_spi_driver.h"
-#include "Hemerion/radalt/fmu/radalt_noise_model.h"  // RadAltNoiseConfig: the simulated part's range sensitivity
-#include "Hemerion/radalt/radalt_conversion.h"
-#include "Hemerion/radalt/radalt_packet.h"
-#include "Hemerion/radalt/radalt_types.h"
 #include "log_contract.hpp"
 #include "udpReceiver.hpp"
 
@@ -155,19 +147,12 @@ using hemerion::sensors::mag::mmc5983ma::Mmc5983maDriver;
 using hemerion::sensors::mag::mmc5983ma::Mmc5983maError;
 using hemerion::sensors::mag::mmc5983ma::Mmc5983maI2cBus;
 using hemerion::sensors::mag::mmc5983ma::Mmc5983maReadResult;
-using hemerion::sensors::radalt::convert_raw_to_si;
-using hemerion::sensors::radalt::RadAltConversionError;
-using hemerion::sensors::radalt::RadAltPacketError;
-using hemerion::sensors::radalt::RadAltPacketParser;
-using hemerion::sensors::radalt::RadAltRawSample;
-using hemerion::sensors::radalt::RadAltSample;
 using hemerion::sim::i2c_shm::I2cShmController;
 using hemerion::sim::spi_shm::SpiShmController;
 
 struct Options
 {
   std::uint16_t gps_port = 5762;                   // GPS FMU default UDP destination
-  std::uint16_t radalt_port = 5765;                // radar altimeter FMU default UDP destination
   std::string imu_bus = "hemerion_imu_spi";        // IMU FMU default SPI bus name
   std::string baro_bus = "hemerion_bmp390_i2c";    // BMP390 FMU default I2C bus name
   std::string mag_bus = "hemerion_mmc5983ma_i2c";  // MMC5983MA FMU default I2C bus name
@@ -176,32 +161,29 @@ struct Options
   std::filesystem::path imu_csv_path = "results/imu_samples.csv";
   std::filesystem::path baro_csv_path = "results/baro_samples.csv";
   std::filesystem::path mag_csv_path = "results/mag_samples.csv";
-  std::filesystem::path radalt_csv_path = "results/radalt_samples.csv";
   // Must match the host's --imu-range; see where imu_scale is taken below.
   hemerion::sensors::imu::ImuRange imu_range = hemerion::sensors::imu::ImuRange::k2000DpsPm40G;
-  double fix_period_s = 0.1;     // co-sim communication step; maps fix index -> sim time for the CSV
-  int print_every = 50;          // console line every N fixes (50 = every 5 s of sim time at 10 Hz)
-  int imu_print_every = 1000;    // console line every N IMU samples (1000 = every 10 s at 100 Hz)
-  int baro_print_every = 500;    // console line every N baro conversions (500 = every 10 s at 50 Hz)
-  int mag_print_every = 500;     // console line every N magnetometer samples
-  int radalt_print_every = 250;  // console line every N radar returns (250 = every 10 s at 25 Hz)
-  long quiet_ms = 3000;          // exit after this long with no sensor data, once at least one sample arrived
-  long max_wall_s = 900;         // hard wall-clock cap
+  double fix_period_s = 0.1;   // co-sim communication step; maps fix index -> sim time for the CSV
+  int print_every = 50;        // console line every N fixes (50 = every 5 s of sim time at 10 Hz)
+  int imu_print_every = 1000;  // console line every N IMU samples (1000 = every 10 s at 100 Hz)
+  int baro_print_every = 500;  // console line every N baro conversions (500 = every 10 s at 50 Hz)
+  int mag_print_every = 500;   // console line every N magnetometer samples
+  long quiet_ms = 3000;        // exit after this long with no sensor data, once at least one sample arrived
+  long max_wall_s = 900;       // hard wall-clock cap
 };
 
 void print_usage()
 {
-  std::cout << "usage: f16_flight_computer [--port <udp port>] [--radalt-port <udp port>]\n"
+  std::cout << "usage: f16_flight_computer [--port <udp port>]\n"
                "                           [--imu-bus <name>] [--baro-bus <name>] [--mag-bus <name>]\n"
                "                           [--imu-wait-s <s>] [--csv <file>] [--imu-csv <file>]\n"
-               "                           [--baro-csv <file>] [--mag-csv <file>] [--radalt-csv <file>]\n"
+               "                           [--baro-csv <file>] [--mag-csv <file>]\n"
                "                           [--fix-period <s>]\n"
                "                           [--print-every <n>] [--imu-print-every <n>] [--baro-print-every <n>]\n"
-               "                           [--mag-print-every <n>] [--radalt-print-every <n>]\n"
+               "                           [--mag-print-every <n>]\n"
                "                           [--quiet-ms <ms>] [--max-wall-s <s>]\n"
                "\n"
                "  --port       UDP port the GPS FMU sends UBX-NAV-PVT to (default 5762)\n"
-               "  --radalt-port  UDP port the radar altimeter FMU sends raw-sample frames to (default 5765)\n"
                "  --imu-bus    shared-memory SPI bus the IMU FMU answers on (default hemerion_imu_spi;\n"
                "               the FMU reads the same name from HEMERION_IMU_FMU_SPI_BUS)\n"
                "  --baro-bus   shared-memory I2C bus the BMP390 FMU answers on (default hemerion_bmp390_i2c;\n"
@@ -223,9 +205,8 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 20> kValueOptions = { {
+constexpr std::array<ValueOption, 17> kValueOptions = { {
     { "--port", [](Options& o, const char* v) { o.gps_port = static_cast<std::uint16_t>(std::stoi(v)); } },
-    { "--radalt-port", [](Options& o, const char* v) { o.radalt_port = static_cast<std::uint16_t>(std::stoi(v)); } },
     { "--imu-bus", [](Options& o, const char* v) { o.imu_bus = v; } },
     { "--baro-bus", [](Options& o, const char* v) { o.baro_bus = v; } },
     { "--mag-bus", [](Options& o, const char* v) { o.mag_bus = v; } },
@@ -234,7 +215,6 @@ constexpr std::array<ValueOption, 20> kValueOptions = { {
     { "--imu-csv", [](Options& o, const char* v) { o.imu_csv_path = v; } },
     { "--baro-csv", [](Options& o, const char* v) { o.baro_csv_path = v; } },
     { "--mag-csv", [](Options& o, const char* v) { o.mag_csv_path = v; } },
-    { "--radalt-csv", [](Options& o, const char* v) { o.radalt_csv_path = v; } },
     { "--fix-period", [](Options& o, const char* v) { o.fix_period_s = std::stod(v); } },
     { "--imu-range",
       [](Options& o, const char* v) {
@@ -247,7 +227,6 @@ constexpr std::array<ValueOption, 20> kValueOptions = { {
     { "--imu-print-every", [](Options& o, const char* v) { o.imu_print_every = std::stoi(v); } },
     { "--baro-print-every", [](Options& o, const char* v) { o.baro_print_every = std::stoi(v); } },
     { "--mag-print-every", [](Options& o, const char* v) { o.mag_print_every = std::stoi(v); } },
-    { "--radalt-print-every", [](Options& o, const char* v) { o.radalt_print_every = std::stoi(v); } },
     { "--quiet-ms", [](Options& o, const char* v) { o.quiet_ms = std::stol(v); } },
     { "--max-wall-s", [](Options& o, const char* v) { o.max_wall_s = std::stol(v); } },
 } };
@@ -519,19 +498,7 @@ int main(int argc, char** argv)
     return EXIT_FAILURE;
   }
 
-  // The radar altimeter is the second talker in this scenario, and it is bound
-  // for the same reason as the GPS: whatever it sends while the SPI and I2C
-  // parts are still coming up should queue in the socket rather than be lost.
-  auto radalt_receiver = UdpReceiver::create(options.radalt_port);
-  if (!radalt_receiver.has_value())
-  {
-    std::cerr << "error: could not bind UDP port " << options.radalt_port << " (already in use?)\n";
-    return EXIT_FAILURE;
-  }
-
   std::cout << "[fc] listening for UBX-NAV-PVT on UDP port " << options.gps_port << " (GpsDriver, protocol=UBX)\n"
-            << "[fc] listening for radar altimeter frames on UDP port " << options.radalt_port
-            << " (RadAltPacketParser)\n"
             << "[fc] waiting up to " << options.imu_wait_s << " s for the IMU on SPI bus '" << options.imu_bus
             << "' and the BMP390 on I2C bus '" << options.baro_bus << "'\n";
 
@@ -708,20 +675,6 @@ int main(int argc, char** argv)
   // an unstamped sensor, and it is why the IMU is the time master here.
   mag_csv << "sample_index,imu_part_time_s,host_time_s,mag_x_ut,mag_y_ut,mag_z_ut\n";
 
-  std::ofstream radalt_csv = open_csv(options.radalt_csv_path);
-  if (!radalt_csv)
-  {
-    std::cerr << "error: cannot open " << options.radalt_csv_path.string() << " for writing\n";
-    return EXIT_FAILURE;
-  }
-  // `valid` is a column rather than a filter: a radar altimeter that has lost
-  // track is still reporting, and on a scenario that flies well inside the
-  // part's range the absence of dropouts is a result worth being able to see.
-  // On case 12 the column is the whole record: 9148 m is past the 6000 m
-  // tracking range, so every row is a no-return, and a filter would leave an
-  // empty file where "the part kept reporting" is the finding.
-  radalt_csv << "sample_index,part_time_s,host_time_s,range_m,valid\n";
-
   {
     // The bridge offset beside the data it made valid, in the same
     // key=value shape f16_trim_cosim uses for its own run configuration.
@@ -749,12 +702,6 @@ int main(int argc, char** argv)
   // plausible and every rate is wrong by a constant factor.
   const hemerion::sensors::imu::ImuScale imu_scale = hemerion::sensors::imu::imu_scale_for(options.imu_range);
 
-  // Same argument for the radar altimeter's range register: the part's
-  // sensitivity is the FMU's default RadAltNoiseConfig scale (100 LSB/m), and
-  // converting with anything else turns centimetres into a systematic error.
-  RadAltPacketParser radalt_parser;
-  const hemerion::sensors::radalt::RadAltScale radalt_scale = hemerion::sensors::radalt::fmu::RadAltNoiseConfig{}.scale;
-
   std::array<std::uint8_t, 2048> datagram{};
   std::array<ImuRawSample, 64> imu_batch{};
   GpsFix fix;
@@ -763,11 +710,6 @@ int main(int argc, char** argv)
   long imu_sample_count = 0;
   long baro_sample_count = 0;
   long mag_sample_count = 0;
-  long radalt_sample_count = 0;
-  long radalt_no_return_count = 0;
-  long radalt_checksum_errors = 0;
-  double min_radalt_range_m = std::numeric_limits<double>::infinity();
-  double max_radalt_range_m = 0.0;
   // The flight computer's own time base, taken from the IMU payload stamps
   // and used to place the magnetometer samples that carry none.
   double imu_part_time_s = 0.0;
@@ -896,68 +838,6 @@ int main(int argc, char** argv)
       }
       last_sensor_data = std::chrono::steady_clock::now();
       feed_gps(*received);
-    }
-  };
-
-  // The radar altimeter is a talker like the GPS, so it gets the same
-  // per-byte feed and the same non-blocking drain. Unlike the GPS its frames
-  // carry their own timestamp in the payload, so there is no index-to-time
-  // mapping to maintain here -- the sender's clock is in the data.
-  RadAltRawSample radalt_raw;
-  auto feed_radalt = [&](std::size_t received) {
-    for (std::size_t i = 0; i < received; ++i)
-    {
-      const RadAltPacketError result = radalt_parser.parse_byte(datagram[i], radalt_raw);
-      if (result == RadAltPacketError::kChecksumMismatch)
-      {
-        ++radalt_checksum_errors;
-        continue;
-      }
-      if (result != RadAltPacketError::kNone)
-      {
-        continue;
-      }
-      RadAltSample sample;
-      if (convert_raw_to_si(radalt_raw, radalt_scale, sample) != RadAltConversionError::kNone)
-      {
-        continue;
-      }
-      ++radalt_sample_count;
-      any_data = true;
-      const double part_time_s = static_cast<double>(sample.timestamp_us) * 1e-6;
-      if (sample.valid)
-      {
-        min_radalt_range_m = std::min(min_radalt_range_m, static_cast<double>(sample.range_m));
-        max_radalt_range_m = std::max(max_radalt_range_m, static_cast<double>(sample.range_m));
-      }
-      else
-      {
-        ++radalt_no_return_count;
-      }
-      radalt_csv << radalt_sample_count << ',' << part_time_s << ',' << arrival_s() << ',' << sample.range_m << ','
-                 << (sample.valid ? 1 : 0) << '\n';
-      if (radalt_sample_count == 1 || radalt_sample_count % options.radalt_print_every == 0)
-      {
-        std::printf("[fc] rad  %5ld  t=%7.1f s  h=%8.2f m %s\n",
-                    radalt_sample_count,
-                    part_time_s,
-                    static_cast<double>(sample.range_m),
-                    sample.valid ? "" : "(no return)");
-      }
-    }
-  };
-
-  auto drain_radalt = [&](std::chrono::milliseconds first_wait) {
-    for (int drained = 0; drained < 512; ++drained)
-    {
-      const auto received = radalt_receiver->receive(
-          datagram.data(), datagram.size(), drained == 0 ? first_wait : std::chrono::milliseconds(0));
-      if (!received.has_value())
-      {
-        break;
-      }
-      last_sensor_data = std::chrono::steady_clock::now();
-      feed_radalt(*received);
     }
   };
 
@@ -1142,7 +1022,6 @@ int main(int argc, char** argv)
     }
 
     drain_gps(std::chrono::milliseconds(5));
-    drain_radalt(std::chrono::milliseconds(0));
     poll_imu();
     poll_baro();
     poll_mag();
@@ -1156,10 +1035,8 @@ int main(int argc, char** argv)
   for (int idle = 0; idle < 20; ++idle)
   {
     const long before = fix_count;
-    const long radalt_before = radalt_sample_count;
     drain_gps(std::chrono::milliseconds(10));
-    drain_radalt(std::chrono::milliseconds(10));
-    if (fix_count == before && radalt_sample_count == radalt_before)
+    if (fix_count == before)
     {
       break;
     }
@@ -1182,19 +1059,7 @@ int main(int argc, char** argv)
             << "[fc] " << baro_sample_count << " BMP390 conversions read over " << baro_bus.transactions()
             << " I2C transactions (" << baro_bus.failed_transactions() << " failed)\n"
             << "[fc] " << mag_sample_count << " MMC5983MA measurements read over " << mag_bus.transactions()
-            << " I2C transactions (" << mag_bus.failed_transactions() << " failed)\n"
-            << "[fc] " << radalt_sample_count << " radar altimeter returns decoded (" << radalt_checksum_errors
-            << " checksum errors, " << radalt_no_return_count << " with no ground return)\n";
-  if (radalt_sample_count > radalt_no_return_count)
-  {
-    // The span, not a single figure: on a level flyout the radar height should
-    // track the barometer and the GPS altitude, and the three agreeing is the
-    // whole reason this scenario is the cross-sensor reference. A run whose
-    // radar span sits far from the ~3052 m the aircraft holds has a terrain
-    // assumption or a scale mismatch, not noise.
-    std::cout << "[fc] radar height " << min_radalt_range_m << " to " << max_radalt_range_m
-              << " m AGL (no terrain model: this scenario feeds the part MSL altitude)\n";
-  }
+            << " I2C transactions (" << mag_bus.failed_transactions() << " failed)\n";
   if (baro_sample_count > 0)
   {
     std::cout << "[fc] min pressure " << min_pressure_pa << " Pa, min temperature " << min_temperature_c
@@ -1226,19 +1091,16 @@ int main(int argc, char** argv)
             << max_body_rate_rad_s << " rad/s\n"
             << "[fc] fixes written to " << options.gps_csv_path.string() << ", IMU samples to "
             << options.imu_csv_path.string() << ", baro samples to " << options.baro_csv_path.string()
-            << ", magnetometer samples to " << options.mag_csv_path.string() << ", radar returns to "
-            << options.radalt_csv_path.string() << "\n";
-  // All five stacks must have produced something -- counting decoded traffic,
+            << ", magnetometer samples to " << options.mag_csv_path.string() << "\n";
+  // All four stacks must have produced something -- counting decoded traffic,
   // not judging it. That criterion holds for both trim flyouts: on case 11
   // every part is in band, and on case 12 the out-of-envelope parts keep
-  // talking anyway (NAV-PVT with gnssFixOK clear, radar frames flagged
-  // no-return, BMP390 conversions below the rated floor), so a silent stack
+  // talking anyway (NAV-PVT with gnssFixOK clear, BMP390 conversions below
+  // the rated floor), so a silent stack
   // is a broken transport on either flight, never a property of the
   // trajectory. Whether what was said is any *good* is the scenario's
   // content, and verify_trajectory.py / the CSVs judge that, not this exit
   // code.
-  return (fix_count > 0 && imu_sample_count > 0 && baro_sample_count > 0 && mag_sample_count > 0 &&
-          radalt_sample_count > 0) ?
-             EXIT_SUCCESS :
-             EXIT_FAILURE;
+  return (fix_count > 0 && imu_sample_count > 0 && baro_sample_count > 0 && mag_sample_count > 0) ? EXIT_SUCCESS :
+                                                                                                    EXIT_FAILURE;
 }

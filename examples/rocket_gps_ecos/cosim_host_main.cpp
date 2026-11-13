@@ -135,7 +135,7 @@ using hemerion::sensors::mag::WorldMagneticModel;
 /// @brief A distinct, reproducible seed per sensor from one run seed.
 ///
 /// Seeding every part with the same number would hand the barometer and the
-/// radar altimeter the same first draw -- a correlation between independent
+/// magnetometer the same first draw -- a correlation between independent
 /// parts that no real hardware has, and a coincidence a figure should never
 /// rest on. A cheap integer hash (splitmix64's finaliser) decorrelates them
 /// while keeping the whole run a function of the one number the user typed.

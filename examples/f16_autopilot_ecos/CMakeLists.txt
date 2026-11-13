@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: GPL-3.0-only License-Filename: LICENSE
 # ------------------------------------------------------------------------------
 # examples/f16_autopilot_ecos -- Ecos co-simulation of NASA TM-2015-218675's four closed-loop autopilot check-cases
-# (13.1-13.4): Aetherion's F16Plant.fmu and F16Autopilot.fmu in a loop, with all five Hemerion sensor FMUs riding the
+# (13.1-13.4): Aetherion's F16Plant.fmu and F16Autopilot.fmu in a loop, with all four Hemerion sensor FMUs riding the
 # same truth. See README.md.
 #
 # One host executable: f16_autopilot_cosim. The flight computer is examples/f16_trim_ecos's f16_flight_computer, reused
@@ -15,9 +15,8 @@
 if(NOT TARGET hemerion_gps_fmu_fmi2
    OR NOT TARGET hemerion_imu_fmu_fmi2
    OR NOT TARGET hemerion_bmp390_fmu_fmi2
-   OR NOT TARGET hemerion_mmc5983ma_fmu_fmi2
-   OR NOT TARGET hemerion_radalt_fmu_fmi2)
-  message(FATAL_ERROR "examples/f16_autopilot_ecos requires the FMI 2.0 GPS, IMU, BMP390, MMC5983MA and radalt FMU "
+   OR NOT TARGET hemerion_mmc5983ma_fmu_fmi2)
+  message(FATAL_ERROR "examples/f16_autopilot_ecos requires the FMI 2.0 GPS, IMU, BMP390 and MMC5983MA FMU "
                       "targets -- configure with HEMERION_BUILD_FMU=ON (use the examples-native preset)")
 endif()
 
@@ -25,7 +24,6 @@ set(HEMERION_GPS_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_gps_fmu.f
 set(HEMERION_IMU_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_imu_fmu.fmu")
 set(HEMERION_BMP390_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_bmp390_fmu.fmu")
 set(HEMERION_MMC5983MA_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_mmc5983ma_fmu.fmu")
-set(HEMERION_RADALT_FMU_ARCHIVE "${HEMERION_FMU_OUTPUT_DIR}/fmi2/hemerion_radalt_fmu.fmu")
 
 # Ecos is fetched by whichever example directory CMake reaches first; the guard makes this one buildable on its own.
 include(FetchContent)
@@ -185,8 +183,7 @@ target_compile_definitions(
           HEMERION_GPS_FMU_PATH="${HEMERION_GPS_FMU_ARCHIVE}"
           HEMERION_IMU_FMU_PATH="${HEMERION_IMU_FMU_ARCHIVE}"
           HEMERION_BMP390_FMU_PATH="${HEMERION_BMP390_FMU_ARCHIVE}"
-          HEMERION_MMC5983MA_FMU_PATH="${HEMERION_MMC5983MA_FMU_ARCHIVE}"
-          HEMERION_RADALT_FMU_PATH="${HEMERION_RADALT_FMU_ARCHIVE}")
+          HEMERION_MMC5983MA_FMU_PATH="${HEMERION_MMC5983MA_FMU_ARCHIVE}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_definitions(f16_autopilot_cosim PRIVATE FMT_CONSTEVAL=)
 endif()
@@ -195,5 +192,4 @@ add_dependencies(
   hemerion_gps_fmu_fmi2
   hemerion_imu_fmu_fmi2
   hemerion_bmp390_fmu_fmi2
-  hemerion_mmc5983ma_fmu_fmi2
-  hemerion_radalt_fmu_fmi2)
+  hemerion_mmc5983ma_fmu_fmi2)

@@ -17,7 +17,7 @@ directory here is indistinguishable from a built one at configure time. Status i
 
 | Module | Status | Responsibility |
 |---|---|---|
-| `sensors/` | **built** | IMU, barometer (BMP390), GPS, radalt, mag drivers; raw → SI conversion; per-sensor hardware-simulator FMUs |
+| `sensors/` | **built** | IMU, barometer (BMP390), GPS, mag drivers; raw → SI conversion; per-sensor hardware-simulator FMUs |
 | `rtos_core/` | **built** | Task registry, queue registry, memory pools |
 | `fault/` | **built** | Fault registry, watchdog supervisor. HAL health monitor and hardware IWDG feed are not built |
 | `power/` | **built** | Battery monitor, regulator sequencer |

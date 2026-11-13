@@ -1,4 +1,4 @@
-# examples/f16_autopilot_ecos — F-16 autopilot closed loop → five sensor FMUs → STM32 flight software, co-simulated with Ecos
+# examples/f16_autopilot_ecos — F-16 autopilot closed loop → four sensor FMUs → STM32 flight software, co-simulated with Ecos
 
 NASA TM-2015-218675's four **closed-loop autopilot check-cases**, selected with `--case`. All four start from
 check-case 11's trim condition (Kitty Hawk, 10 013 ft, 335 KTAS, heading 45°) and step exactly one command:
@@ -22,13 +22,12 @@ Where [`f16_trim_ecos`](../f16_trim_ecos/) flies the plant open-loop, this examp
 │                      ├──> hemerion_gps_fmu ──UBX-NAV-PVT/UDP──┐
 │                      ├──> hemerion_imu_fmu ──SPI/shared mem───┤     f16_flight_computer
 │                      ├──> hemerion_bmp390_fmu ──I2C/shm───────┼──>  (examples/f16_trim_ecos's
-│                      ├──> hemerion_mmc5983ma ──I2C/shm────────┤      executable, reused unchanged)
-│                      └──> hemerion_radalt_fmu ──frames/UDP────┘
+│                      └──> hemerion_mmc5983ma ──I2C/shm────────┘      executable, reused unchanged)
 └──────────────────────┘
         └──────── f16_autopilot_cosim (Ecos master, 0.01 s base step) ────────┘
 ```
 
-The five sensor FMUs ride the same truth with the same wiring as the trim example, and are consumed by **the
+The four sensor FMUs ride the same truth with the same wiring as the trim example, and are consumed by **the
 same `f16_flight_computer` executable** — this example deliberately has no flight computer of its own. What
 changes is the flight: the maneuvers excite exactly the states a straight-and-level flyout leaves
 unobservable (13.3 and 13.4 especially), which is what makes these runs the sensor-fusion exercise the EKF in
@@ -55,7 +54,6 @@ step-size hint, stepping that instance every Nth base step with dt = N × base:
 |---|---|---|
 | plant, autopilot | — (base) | 100 Hz loop |
 | GPS | 0.1 s | one NAV-PVT per step of its own = **10 Hz**, as in the trim example |
-| radar altimeter | 1/25 s | 25 Hz — at base rate its `max(1, lround(dt·rate))` framing would clamp to 100 Hz |
 | IMU | — (base) | `lround(0.01 × 100)` = exactly one frame per base step = 100 Hz |
 | BMP390, MMC5983MA | — (base) | whatever ODR the flight computer programs; stepping rate is irrelevant |
 

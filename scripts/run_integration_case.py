@@ -215,7 +215,6 @@ def main() -> int:
         "--imu-csv", str(out / "imu_samples.csv"),
         "--baro-csv", str(out / "baro_samples.csv"),
         "--mag-csv", str(out / "mag_samples.csv"),
-        "--radalt-csv", str(out / "radalt_samples.csv"),
         "--fix-period", str(CASE["gps_period_s"]),
         "--max-wall-s", str(int(args.timeout_s)),
     ]

@@ -7,13 +7,13 @@
 
 .. _f16_autopilot_ecos_cosim:
 
-F-16 Autopilot Closed Loop → Five Sensor FMUs → Flight Software Co-Simulation (``examples/f16_autopilot_ecos``)
+F-16 Autopilot Closed Loop → Four Sensor FMUs → Flight Software Co-Simulation (``examples/f16_autopilot_ecos``)
 ===============================================================================================================
 
 ``examples/f16_autopilot_ecos`` closes the loop the trim flyouts leave open:
 Aetherion's ``F16Plant.fmu`` and ``F16Autopilot.fmu`` co-simulated as a
 100 Hz sampled control loop, flying NASA TM-2015-218675's four closed-loop
-autopilot check-cases — while the five Hemerion sensor FMUs ride the same
+autopilot check-cases — while the four Hemerion sensor FMUs ride the same
 truth with the same wiring as :ref:`f16_trim_ecos_cosim`, consumed by **the
 same** ``f16_flight_computer`` executable, reused unchanged.
 
@@ -62,7 +62,7 @@ The loop, and the delay that cannot be removed
    │  (Aetherion 6-DoF    │                       │  (DML LQR SAS +      │<─ baseChiCmd_deg, latOffset_ft
    │   plant + trim)      │<──────────────────────┤   autopilot)         │   — the host owns the schedule
    │                      │  ctrl.* (4 surfaces)  └──────────────────────┘
-   │                      ├──> the five sensor FMUs, wired as in f16_trim_ecos ──> f16_flight_computer
+   │                      ├──> the four sensor FMUs, wired as in f16_trim_ecos ──> f16_flight_computer
    └──────────────────────┘
 
 Aetherion's standalone 13.x examples evaluate their DML LQR as a
@@ -103,10 +103,6 @@ Nth base step with dt = N × base:
      - 0.1 s
      - one NAV-PVT per step of its own = **10 Hz**, as in the trim example —
        the GPS FMU needed no change
-   * - radar altimeter
-     - 1/25 s
-     - 25 Hz — at base rate its ``max(1, lround(dt·rate))`` framing would
-       clamp to 100 Hz
    * - IMU
      - — (base)
      - exactly one frame per base step = 100 Hz

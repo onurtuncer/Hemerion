@@ -414,7 +414,7 @@ option at a pre-0.13.0 plant and the failure comes from Ecos at
 
 Besides the two example executables this also produces
 ``hemerion_gps_fmu.fmu``, ``hemerion_imu_fmu.fmu`` and
-``hemerion_bmp390_fmu.fmu`` (plus the baro/radalt/mag UDP emitters this
+``hemerion_bmp390_fmu.fmu`` (plus the baro/mag UDP emitters this
 example does not use) under ``build/examples-native/fmus/``. ``generateFMU()``
 (:file:`cmake/generate_fmu.cmake`) builds each simulator against the vendored
 fmu4cpp export layer, generates its ``modelDescription.xml`` from the
@@ -1063,7 +1063,7 @@ The IMU on the same truth bus
 The IMU FMU follows the pattern the GPS FMU established — truth in over FMI,
 sensor-realistic bytes out the side channel — the BMP390 FMU carries it onto
 a register-accurate I2C part, and the same pattern extends to any further
-sensor (magnetometer, radar altimeter): a noise model and an emitter under
+sensor (the magnetometer): a noise model and an emitter under
 ``modules/sensors/include/Hemerion/<sensor>/fmu/``, an on-target parser next
 to the driver code, and a round-trip unit test proving the two stay
 byte-compatible. The wire format is deliberately *not* UBX: the
