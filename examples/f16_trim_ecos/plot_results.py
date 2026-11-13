@@ -529,6 +529,31 @@ def isa_altitude_m(pressure_pa: float) -> float:
     return _ISA_H_TROPO - (_ISA_R * _ISA_T_TROPO / _ISA_G) * math.log(pressure_pa / _ISA_P_TROPO)
 
 
+# The ISA is tabulated in geopotential altitude, and the plant's static pressure
+# (out.P_Pa, which drives the BMP390) is the ISA evaluated at the geopotential
+# altitude of its geometric one. Plant truth (out.alt_m) is geometric. Comparing
+# an ISA-inverted pressure altitude with it directly therefore books
+# H - h = -h^2 / (R + h) as barometer error: -1.47 m at 3052 m, -13.1 m at
+# 9148 m. These two convert between the conventions so that a residual against
+# truth contains the sensor's error and nothing else.
+_ISA_GEOPOTENTIAL_RADIUS_M = 6356766.0
+
+
+def geopotential_m(height_m: float) -> float:
+    """Geometric height -> geopotential altitude, the ISA's argument."""
+    return _ISA_GEOPOTENTIAL_RADIUS_M * height_m / (_ISA_GEOPOTENTIAL_RADIUS_M + height_m)
+
+
+def geometric_m(geopotential_alt_m: float) -> float:
+    """Geopotential altitude -> geometric height, plant truth's convention."""
+    return _ISA_GEOPOTENTIAL_RADIUS_M * geopotential_alt_m / (_ISA_GEOPOTENTIAL_RADIUS_M - geopotential_alt_m)
+
+
+def pressure_altitude_geometric_m(pressure_pa: float) -> float:
+    """ISA pressure altitude, expressed as a geometric height comparable with plant truth."""
+    return geometric_m(isa_altitude_m(pressure_pa))
+
+
 def config_declination_deg(config: dict[str, str]) -> float:
     """The declination the host evaluated, from the run's own .config sidecar.
 
@@ -699,17 +724,19 @@ def plot_altitude_consistency(truth, fixes, baro, gps_gaps, out: Path, prefix: s
         ax.plot(fixes["sim_time_s"], fixes["altitude_m"], linestyle="none", marker=".",
                 markersize=MARKER_GPS, alpha=0.5, color=GPS, label="GPS altitude (decoded UBX)")
     if baro["sim_time_s"]:
-        ax.plot(baro["sim_time_s"], [isa_altitude_m(p) for p in baro["pressure_pa"]],
+        ax.plot(baro["sim_time_s"], [pressure_altitude_geometric_m(p) for p in baro["pressure_pa"]],
                 linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.6, color=BARO,
-                label="pressure altitude (BMP390, ISA inverted)")
+                label="pressure altitude (BMP390, ISA inverted, as geometric height)")
     ax.set_ylabel("altitude [m]")
-    # The title counts the sources that actually produced data. On case 11 that
-    # is three and the figure is a consistency check; on case 12 it is one, and a
-    # title still promising three would be describing the wiring instead of the
-    # flight.
-    surviving = 1 + sum(1 for series in (fixes, baro) if series["sim_time_s"])
-    ax.set_title("Three independent altitudes of the same aircraft" if surviving == 3
-                 else f"Only {surviving} of the three altitude sources produced data on this flight",
+    # The title counts the measured sources that actually produced data; plant
+    # truth is the reference, not a source. On case 11 both do and the figure is
+    # a consistency check; on case 12 only the barometer does, and a title still
+    # promising two would be describing the wiring instead of the flight.
+    sources = (fixes, baro)
+    surviving = sum(1 for series in sources if series["sim_time_s"])
+    ax.set_title("Two independent altitudes of the same aircraft, against plant truth"
+                 if surviving == len(sources)
+                 else f"Only {surviving} of the {len(sources)} altitude sources produced data on this flight",
                  fontsize=10)
     add_headroom(ax, 0.34)
     legend(ax, loc="upper left", framed=True)
@@ -728,7 +755,7 @@ def plot_altitude_consistency(truth, fixes, baro, gps_gaps, out: Path, prefix: s
         any_residual = True
     if baro["sim_time_s"]:
         ax_err.plot(baro["sim_time_s"],
-                    [isa_altitude_m(p) - interpolate(truth["time"], truth["alt_m"], t)
+                    [pressure_altitude_geometric_m(p) - interpolate(truth["time"], truth["alt_m"], t)
                      for t, p in zip(baro["sim_time_s"], baro["pressure_pa"])],
                     linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.6, color=BARO,
                     label="pressure altitude - truth")
@@ -1110,8 +1137,10 @@ def plot_sensor_envelopes(truth, fixes, baro, gps_gaps, fix_epochs, out: Path, p
 
     One figure, three panels, and the whole difference between the two
     check-cases: on case 11 every trace sits clear of its line for 200 s; on
-    case 12 all three are on the wrong side of it from the first epoch, while
-    every part keeps talking. That is the distinction the example
+    case 12 the receiver and the barometer each sit on the wrong side of one
+    of theirs from the first epoch (on Aetherion 0.18.2 the barometer's is the
+    die temperature; pressure holds just above its floor), while every part
+    keeps talking. That is the distinction the example
     is built to make — an envelope violation is not a silent bus.
 
     The GPS panel plots speed and altitude together on purpose. COCOM is an
@@ -1170,7 +1199,7 @@ def plot_sensor_envelopes(truth, fixes, baro, gps_gaps, fix_epochs, out: Path, p
     if baro["sim_time_s"]:
         ax_press.plot(baro["sim_time_s"], baro["pressure_pa"], linestyle="none", marker=".",
                       markersize=MARKER_SENSOR, alpha=0.6, color=BARO, label="BMP390 compensated pressure")
-    ax_press.plot(truth["time"], [isa_pressure_pa(h) for h in truth["alt_m"]], color=TRUTH,
+    ax_press.plot(truth["time"], [isa_pressure_pa(geopotential_m(h)) for h in truth["alt_m"]], color=TRUTH,
                   linewidth=1.2, alpha=0.8, label="ISA pressure at true altitude")
     ax_press.set_ylim(min(BMP390_P_MIN_PA * 0.9, min(baro["pressure_pa"], default=BMP390_P_MIN_PA) * 0.95),
                       max(baro["pressure_pa"], default=BMP390_P_MAX_PA) * 1.08)
