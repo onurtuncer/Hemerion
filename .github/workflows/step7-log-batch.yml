@@ -193,7 +193,7 @@ jobs:
       # so a build that succeeds is kept even when the case after it fails.
       - name: Restore the pinned Aetherion build
         id: aetherion-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: aetherion-install
           key: aetherion-${{ runner.os }}-${{ steps.pin.outputs.commit }}-recipe-${{ env.AETHERION_RECIPE }}
@@ -208,7 +208,7 @@ jobs:
 
       - name: Restore the vcpkg binary cache
         if: steps.aetherion-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
@@ -251,7 +251,7 @@ jobs:
 
       - name: Save the vcpkg binary cache
         if: steps.aetherion-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/.vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
@@ -259,7 +259,7 @@ jobs:
 
       - name: Save the pinned Aetherion build
         if: steps.aetherion-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: aetherion-install
           key: ${{ steps.aetherion-cache.outputs.cache-primary-key }}
@@ -305,7 +305,7 @@ jobs:
 
       # Built by the plan job (or by integration.yml, which shares the entry); never rebuilt per seed.
       - name: Restore the pinned Aetherion build
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: aetherion-install
           key: ${{ needs.plan.outputs.cache_key }}
