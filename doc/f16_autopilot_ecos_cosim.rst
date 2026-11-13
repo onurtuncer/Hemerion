@@ -331,7 +331,7 @@ looking complete.
 
 .. figure:: _static/f16_autopilot_ecos/sensor_cadence.png
    :width: 100%
-   :alt: Five stacked panels of sample interval against time — GPS flat at 100 ms, radar altimeter at 40 ms, IMU at 10 ms, and the two I2C parts scattered across bands at multiples of 10 ms
+   :alt: Four stacked panels of sample interval against time — GPS flat at 100 ms, IMU at 10 ms, and the two I2C parts scattered between 0 and about 500 ms
 
    The two-rate scheme, measured rather than asserted. The plant and the
    autopilot run at 100 Hz because the control loop needs it; the sensors do
@@ -340,18 +340,19 @@ looking complete.
    check-case 13.3's 240 s window:
 
    * GPS — 2401 samples, mean interval **100.00 ms**. Exactly 10 Hz.
-   * radar altimeter — 6001 samples, **40.00 ms**. Exactly 25 Hz.
-   * IMU — 24000 samples, **10.00 ms**. Exactly one frame per base step.
+   * IMU — 23998 samples, **10.00 ms**. Exactly one frame per base step.
 
-   The three hinted rows are flat lines, which is the result; their axes are
+   The two hinted rows are flat lines, which is the result; their axes are
    pinned to ±20 % of the mean, because an auto-scaled constant is a picture of
    numerical dust.
 
    The two I2C rows are the interesting ones. They carry no hint at all — a
    BMP390 data register is not a FIFO, so their rate is whatever the flight
    computer's poll loop achieves — and their intervals are a scatter rather
-   than a line, averaging 24.73 ms and 25.84 ms. The scatter has structure: it
-   lands on bands at multiples of the 10 ms base step, because a polled part
-   only has something new to say once the master has stepped it. That is the
-   whole reason the trim example's figures come from paced runs, and the
-   reason these do not need to be.
+   than a line. On the run drawn here (regenerated 2026-11-13 against
+   Aetherion 0.18.2, on a machine also running a build) they average
+   114.58 ms and 118.13 ms; the 2026-09 run this figure replaced, on an idle
+   machine, averaged 24.73 ms and 25.84 ms and landed on bands at multiples of
+   the 10 ms base step, because a polled part only has something new to say
+   once the master has stepped it. That load dependence is the whole reason
+   the trim example's figures come from paced runs.
