@@ -52,3 +52,11 @@ if(HEMERION_AETHERION_LOG_CONTRACT AND Python3_Interpreter_FOUND)
 else()
   message(STATUS "Aetherion LogContract.h not found (set AETHERION_ROOT) -- examples.log_contract_upstream not added")
 endif()
+
+# The step-7 table's reader (scripts/aggregate_replay_summaries.py) against summaries shaped like the pinned
+# EKFReplay's, and the 3D-fix threshold scripts/run_integration_case.py derives from the run length. Needs Python only.
+if(Python3_Interpreter_FOUND)
+  add_test(NAME scripts.aggregate_replay_summaries
+           COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_aggregate_replay_summaries.py")
+  set_tests_properties(scripts.aggregate_replay_summaries PROPERTIES LABELS "unit")
+endif()

@@ -1,0 +1,460 @@
+name: Step 7 log batch (case 11, turbulence, over seeds)
+
+# Logs for Aetherion's step 7 (tuning and consistency over seeds), generated on
+# Linux: on Windows the polled BMP390 is starved and non-reproducible and
+# host_time_s drifts, so tuning logs come from here (maintainer, 2026-11-13).
+#
+# NESC check-case 11 with Dryden turbulence, one job per seed, at the
+# sensor-fusion baseline, which is fixed here and not an input: IMU 100 Hz,
+# GNSS 10 Hz (--gps-period 0.1), --step 0.01, --rtf 1, against the Aetherion
+# commit pinned in cmake/aetherion_plant_version.cmake. Each seed is flown by
+# scripts/run_integration_case.py -- the integration gate's own runner, so
+# the log-contract check (check_log_contract.py --results, against the
+# installed LogContract.h), the GNSS-velocity check and EKFReplay
+# nav-baro-gnss16 are the gate's -- and uploaded as its own artifact whatever
+# the outcome: the logs are the product, a failed replay does not drop them.
+#
+# Seed convention: matrix seed N is f16_trim_cosim --seed N (each sensor's
+# seed is hashed from N per part) and --turbulence-seed N, so one integer
+# names the whole realisation. Both are in the f16_truth.config sidecar
+# (seed=, turbulence_seed=) and in manifest.json (case.seed,
+# case.turbulence_seed, and the cosim command line).
+#
+# The last job reads every seed's EKFReplay summary into one table
+# (scripts/aggregate_replay_summaries.py): job summary and a CSV artifact.
+#
+# Dispatch (the branch must be on GitHub):
+#   gh workflow run step7-log-batch.yml --ref <branch> \
+#     -f seeds=1-20 -f duration_s=200 -f turbulence=8 -f max_parallel=10
+
+on:
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: "Seeds: a range and/or a list, e.g. 1-20 or 1,3,5-8 (positive, at most 256)"
+        type: string
+        default: "1-20"
+      duration_s:
+        description: "Simulated seconds per seed (1 to 1800; at --rtf 1 this is also the wall time)"
+        type: string
+        default: "200"
+      turbulence:
+        description: "MIL-F-8785C W20 [m/s] (--turbulence); 8 as in TODO-sensor-fusion.md's 2026-10-19 table"
+        type: string
+        default: "8"
+      max_parallel:
+        description: "Seed jobs at once (1 to 20)"
+        type: string
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Inputs, the pin, and the pinned Aetherion build (once, into the cache) ──
+  plan:
+    name: plan and pinned Aetherion
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      AETHERION_RECIPE: 1
+    outputs:
+      seeds: ${{ steps.inputs.outputs.seeds }}
+      duration_s: ${{ steps.inputs.outputs.duration_s }}
+      turbulence: ${{ steps.inputs.outputs.turbulence }}
+      max_parallel: ${{ steps.inputs.outputs.max_parallel }}
+      commit: ${{ steps.pin.outputs.commit }}
+      version: ${{ steps.pin.outputs.version }}
+      cache_key: ${{ steps.aetherion-cache.outputs.cache-primary-key }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: hemerion
+
+      - name: Check the inputs and expand the seeds
+        id: inputs
+        env:
+          IN_SEEDS: ${{ inputs.seeds }}
+          IN_DURATION: ${{ inputs.duration_s }}
+          IN_TURBULENCE: ${{ inputs.turbulence }}
+          IN_MAX_PARALLEL: ${{ inputs.max_parallel }}
+        run: |
+          python3 - <<'EOF'
+          import json, math, os, re, sys
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+          seeds = []
+          for item in os.environ["IN_SEEDS"].replace(" ", "").split(","):
+              match = re.fullmatch(r"(\d+)(?:-(\d+))?", item)
+              if not match:
+                  fail(f"seeds: cannot read {item!r}; give e.g. 1-20 or 1,3,5-8")
+              first, last = int(match.group(1)), int(match.group(2) or match.group(1))
+              if first < 1 or last < first:
+                  fail(f"seeds: {item!r} is not a rising range of positive seeds (0 means unseeded)")
+              if last >= 2**31 or len(seeds) + last - first >= 256:
+                  fail("seeds: a matrix takes at most 256 seeds, each below 2^31")
+              seeds += range(first, last + 1)
+          if len(set(seeds)) != len(seeds):
+              fail("seeds: a seed is listed twice")
+          if not 1 <= len(seeds) <= 256:
+              fail(f"seeds: {len(seeds)} seeds; a matrix takes 1 to 256")
+          try:
+              duration = float(os.environ["IN_DURATION"])
+              turbulence = float(os.environ["IN_TURBULENCE"])
+              max_parallel = int(os.environ["IN_MAX_PARALLEL"])
+          except ValueError as error:
+              fail(f"inputs: {error}")
+          if not (math.isfinite(duration) and 1.0 <= duration <= 1800.0):
+              fail("duration_s must lie in [1, 1800]")
+          if not (math.isfinite(turbulence) and 0.0 <= turbulence <= 30.0):
+              fail("turbulence must lie in [0, 30] m/s")
+          if not 1 <= max_parallel <= 20:
+              fail("max_parallel must lie in [1, 20]")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"seeds={json.dumps(seeds)}\n")
+              out.write(f"duration_s={duration:g}\n")
+              out.write(f"turbulence={turbulence:g}\n")
+              out.write(f"max_parallel={max_parallel}\n")
+          print(f"{len(seeds)} seeds {seeds}, {duration:g} s, W20 {turbulence:g} m/s, {max_parallel} at once")
+          EOF
+
+      # ── From here to "Show the Aetherion build": integration.yml's recipe ──
+      # Duplicated, not factored out, so integration.yml's gate is untouched.
+      # Both workflows build into one cache entry (same key, by commit and
+      # AETHERION_RECIPE), so the recipe must be the same in both: the next
+      # step compares them and fails on any difference. Change both together.
+      - name: Read the Aetherion pin
+        id: pin
+        run: |
+          f=hemerion/cmake/aetherion_plant_version.cmake
+          commit=$(sed -n 's/^set(HEMERION_AETHERION_PIN_COMMIT \([0-9a-f]\{40\}\))$/\1/p' "$f")
+          version=$(sed -n 's/^set(HEMERION_AETHERION_PIN_VERSION \([0-9.]*\))$/\1/p' "$f")
+          if [ -z "$commit" ] || [ -z "$version" ]; then
+            echo "::error file=$f::cannot read HEMERION_AETHERION_PIN_COMMIT / _VERSION"
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Aetherion pin: $version at $commit"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          # libtbb-dev: Ecos links -ltbb on Linux (doc/rocket_gps_ecos_cosim.rst lists the same packages).
+          # python3-yaml: the recipe comparison below.
+          sudo apt-get install -y g++-13 g++-14 ninja-build unzip libtbb-dev python3-yaml
+
+      - name: Check the Aetherion recipe matches integration.yml
+        run: |
+          python3 - <<'EOF'
+          import sys
+          import yaml
+
+          SHARED = ["Read the Aetherion pin", "Restore the pinned Aetherion build", "Check out Aetherion at the pin",
+                    "Restore the vcpkg binary cache", "Build and install Aetherion", "Save the vcpkg binary cache",
+                    "Save the pinned Aetherion build", "Show the Aetherion build"]
+
+          def job(path, name):
+              with open(path, encoding="utf-8") as f:
+                  return yaml.safe_load(f)["jobs"][name]
+
+          def steps(j):
+              return {step.get("name"): step for step in j["steps"] if step.get("name") in SHARED}
+
+          gate = job("hemerion/.github/workflows/integration.yml", "case11")
+          here = job("hemerion/.github/workflows/step7-log-batch.yml", "plan")
+          problems = []
+          if gate.get("env", {}).get("AETHERION_RECIPE") != here.get("env", {}).get("AETHERION_RECIPE"):
+              problems.append("AETHERION_RECIPE differs")
+          ours, theirs = steps(here), steps(gate)
+          for name in SHARED:
+              if name not in theirs or name not in ours:
+                  problems.append(f"step {name!r} missing from {'integration.yml' if name not in theirs else 'here'}")
+              elif ours[name] != theirs[name]:
+                  problems.append(f"step {name!r} differs")
+          for problem in problems:
+              print(f"::error file=.github/workflows/step7-log-batch.yml::{problem}: keep the Aetherion recipe "
+                    "identical to integration.yml's, which shares its cache entry")
+          sys.exit(1 if problems else 0)
+          EOF
+
+      # ── Aetherion at the pinned commit ──────────────────────────────────────
+      # Cached by commit and AETHERION_RECIPE: bump the recipe number whenever
+      # the "Build and install Aetherion" step changes, so the pin or the recipe
+      # rebuilds it and nothing else does (an apt package for Hemerion's side
+      # must not cost an Aetherion build). Restored and saved as separate steps,
+      # so a build that succeeds is kept even when the case after it fails.
+      - name: Restore the pinned Aetherion build
+        id: aetherion-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: aetherion-install
+          key: aetherion-${{ runner.os }}-${{ steps.pin.outputs.commit }}-recipe-${{ env.AETHERION_RECIPE }}
+
+      - name: Check out Aetherion at the pin
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: onurtuncer/Aetherion
+          ref: ${{ steps.pin.outputs.commit }}
+          path: aetherion
+
+      - name: Restore the vcpkg binary cache
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
+
+      # Aetherion's own Linux release recipe (its gcc-release preset, gcc-13),
+      # with the FMUs and install rules of the baseline build, plus the
+      # simulation layer and examples EKFReplay needs. Only the targets the
+      # install and the replay use are built.
+      - name: Build and install Aetherion
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        working-directory: aetherion
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          test "$(git rev-parse HEAD)" = "${{ steps.pin.outputs.commit }}"
+          # The target is EkfReplay at the pinned commit; Hemerion calls it EKFReplay, and so will Aetherion.
+          replay=EkfReplay
+          if grep -qs 'add_executable(EKFReplay' src/Examples/*/CMakeLists.txt; then replay=EKFReplay; fi
+          cmake --preset=gcc-release -B build/pinned \
+            -DAETHERION_BUILD_TESTS=OFF -DAETHERION_BUILD_FMUS=ON -DAETHERION_INSTALL=ON \
+            -DAETHERION_BUILD_SIMULATION=ON -DAETHERION_BUILD_EXAMPLES=ON \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/aetherion-install"
+          cmake --build build/pinned --target \
+            Aetherion aetherion_fmu4cpp_base aetherion_fmu4cpp_fmi2 aetherion_fmu4cpp_fmi3 descriptionGenerator \
+            F16Plant_fmi2 F16Autopilot_fmi2 TwoStageRocket_fmi2 "$replay"
+          cmake --install build/pinned
+          install -m 755 "$(find build/pinned -type f -name "$replay" -perm -u+x | head -n 1)" \
+            "$GITHUB_WORKSPACE/aetherion-install/bin/EKFReplay"
+          # Names the commit, so Hemerion's configure can say whether this is the pinned build.
+          {
+            echo "Aetherion build for Hemerion's integration gate"
+            echo "Source        onurtuncer/Aetherion @ $(git rev-parse HEAD) (v${{ steps.pin.outputs.version }})"
+            echo "Configure     --preset=gcc-release, FMUS/INSTALL/SIMULATION/EXAMPLES ON, TESTS OFF"
+            echo "Toolchain     $(g++-13 --version | head -n 1); $(cmake --version | head -n 1)"
+            echo "Replay        $replay, installed as bin/EKFReplay"
+          } > "$GITHUB_WORKSPACE/aetherion-install/BUILDINFO.txt"
+
+      - name: Save the vcpkg binary cache
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('aetherion/vcpkg.json') }}
+        continue-on-error: true  # already saved by an earlier run with the same manifest
+
+      - name: Save the pinned Aetherion build
+        if: steps.aetherion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: aetherion-install
+          key: ${{ steps.aetherion-cache.outputs.cache-primary-key }}
+
+      - name: Show the Aetherion build
+        run: |
+          cat aetherion-install/BUILDINFO.txt
+          ls -l aetherion-install/share/Aetherion/fmu aetherion-install/bin
+          grep -q "${{ steps.pin.outputs.commit }}" aetherion-install/BUILDINFO.txt
+      # ── End of integration.yml's recipe ─────────────────────────────────────
+
+  # ── One job per seed: build, fly, check, replay, upload ─────────────────────
+  fly:
+    name: case 11 seed ${{ matrix.seed }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    # 200 s flies in about 6 min (build 1 min, flight at --rtf 1 = wall time); 1800 s, the cap, in about 36.
+    # Each process is capped at 1.5 x duration + 300 s (50 min at the cap), inside the job's limit, so a hung
+    # run is stopped by the runner script and its logs are still uploaded.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
+      matrix:
+        seed: ${{ fromJSON(needs.plan.outputs.seeds) }}
+    env:
+      SEED: ${{ matrix.seed }}
+      DURATION_S: ${{ needs.plan.outputs.duration_s }}
+      TURBULENCE: ${{ needs.plan.outputs.turbulence }}
+      PIN_COMMIT: ${{ needs.plan.outputs.commit }}
+      PIN_VERSION: ${{ needs.plan.outputs.version }}
+      OUT: case11-seed${{ matrix.seed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: hemerion
+          submodules: recursive
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 ninja-build unzip libtbb-dev
+
+      # Built by the plan job (or by integration.yml, which shares the entry); never rebuilt per seed.
+      - name: Restore the pinned Aetherion build
+        uses: actions/cache/restore@v4
+        with:
+          path: aetherion-install
+          key: ${{ needs.plan.outputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Show the Aetherion build
+        run: |
+          cat aetherion-install/BUILDINFO.txt
+          grep -q "$PIN_COMMIT" aetherion-install/BUILDINFO.txt
+
+      - name: Configure Hemerion examples
+        working-directory: hemerion
+        env:
+          AETHERION_ROOT: ${{ github.workspace }}/aetherion-install
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake --preset=examples-native 2>&1 | tee configure.log
+          # The plant must be the pinned build, not merely above the floor.
+          grep -q "f16_trim_ecos: Aetherion build is the pinned $PIN_COMMIT" configure.log
+
+      - name: Build case 11
+        working-directory: hemerion
+        run: cmake --build build/examples-native --target f16_trim_cosim f16_flight_computer
+
+      - name: Record the environment
+        env:
+          IN_SEEDS: ${{ inputs.seeds }}
+          SEED_LIST: ${{ needs.plan.outputs.seeds }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, platform, subprocess
+
+          def first_line(command):
+              try:
+                  return subprocess.run(command, capture_output=True, text=True).stdout.splitlines()[0]
+              except (OSError, IndexError):
+                  return ""
+
+          cache = {}
+          with open("hemerion/build/examples-native/CMakeCache.txt", encoding="utf-8") as f:
+              for line in f:
+                  key, _, value = line.rstrip("\n").partition("=")
+                  if key.split(":")[0] in ("CMAKE_CXX_COMPILER", "CMAKE_C_COMPILER", "CMAKE_BUILD_TYPE",
+                                           "CMAKE_GENERATOR"):
+                      cache[key.split(":")[0]] = value
+          environment = {
+              "runner_os": os.environ["RUNNER_OS"],
+              "runner_arch": os.environ["RUNNER_ARCH"],
+              "runner_image": f"{os.environ.get('ImageOS', '')} {os.environ.get('ImageVersion', '')}".strip(),
+              "os_release": platform.freedesktop_os_release().get("PRETTY_NAME", ""),
+              "kernel": platform.release(),
+              "cxx": first_line([cache.get("CMAKE_CXX_COMPILER", "g++-14"), "--version"]),
+              "cmake": first_line(["cmake", "--version"]),
+              "cmake_cache": cache,
+              "aetherion_buildinfo": open("aetherion-install/BUILDINFO.txt", encoding="utf-8").read().splitlines(),
+              "aetherion_pin": {"version": os.environ["PIN_VERSION"], "commit": os.environ["PIN_COMMIT"]},
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_url": os.environ["RUN_URL"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "ref": os.environ["GITHUB_REF"],
+              "sha": os.environ["GITHUB_SHA"],
+              "inputs": {"seeds": os.environ["IN_SEEDS"], "duration_s": os.environ["DURATION_S"],
+                         "turbulence": os.environ["TURBULENCE"]},
+              "seeds": json.loads(os.environ["SEED_LIST"]),
+              "seed": int(os.environ["SEED"]),
+              "seed_convention": "f16_trim_cosim --seed N and --turbulence-seed N for matrix seed N",
+              "baseline": "IMU 100 Hz, GNSS 10 Hz (--gps-period 0.1), --step 0.01, --rtf 1 (fixed, not inputs)",
+          }
+          with open("environment.json", "w", encoding="utf-8") as out:
+              json.dump(environment, out, indent=2)
+          print(json.dumps(environment, indent=2))
+          EOF
+
+      # The turbulence seed is left to run_integration_case.py, whose default is the --seed value (the convention
+      # above); turbulence 0 flies calm air and names no turbulence seed.
+      - name: Fly, check the log contract, replay
+        run: |
+          python3 hemerion/scripts/run_integration_case.py \
+            --bin hemerion/build/examples-native/examples/f16_trim_ecos \
+            --ekfreplay aetherion-install/bin/EKFReplay \
+            --aetherion-header aetherion-install/include/Aetherion/Estimation/LogContract.h \
+            --aetherion-commit "$PIN_COMMIT" \
+            --seed "$SEED" --stop "$DURATION_S" --turbulence "$TURBULENCE" \
+            --environment environment.json \
+            --timeout-s "$(python3 -c "import os; print(1.5 * float(os.environ['DURATION_S']) + 300)")" \
+            --out "$OUT"
+
+      - name: Record both commits
+        if: always()
+        run: |
+          mkdir -p "$OUT"
+          {
+            echo "hemerion_commit=$GITHUB_SHA"
+            echo "hemerion_ref=$GITHUB_REF"
+            echo "aetherion_commit=$PIN_COMMIT"
+            echo "aetherion_version=$PIN_VERSION"
+            echo "seed=$SEED"
+          } > "$OUT/commits.txt"
+          cp environment.json "$OUT/environment.json" 2>/dev/null || true
+          cp aetherion-install/BUILDINFO.txt "$OUT/aetherion-BUILDINFO.txt" 2>/dev/null || true
+          cp hemerion/configure.log "$OUT/hemerion-configure.log" 2>/dev/null || true
+          ls -l "$OUT"
+
+      - name: Upload logs, truth, sidecar, replay and manifest
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: step7-case11-seed-${{ matrix.seed }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+
+  # ── One table over every seed that produced a run ───────────────────────────
+  aggregate:
+    name: table over seeds
+    needs: [plan, fly]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: hemerion
+
+      - name: Download every seed's run
+        uses: actions/download-artifact@v8
+        with:
+          pattern: step7-case11-seed-*
+          path: step7-runs
+
+      - name: Aggregate the EKFReplay summaries
+        env:
+          TITLE: >-
+            Step 7 batch: case 11, W20 ${{ needs.plan.outputs.turbulence }} m/s,
+            ${{ needs.plan.outputs.duration_s }} s, Aetherion ${{ needs.plan.outputs.version }}
+            (${{ needs.plan.outputs.commit }}), Linux
+        run: |
+          mkdir -p step7-summary
+          python3 hemerion/scripts/aggregate_replay_summaries.py step7-runs \
+            --title "$TITLE" \
+            --csv step7-summary/step7_case11_summary.csv \
+            --markdown step7-summary/step7_case11_summary.md
+          cat step7-summary/step7_case11_summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the table
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: step7-case11-summary
+          path: step7-summary
+          if-no-files-found: error
