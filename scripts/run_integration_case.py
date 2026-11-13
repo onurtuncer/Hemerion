@@ -25,10 +25,17 @@ GNSS 10 Hz, 0.01 s communication step -- for 20 simulated seconds with seed
      must exit 0.
   5. Its summary, states and updates must be finite throughout.
 
+The gate runs with the defaults. --seed, --stop and --turbulence (with
+--turbulence-seed) fly the same case over other realisations, as
+.github/workflows/step7-log-batch.yml does for Aetherion's step 7; the rates
+and the step are not options, so every run stays at the baseline. Without
+--turbulence the co-simulation's command line is the gate's, unchanged.
+
 Everything a reader needs to reproduce or judge the run lands in --out:
 the logs, EKFReplay_summary.txt, EKFReplay_states.csv, EKFReplay_updates.csv,
 the two processes' console logs, and manifest.json with both repositories'
-commits, every command line and the outcome of each check. Exit status 0
+commits, every command line, the host, anything --environment adds, and the
+outcome of each check. Exit status 0
 when every check passes, 1 otherwise, with each failure named.
 
     python scripts/run_integration_case.py \\
@@ -44,6 +51,7 @@ import csv
 import json
 import math
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -55,7 +63,9 @@ PIN_FILE = REPO / "cmake" / "aetherion_plant_version.cmake"
 EXE = ".exe" if os.name == "nt" else ""
 
 # The case. Rates are the sensor-fusion baseline (TODO-sensor-fusion.md, step 4):
-# one IMU sample per 0.01 s step, a 10 Hz receiver whatever the step.
+# one IMU sample per 0.01 s step, a 10 Hz receiver whatever the step. seed,
+# stop_s and the turbulence keys are the gate's values and can be overridden
+# from the command line; the rest cannot.
 CASE = {
     "case": "11",
     "seed": 11,
@@ -65,12 +75,18 @@ CASE = {
     "imu_rate_hz": 100.0,
     "rtf": 1.0,
     "replay_config": "nav-baro-gnss16",
+    "turbulence_w20_mps": 0.0,
+    "turbulence_seed": None,
 }
 
 # 20 s at 10 Hz is 200 epochs; case 11 keeps a fix for all of them. Fewer than
-# this many 3D fixes means the receiver or the link broke, not that the filter
-# had little to work with.
-MIN_3D_FIXES = 150
+# three quarters of the epochs as 3D fixes (150 of the gate's 200) means the
+# receiver or the link broke, not that the filter had little to work with.
+MIN_3D_FIX_FRACTION = 0.75
+
+
+def min_3d_fixes(case: dict) -> int:
+    return int(MIN_3D_FIX_FRACTION * round(case["stop_s"] / case["gps_period_s"]))
 
 GNSS_VELOCITY = ["vel_north_mps", "vel_east_mps", "vel_down_mps", "speed_accuracy_mps"]
 
@@ -138,7 +154,7 @@ def check_finite_csv(path: Path, failures: list[str]) -> int:
     return rows
 
 
-def check_gnss_velocity(gps_csv: Path, failures: list[str]) -> int:
+def check_gnss_velocity(gps_csv: Path, failures: list[str], min_fixes: int) -> int:
     """Every 3D fix carries finite NED velocity and a positive speed accuracy. Returns the 3D fix count."""
     if not gps_csv.exists():
         failures.append(f"{gps_csv.name}: missing")
@@ -163,8 +179,8 @@ def check_gnss_velocity(gps_csv: Path, failures: list[str]) -> int:
             if float(row["speed_accuracy_mps"]) <= 0.0:
                 failures.append(f"{gps_csv.name}:{line}: 3D fix with speed_accuracy_mps <= 0")
                 return fixes
-    if fixes < MIN_3D_FIXES:
-        failures.append(f"{gps_csv.name}: {fixes} 3D fixes, expected at least {MIN_3D_FIXES}")
+    if fixes < min_fixes:
+        failures.append(f"{gps_csv.name}: {fixes} 3D fixes, expected at least {min_fixes}")
     return fixes
 
 
@@ -183,8 +199,33 @@ def main() -> int:
     parser.add_argument("--aetherion-header", type=Path, help="installed Aetherion/Estimation/LogContract.h")
     parser.add_argument("--aetherion-commit", default="",
                         help="the Aetherion commit EKFReplay and the plant FMU were built from")
-    parser.add_argument("--timeout-s", type=float, default=600.0, help="wall-clock cap per process")
+    parser.add_argument("--seed", type=int, default=CASE["seed"],
+                        help=f"sensor seed, --seed of f16_trim_cosim (default {CASE['seed']}, the gate's)")
+    parser.add_argument("--stop", type=float, default=CASE["stop_s"],
+                        help=f"simulated seconds (default {CASE['stop_s']:g}, the gate's)")
+    parser.add_argument("--turbulence", type=float, default=CASE["turbulence_w20_mps"],
+                        help="MIL-F-8785C W20 [m/s], --turbulence of f16_trim_cosim (default 0: calm, the gate's)")
+    parser.add_argument("--turbulence-seed", type=int,
+                        help="turbulence realisation (default: the --seed value; needs --turbulence)")
+    parser.add_argument("--environment", type=Path,
+                        help="JSON object recorded as the manifest's 'environment' (runner, compiler, CI run)")
+    parser.add_argument("--timeout-s", type=float,
+                        help="wall-clock cap per process (default 600 s, or 3 x --stop + 300 s if longer)")
     args = parser.parse_args()
+    if args.seed <= 0:
+        parser.error("--seed must be positive: 0 makes every sensor a fresh, unreproducible draw")
+    if args.stop <= 0.0 or args.turbulence < 0.0:
+        parser.error("--stop must be positive and --turbulence not negative")
+    if args.turbulence_seed is not None and args.turbulence == 0.0:
+        parser.error("--turbulence-seed without --turbulence would name a realisation nobody flies")
+    if args.timeout_s is None:
+        args.timeout_s = max(600.0, 3.0 * args.stop + 300.0)
+    case = dict(CASE, seed=args.seed, stop_s=args.stop)
+    if args.turbulence > 0.0:
+        # One integer names a realisation: the turbulence seed is the sensor seed unless given. The sensors' own
+        # seeds are hashed from --seed per part (derived_seed in cosim_host_main.cpp), so they do not coincide.
+        case["turbulence_w20_mps"] = args.turbulence
+        case["turbulence_seed"] = args.turbulence_seed if args.turbulence_seed is not None else args.seed
     # The child processes run in --out, so every path given relative to the caller's directory is resolved first.
     args.bin = args.bin.resolve()
     args.ekfreplay = args.ekfreplay.resolve()
@@ -198,11 +239,14 @@ def main() -> int:
 
     pin = read_pin()
     manifest: dict = {
-        "case": CASE,
+        "case": case,
         "hemerion_commit": os.environ.get("GITHUB_SHA") or git_head(REPO),
         "hemerion_head": git_head(REPO),
         "aetherion_commit": args.aetherion_commit,
         "aetherion_pin": pin,
+        "host": {"platform": platform.platform(), "machine": platform.machine(),
+                 "python": platform.python_version()},
+        "environment": json.loads(args.environment.read_text(encoding="utf-8")) if args.environment else {},
         "commands": {},
         "checks": {},
         "failures": [],
@@ -215,21 +259,22 @@ def main() -> int:
         "--imu-csv", str(out / "imu_samples.csv"),
         "--baro-csv", str(out / "baro_samples.csv"),
         "--mag-csv", str(out / "mag_samples.csv"),
-        "--radalt-csv", str(out / "radalt_samples.csv"),
-        "--fix-period", str(CASE["gps_period_s"]),
+        "--fix-period", str(case["gps_period_s"]),
         "--max-wall-s", str(int(args.timeout_s)),
     ]
     cosim = [
         str(args.bin / f"f16_trim_cosim{EXE}"),
-        "--case", CASE["case"],
-        "--seed", str(CASE["seed"]),
-        "--stop", str(CASE["stop_s"]),
-        "--step", str(CASE["step_s"]),
-        "--gps-period", str(CASE["gps_period_s"]),
-        "--imu-rate", str(CASE["imu_rate_hz"]),
-        "--rtf", str(CASE["rtf"]),
+        "--case", case["case"],
+        "--seed", str(case["seed"]),
+        "--stop", str(case["stop_s"]),
+        "--step", str(case["step_s"]),
+        "--gps-period", str(case["gps_period_s"]),
+        "--imu-rate", str(case["imu_rate_hz"]),
+        "--rtf", str(case["rtf"]),
         "--csv", str(out / "f16_truth.csv"),
     ]
+    if case["turbulence_w20_mps"] > 0.0:
+        cosim += ["--turbulence", str(case["turbulence_w20_mps"]), "--turbulence-seed", str(case["turbulence_seed"])]
     manifest["commands"]["flight_computer"] = flight_computer
     manifest["commands"]["cosim"] = cosim
 
@@ -266,11 +311,11 @@ def main() -> int:
         failures.append("check_log_contract.py failed (log_contract.log)")
 
     # 3. GNSS velocity: values, not only names.
-    manifest["checks"]["gnss_3d_fixes"] = check_gnss_velocity(out / "gps_fixes.csv", failures)
+    manifest["checks"]["gnss_3d_fixes"] = check_gnss_velocity(out / "gps_fixes.csv", failures, min_3d_fixes(case))
 
     # 4. The reference filter over the logs.
     replay = [str(args.ekfreplay), "--logs", str(out), "--truth", str(out / "f16_truth.csv"), "--config",
-              CASE["replay_config"], "--output", str(out / "EKFReplay")]
+              case["replay_config"], "--output", str(out / "EKFReplay")]
     manifest["commands"]["ekfreplay"] = replay
     summary = out / "EKFReplay_summary.txt"
     try:
@@ -304,7 +349,7 @@ def main() -> int:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"integration case {CASE['case']}: all checks passed ({manifest['checks']['gnss_3d_fixes']} 3D fixes, "
+    print(f"integration case {case['case']} seed {case['seed']}: all checks passed ({manifest['checks']['gnss_3d_fixes']} 3D fixes, "
           f"{manifest['checks']['states_rows']} state rows, {manifest['checks']['updates_rows']} updates)")
     return 0
 
