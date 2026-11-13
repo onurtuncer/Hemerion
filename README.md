@@ -47,7 +47,7 @@ to the boundless realm of *Aetherion*.
 ## ✨ Features
 
 - **FreeRTOS task architecture** with deterministic scheduling on STM32
-- **Protocol-accurate sensor stacks** — register-level part models paired with the on-target drivers that read them (BMP390, MMC5983MA, MEMS IMU, u-blox GPS, radar altimeter)
+- **Protocol-accurate sensor stacks** — register-level part models paired with the on-target drivers that read them (BMP390, MMC5983MA, MEMS IMU, u-blox GPS)
 - **Renode SWIL simulation** on a Nucleo-H743ZI2 platform description, with a runtime-loaded I2C bridge that lets emulated firmware talk to a host-side part model
 - **FMI 2.0 *and* 3.0 FMU export** from one set of sources via `generateFMU()` — no hand-written FMI plumbing
 - **Simulated SPI and I2C buses in shared memory**, so the same sensor model serves the host co-simulation and the emulator
@@ -71,7 +71,6 @@ driver — so a wire-protocol change cannot land on only one side.
 | `mag/` | MEMSIC **MMC5983MA** | I2C, register-accurate | SET/RESET offset cancellation; SWIL-tested via `mag_logger` |
 | `imu/` | Generic MEMS IMU | SPI, command byte + auto-increment register map (ADIS16470 / ICM-42688 / BMI088 shape) | Simulator is an SPI peripheral on `sim/spi_shm` |
 | `gps/` | u-blox-class receiver | UBX (`NAV-PVT`) and NMEA over UART/UDP | COCOM-limited; parsers and emitter unit-tested both directions |
-| `radalt/` | Generic radar altimeter | Range + track-status word | Conversion and packet layers only |
 
 See [`doc/sensor_models.rst`](doc/sensor_models.rst) for the model details and
 [`modules/README.md`](modules/README.md) for per-module build status.
@@ -88,7 +87,7 @@ hemerion/
 ├── cmake/                  # Shared find-modules and helper functions
 │
 ├── modules/                # Reusable firmware libraries + FMU wrappers
-│   ├── sensors/            # built  -- baro, mag, imu, gps, radalt (see above)
+│   ├── sensors/            # built  -- baro, mag, imu, gps (see above)
 │   ├── rtos_core/          # built  -- task/queue registries, memory pools
 │   ├── fault/              # built  -- fault registry, watchdog supervisor
 │   ├── power/              # built  -- battery monitor, regulator sequencer

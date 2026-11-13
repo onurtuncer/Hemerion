@@ -64,9 +64,9 @@ which take noiseless truth over FMI, apply a grade-specific error model,
 quantize to register counts, and emit wire-exact traffic on the bus the
 physical part uses, so unmodified firmware parses the bytes it will see in
 flight. Because each error model inverts the on-target conversion routine, a
-round-trip test pins simulator and flight code together. We instantiate five sensors in one embedded
+round-trip test pins simulator and flight code together. We instantiate four sensors in one embedded
 framework, three of them register-accurate (a synthetic MEMS IMU on SPI, a
-Bosch BMP390 and a MEMSIC MMC5983MA on I$^2$C), and exercise four end-to-end against a
+Bosch BMP390 and a MEMSIC MMC5983MA on I$^2$C), and exercise all four end-to-end against a
 verified 6-DoF two-stage-rocket plant. The pattern exposes behaviour a
 value-level FMU cannot: a receiver losing its fix to export-control limits
 31~s after lift-off, a FIFO with sticky overflow semantics, and a magnetometer
@@ -328,14 +328,14 @@ barometer---with a plausible register sensitivity and a talker transport; it
 costs a day to write and exercises the parser and the conversion arithmetic. A
 \emph{part-accurate} model transcribes one datasheet: its register map, its bus
 conventions, its calibration data, and whatever internal state a driver has to
-manage. Two of the five sensors exist at that tier, the Bosch BMP390 and the
+manage. Two of the four sensors exist at that tier, the Bosch BMP390 and the
 MEMSIC MMC5983MA. The SPI IMU sits between the two: it is
 \emph{register-accurate} but \emph{synthetic}, a register map, FIFO and shift
 register in the shape most MEMS inertial parts share, with sensitivities taken
 from a representative part rather than one datasheet transcribed. It exercises
 everything a polled peripheral asks of a driver without claiming to be a
 particular device, and the paper is careful to call it that. The generic
-magnetometer, barometer and radar-altimeter emitters remain, since a scenario
+magnetometer and barometer emitters remain, since a scenario
 that only needs a field measurement should not pay for a register file. The
 interesting claims in this paper come from the register-accurate models, and
 Section~\ref{sec:transport} is about what they buy.
@@ -364,7 +364,7 @@ sequence, including the turn-on biases. Each FMU exposes that seed and every
 $\sigma$ as fixed FMI parameters, and the case study derives a distinct stream
 per part from one run seed, so that the parts are reproducible without being
 correlated with each other. Table~\ref{tab:params} lists the configured error
-parameters for the five models, chosen to represent the reference parts of
+parameters for the four models, chosen to represent the reference parts of
 Table~\ref{tab:sensors}.
 
 Several further terms are implemented and are off by default. On the IMU the
@@ -419,7 +419,6 @@ IMU accel.     & 0.05\,m/s$^2$ & 0.02\,m/s$^2$ & 800\,LSB/g\\
 IMU gyro       & 0.002\,rad/s & 0.001\,rad/s & 16.4\,LSB/($^\circ$/s)\\
 Baro pressure  & 3\,Pa       & 50\,Pa      & 1\,LSB/Pa\\
 Baro temp.     & $0.05^\circ$C & $0.5^\circ$C & 100\,LSB/$^\circ$C\\
-Radar alt.\ range & 0.1\,m   & 0.05\,m     & 100\,LSB/m\\
 Mag.\ (per axis) & 0.2\,\textmu T & 1.0\,\textmu T & 100\,LSB/\textmu T\\
 \midrule
 BMP390 pressure & 3\,Pa & 50\,Pa & 24-bit, compensated\\
@@ -523,7 +522,7 @@ $5{+}n$ & 2 & Fletcher checksum (ck\_a, ck\_b)\\
 \end{tabular}
 \end{center}
 Each sensor uses \emph{distinct} sync bytes (IMU \code{A5 5A}, baro \code{B7
-7B}, radalt \code{C9 9C}, mag \code{D1 1D}, vs.\ UBX's \code{B5 62}), so an
+7B}, mag \code{D1 1D}, vs.\ UBX's \code{B5 62}), so an
 interleaved multi-sensor stream can never desynchronize one parser into
 another's frames. Unknown message ids are checksummed and skipped, not buffered,
 so a stream carrying future message types cannot desync today's parser.
@@ -559,7 +558,7 @@ vehicles.
 \label{sec:transport}
 % ===========================================================================
 A central design choice is that not all sensors are pushed byte streams.
-Table~\ref{tab:sensors} lists the five instantiated models across three
+Table~\ref{tab:sensors} lists the four instantiated models across three
 transport classes. A \emph{talker}---a receiver or sensor that emits frames
 whenever it has them---sends its bytes over UDP, standing in for a UART RX line
 (or Renode's emulated one). The environment supplies each talker's destination
@@ -571,7 +570,7 @@ I$^2$C buses that carry one framed transaction per handshake.
 
 \begin{sidewaystable}
 \centering
-\caption{The five instantiated protocol-accurate sensor models. The upper block
+\caption{The four instantiated protocol-accurate sensor models. The upper block
 is the generic tier of Section~\ref{sec:tiers}, all of it \emph{talkers} on UDP;
 the lower block is the part-accurate tier, all of it \emph{polled}. The generic
 barometer and magnetometer emitters coexist with their part-accurate
@@ -585,7 +584,6 @@ shared-memory bus segment carrying one framed transaction per handshake.}
 Sensor & Reference part & Truth inputs (FMI) & Boundary contents & Sync & Bus & Rate\\
 \midrule
 GPS         & u-blox M9N        & lat, lon, alt, NED velocity  & UBX-NAV-PVT (wire-exact)  & \code{B5 62} & UDP 5762 & 1/step\\
-Radar alt.  & FMCW altimeter    & height above ground          & Hemerion radalt frame     & \code{C9 9C} & UDP 5765 & 25\,Hz\\
 Baro (gen.) & MS5611-class      & altitude MSL                 & Hemerion baro frame       & \code{B7 7B} & UDP 5764 & 50\,Hz\\
 Mag.\ (gen.)& RM3100-class      & body field [\textmu T]       & Hemerion mag frame        & \code{D1 1D} & UDP 5766 & 100\,Hz\\
 \midrule
@@ -1406,9 +1404,7 @@ MMC5983MA's self-test coil applies a field of the model's choosing
 field the coil produces: a driver self-test exercises the real sequence against
 a model that answers, but its absolute threshold cannot be calibrated against
 the FMU. The shared-memory I$^2$C bus carries one peripheral per bus, so multi-drop
-addressing is not exercised (Section~\ref{sec:i2c}). The radar altimeter is the
-one sensor of the five with a model but no case-study run: the scenario is a
-launch to orbit, and there is no ground under it to measure. The consumer is a
+addressing is not exercised (Section~\ref{sec:i2c}). The consumer is a
 free-running host process rather than a stepped participant
 (Section~\ref{sec:sync}): the loop is open, firmware task timing is not
 represented in this tier, every connection carries one communication step of
@@ -1446,7 +1442,7 @@ STM32H743 hardware.
 
 % ===========================================================================
 \section*{Reproducibility}
-The framework, the seven sensor FMUs (five sensors, two of them at both
+The framework, the six sensor FMUs (four sensors, two of them at both
 fidelity tiers), the case study, the Renode software-in-the-loop harnesses and
 the plotting scripts are open source under GPLv3. Each sensor FMU is exported
 for both FMI 2.0 and 3.0 from one source, and every model constructor accepts an

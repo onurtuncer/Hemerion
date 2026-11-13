@@ -1,11 +1,11 @@
-# examples/f16_trim_ecos — F-16 trim flyouts → five sensor FMUs → STM32 flight software, co-simulated with Ecos
+# examples/f16_trim_ecos — F-16 trim flyouts → four sensor FMUs → STM32 flight software, co-simulated with Ecos
 
 NASA TM-2015-218675's two open-loop **trim flyouts**, selected with `--case`:
 
 | `--case` | check-case | condition | what the sensors make of it |
 |---|---|---|---|
 | `11` (default) | subsonic trim flyout | 10 013 ft, 565.685 ft/s TAS (335 KTAS), Mach 0.52 | every stack in band for all 200 s — the cross-sensor reference |
-| `12` | supersonic trim flyout | 30 013 ft, 2000 ft/s TAS, Mach 2.01 | no GPS fix, no radar return, a barometer below its rated floor |
+| `12` | supersonic trim flyout | 30 013 ft, 2000 ft/s TAS, Mach 2.01 | no GPS fix, a barometer below its rated floor |
 
 Both trim the same aircraft over Kitty Hawk, NC on a 45° heading and fly it open-loop for 200 s; the whole
 difference between them is an altitude and an airspeed. The wiring, both executables and the verifier are
@@ -22,29 +22,26 @@ identical across the two — which is the point of flying both.
 │                      │  altitude              ┌──────────────────────┐  I2C transactions │                         │
 │                      ├───────────────────────>│ hemerion_bmp390_fmu  │<─── shared mem ──>│  Mmc5983maDriver + …    │
 │                      │  position + attitude   ┌──────────────────────┐  I2C transactions │                         │
-│                      ├───────────────────────>│ hemerion_mmc5983ma   │<─── shared mem ──>│  RadAltPacketParser +   │
-│                      │  (host-computed)       └──────────────────────┘                   │  convert_raw_to_si      │
-│                      │  altitude as AGL       ┌──────────────────────┐  raw-sample frames│                         │
-│                      ├───────────────────────>│ hemerion_radalt_fmu  ├──────────────────>│  — the same modules/    │
-└──────────────────────┘                        └──────────────────────┘  UDP 5765         │  sensors code the STM32 │
-        │                                                                                  │  H743 firmware runs     │
+│                      ├───────────────────────>│ hemerion_mmc5983ma   │<─── shared mem ──>│  — the same modules/    │
+│                      │  (host-computed)       └──────────────────────┘                   │  sensors code the STM32 │
+└──────────────────────┘                                                                   │  H743 firmware runs     │
+        │                                                                                  │                         │
         └────────────── f16_trim_cosim (Ecos master, fixed-step 10 Hz) ────────────────────┴─────────────────────────┘
 ```
 
 ## Why these check-cases
 
-Case 11 is the only scenario in the NESC set where **all four environment-dependent sensor stacks are valid
-at the same time**; case 12 takes three of them out of band at once, over the same wiring:
+Case 11 is the only scenario in the NESC set where **all three environment-dependent sensor stacks are valid
+at the same time**; case 12 takes two of them out of band at once, over the same wiring:
 
 | stack | case 11 (10 013 ft, 172 m/s) | case 12 (30 013 ft, 610 m/s) | the rocket scenario |
 |---|---|---|---|
 | GPS | clears every envelope limit; **2001 of 2001 epochs carry a fix** | past dynModel 8's 500 m/s from t = 0; **0 of 2001 epochs carry a fix** | loses the fix at t = 31 s |
 | barometer | 10 013 ft is squarely in band | most of the flight below the part's 300 hPa rated floor | leaves the atmosphere |
 | magnetometer | 36° N gives a strong, near-constant field (49.3–49.5 µT) | still in band — the one survivor | field magnitude swings 10% with altitude |
-| radar altimeter | 3052 m AGL is inside the part's 6000 m range | 9148 m: **every return reports no ground** | out of range within seconds of the pad |
 
 That is what makes the case-11 run the **cross-sensor consistency reference** — baro altitude against GPS
-altitude against radar height, magnetic heading against GPS course, all on one trajectory. It is the case the
+altitude, magnetic heading against GPS course, all on one trajectory. It is the case the
 EKF in `modules/gnc` will be judged on. Case 12 is the same EKF's degraded-mode counterpart: the flight where
 fusion has to fall back on the IMU and the magnetometer, because everything else is out of its envelope while
 still talking. See [Case 12: the flight the sensors cannot follow](#case-12-the-flight-the-sensors-cannot-follow).
@@ -66,9 +63,6 @@ the flight computer changes; measured over a full 200 s run:
   9214 m. That is COCOM's AND holding: the cut-off needs 18 000 m *and* 515 m/s, and 9.2 km is half the
   altitude threshold. This is the one flight in the NESC set that tells COCOM's AND apart from an OR — the
   rocket crosses both thresholds within seconds of each other and cannot.
-* **Radar altimeter: 6003 of 6003 returns report no ground.** 9148 m is past the part's 6000 m tracking
-  range. The part keeps reporting — a sensor that is working and has nothing to say — and `valid` is a column
-  in the CSV rather than a filter precisely so this record isn't an empty file.
 * **BMP390: 253 of 286 conversions below the part's 300 hPa rated pressure floor** (minimum 290.9 hPa), with
   the die at **−45.9 °C, below its −40 °C rating** (the FMU uses ambient air as die temperature). The part
   model saturates only at the ADC rails, so the conversions read plausibly — as they do on the real silicon,
@@ -83,14 +77,6 @@ the flight computer changes; measured over a full 200 s run:
 Against Aetherion's standalone `F16SupersonicTrim` (≥ 0.14.1) the run verifies exactly as case 11 does:
 0.491 m constant initial offset (the same five-decimal Kitty Hawk rounding), 0.000 m worst altitude
 difference, 1.4×10⁻⁷ deg worst heading difference — and the NESC sanity bound passes.
-
-## The radar altimeter measures height above *ground*
-
-There is no terrain model. `radalt::h_agl_m` is fed the plant's MSL altitude, correct to within the terrain
-elevation at Kitty Hawk — a few metres of coastal North Carolina. Over mountains this connection would be
-wrong, and it is wired bare rather than through a nominal offset so the assumption is visible in one line.
-On case 12 the same connection feeds it 9148 m, past the part's tracking range, so the approximation never
-matters there — the part is out of range against any plausible terrain.
 
 ## Running
 
@@ -118,8 +104,8 @@ The flight computer takes no case option: it decodes whatever arrives, unchanged
 **Pace it if you care about the I2C parts.** The BMP390 and MMC5983MA are *polled*, and their sample rate is
 the flight computer's loop rate, not the ODR programmed into their registers. Unpaced, the co-simulation
 finishes far faster than wall clock and starves them: 200 s of flight yields about **37 baro conversions**.
-With `./f16_trim_cosim --rtf 1` the same 20 s of flight yields **83**, a ~23× higher rate. The GPS, IMU and
-radar altimeter are unaffected — their data queues in a socket or a FIFO.
+With `./f16_trim_cosim --rtf 1` the same 20 s of flight yields **83**, a ~23× higher rate. The GPS and IMU
+are unaffected — their data queues in a socket or a FIFO.
 
 ## Verifying
 

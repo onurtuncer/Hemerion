@@ -5,13 +5,13 @@
 # ------------------------------------------------------------------------------
 """Plots the f16_trim_ecos co-simulation results for the Sphinx docs.
 
-Reads the six CSVs the example produces (the host's plant-truth log and the
-flight computer's decoded GPS, IMU, barometer, magnetometer and radar-altimeter
-logs), joins them on simulation time, and renders the figures embedded in
+Reads the five CSVs the example produces (the host's plant-truth log and the
+flight computer's decoded GPS, IMU, barometer and magnetometer logs), joins
+them on simulation time, and renders the figures embedded in
 doc/f16_trim_ecos_cosim.rst:
 
     <case>_ground_track.png          the flyout in plan view, truth + decoded fixes
-    <case>_altitude_consistency.png  four independent altitudes, and their residuals
+    <case>_altitude_consistency.png  three independent altitudes, and their residuals
     <case>_heading_consistency.png   truth yaw vs GPS course vs magnetic heading
     <case>_imu_specific_force.png    body specific force, truth + decoded counts
     <case>_imu_body_rates.png        body rates, against the gyroscope's resolution
@@ -24,7 +24,7 @@ the truth log, so a case-11 and a case-12 run write different files into the
 same directory rather than overwriting each other. That prefix is not
 decoration: the two cases produce figures identical in *form* and opposite in
 *content* — on case 11 every stack sits inside its envelope for 200 s, on case
-12 three of them are outside from the first epoch — and a PNG separated from
+12 two of them are outside from the first epoch — and a PNG separated from
 its caption has nothing else to tell you which run it came from. Every figure
 is additionally stamped at the foot with the check-case, the flight condition
 and the receiver configuration.
@@ -32,20 +32,19 @@ and the receiver configuration.
 Usage (from the co-simulation working directory, after a run):
 
     python plot_results.py [--truth results/f16_truth.csv] [--fixes ...]
-                           [--imu ...] [--baro ...] [--mag ...] [--radalt ...]
+                           [--imu ...] [--baro ...] [--mag ...]
                            [--reference <NESC csv>]... [--out plots/]
 
 **Pace the run.** The BMP390 and MMC5983MA are polled at the flight computer's
 loop rate, not their programmed ODR, so an unpaced 200 s flight yields about 37
 barometer conversions — enough to plot, not enough to read a trace against GPS
-and radar altimetry. ``f16_trim_cosim --rtf 1`` gives roughly 23x that. The
-altitude- and heading-consistency figures are the ones that suffer; the GPS,
-IMU and radar-altimeter figures are unaffected, since their data queues in a
-socket or a FIFO.
+altitude. ``f16_trim_cosim --rtf 1`` gives roughly 23x that. The altitude- and
+heading-consistency figures are the ones that suffer; the GPS and IMU figures
+are unaffected, since their data queues in a socket or a FIFO.
 
 Only matplotlib is required. The truth CSV is written by the host's
 ``TruthLogger`` in Ecos ``csv_writer`` format (", "-separated, "name[TYPE]"
-headers); the five sensor CSVs are written by ``f16_flight_computer``; the
+headers); the four sensor CSVs are written by ``f16_flight_computer``; the
 optional NESC references are the published check-case files, in feet and
 degrees.
 """
@@ -78,11 +77,10 @@ OUTAGE = "#eceae5"
 # Threshold and rating lines are annotation, not data: warm enough to read
 # against the categorical colors without competing with them.
 LIMIT = "#b4632a"
-# The third and fourth sensor series on the consistency figures. Four
-# independent measurements of one quantity is the whole point of those plots,
-# so they need four distinguishable inks rather than two plus reuse.
+# The third sensor series on the consistency figures. Independent
+# measurements of one quantity is the whole point of those plots, so each
+# needs its own ink rather than reuse.
 BARO = "#7b5bd6"
-RADALT = "#c2185b"
 
 # A quiet card behind an annotation that has to sit inside a dense cloud of
 # sample markers, where plain text on the samples is unreadable.
@@ -106,9 +104,6 @@ EARTH_RADIUS_M = 6_378_137.0
 # Part limits. Each is the bound the corresponding figure draws, and each is
 # the reason one of the two check-cases exists.
 # ---------------------------------------------------------------------------
-# RadAltModel's maximum tracking range: beyond this the part reports a frame
-# with no return rather than falling silent.
-RADALT_MAX_RANGE_M = 6000.0
 # BMP390 rated operating envelope (Bosch datasheet, and BaroNoiseModel's
 # out-of-rating counters).
 BMP390_P_MIN_PA = 30_000.0
@@ -181,11 +176,11 @@ def read_truth(path: Path) -> dict[str, list[float]]:
     """Reads the host truth log into {short_name: column}.
 
     The header is Ecos ``csv_writer`` format, and the log carries variables
-    from four instances, so the instance prefix is what distinguishes them:
-    ``f16::out.alt_m`` is the plant's own altitude and ``radalt::h_agl_m`` is
-    the height the radar altimeter was handed. Stripping to the last ``::``
-    segment and dropping ``out.`` leaves those distinct (``alt_m`` and
-    ``h_agl_m``) while giving every column a name short enough to index with.
+    from several instances, so the instance prefix is what distinguishes them:
+    ``f16::out.alt_m`` is the plant's own altitude and ``imu::f_x_mps2`` is the
+    specific force the IMU was handed. Stripping to the last ``::`` segment and
+    dropping ``out.`` keeps the names in use distinct while giving every column
+    a name short enough to index with.
     """
     with path.open(newline="") as f:
         rows = list(csv.reader(f))
@@ -203,14 +198,13 @@ def read_truth(path: Path) -> dict[str, list[float]]:
 def read_samples(path: Path) -> dict[str, list[float]]:
     """Reads a flight-computer log, keeping only rows that carry a measurement.
 
-    Two of the five logs record epochs the part reported *nothing usable* for,
-    and they record them deliberately: the GPS keeps emitting NAV-PVT with
-    ``gnssFixOK`` clear when the vehicle leaves the receiver's envelope, and
-    the radar altimeter keeps sending frames with the no-return flag set when
-    the ground is out of range. Those rows carry no position and no range, so
-    plotting them as data would invent measurements the parts never made --
-    but dropping them from the *file* would erase the evidence that the parts
-    were alive and talking, which on check-case 12 is the entire result.
+    The GPS log records epochs the receiver reported *nothing usable* for, and
+    records them deliberately: it keeps emitting NAV-PVT with ``gnssFixOK``
+    clear when the vehicle leaves the receiver's envelope. Those rows carry no
+    position, so plotting them as data would invent measurements the part
+    never made -- but dropping them from the *file* would erase the evidence
+    that the part was alive and talking, which on check-case 12 is the entire
+    result.
     Hence: filtered here, kept there. ``read_gaps`` reads the same rows for
     the shading.
     """
@@ -234,8 +228,6 @@ def read_samples(path: Path) -> dict[str, list[float]]:
     rows = [r for r in rows if all(r.get(k) not in (None, "") for k in fields)]
     if "fix_type" in fields:
         rows = [r for r in rows if float(r["fix_type"]) > 0.0]
-    elif "valid" in fields:
-        rows = [r for r in rows if float(r["valid"]) > 0.0]
     return with_canonical_time({k: [float(r[k]) for r in rows] for k in fields})
 
 
@@ -243,17 +235,15 @@ def read_gaps(path: Path) -> list[tuple[float, float]]:
     """Finds the windows a part spent reporting no usable measurement.
 
     Returned as (start, end) pairs in simulation time, merged across
-    consecutive epochs. Works for either kind of "nothing to say" column --
-    the GPS's ``fix_type`` and the radar altimeter's ``valid`` -- because both
-    log every epoch whether or not it carried data.
+    consecutive epochs. Reads the GPS's ``fix_type``, which is logged for every
+    epoch whether or not it carried data.
     """
     if not path.exists():
         return []
     with path.open(newline="") as f:
         reader = csv.DictReader(f)
         fields = reader.fieldnames or []
-        column = "fix_type" if "fix_type" in fields else ("valid" if "valid" in fields else None)
-        if column is None:
+        if "fix_type" not in fields:
             return []
         rows = list(reader)
     if not rows:
@@ -267,7 +257,7 @@ def read_gaps(path: Path) -> list[tuple[float, float]]:
     start: float | None = None
     previous = times[0]
     for row, t in zip(rows, times):
-        if float(row[column]) <= 0.0:
+        if float(row["fix_type"]) <= 0.0:
             if start is None:
                 start = t
             previous = t
@@ -539,6 +529,31 @@ def isa_altitude_m(pressure_pa: float) -> float:
     return _ISA_H_TROPO - (_ISA_R * _ISA_T_TROPO / _ISA_G) * math.log(pressure_pa / _ISA_P_TROPO)
 
 
+# The ISA is tabulated in geopotential altitude, and the plant's static pressure
+# (out.P_Pa, which drives the BMP390) is the ISA evaluated at the geopotential
+# altitude of its geometric one. Plant truth (out.alt_m) is geometric. Comparing
+# an ISA-inverted pressure altitude with it directly therefore books
+# H - h = -h^2 / (R + h) as barometer error: -1.47 m at 3052 m, -13.1 m at
+# 9148 m. These two convert between the conventions so that a residual against
+# truth contains the sensor's error and nothing else.
+_ISA_GEOPOTENTIAL_RADIUS_M = 6356766.0
+
+
+def geopotential_m(height_m: float) -> float:
+    """Geometric height -> geopotential altitude, the ISA's argument."""
+    return _ISA_GEOPOTENTIAL_RADIUS_M * height_m / (_ISA_GEOPOTENTIAL_RADIUS_M + height_m)
+
+
+def geometric_m(geopotential_alt_m: float) -> float:
+    """Geopotential altitude -> geometric height, plant truth's convention."""
+    return _ISA_GEOPOTENTIAL_RADIUS_M * geopotential_alt_m / (_ISA_GEOPOTENTIAL_RADIUS_M - geopotential_alt_m)
+
+
+def pressure_altitude_geometric_m(pressure_pa: float) -> float:
+    """ISA pressure altitude, expressed as a geometric height comparable with plant truth."""
+    return geometric_m(isa_altitude_m(pressure_pa))
+
+
 def config_declination_deg(config: dict[str, str]) -> float:
     """The declination the host evaluated, from the run's own .config sidecar.
 
@@ -587,8 +602,8 @@ def interpolate(times: list[float], values: list[float], t: float) -> float:
     """Linear interpolation onto an arbitrary time, clamped at both ends.
 
     The truth log is on the 0.1 s communication grid while the sensor logs are
-    on their own -- 100 Hz for the IMU, 25 Hz for the radar altimeter,
-    whatever the flight computer's loop achieved for the two I2C parts -- so
+    on their own -- 100 Hz for the IMU, whatever the flight computer's loop
+    achieved for the two I2C parts -- so
     every residual on these figures needs truth resampled onto a sensor's
     stamps. Nearest-sample would quantise a sub-metre residual against a
     0.1 s grid at 172 m/s, which is 17 m of ground track.
@@ -685,25 +700,21 @@ def plot_ground_track(truth, fixes, gps_gaps, out: Path, prefix: str, caption: s
     return save(fig, out, prefix, "ground_track", caption)
 
 
-def plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
-                              out: Path, prefix: str, caption: str) -> str:
-    """Four independent altitudes of one aircraft, and their disagreement.
+def plot_altitude_consistency(truth, fixes, baro, gps_gaps, out: Path, prefix: str, caption: str) -> str:
+    """Independent altitudes of one aircraft, and their disagreement.
 
-    This is the figure check-case 11 exists for. Barometric altitude, GNSS
-    altitude and radar height are three physically unrelated measurements —
-    a pressure, a set of ranging solutions, and a time of flight to the ground
-    — and a fusion filter that trusts their agreement has to be shown that
-    agreement first, on a flight where all three are valid. The lower panel is
-    the actual content: each stack's residual against plant truth, on one
-    scale, so their very different error characters are comparable. The
+    This is the figure check-case 11 exists for. Barometric altitude and GNSS
+    altitude are physically unrelated measurements — a pressure and a set of
+    ranging solutions — and a fusion filter that trusts their agreement has to
+    be shown that agreement first, on a flight where both are valid. The lower
+    panel is the actual content: each stack's residual against plant truth, on
+    one scale, so their very different error characters are comparable. The
     barometer's offset is bias (the BMP390 model's per-run turn-on pressure
-    offset, read through the ISA), the GPS's is noise, and the radar
-    altimeter's is quantisation.
+    offset, read through the ISA) and the GPS's is noise.
 
     On check-case 12 the same figure draws the opposite result, which is why it
     is not gated on the case: the GPS trace disappears into a full-width no-fix
-    wash, the radar altimeter's does the same past its tracking range, and the
-    barometer runs on below the pressure its part is rated for.
+    wash, and the barometer runs on below the pressure its part is rated for.
     """
     fig, (ax, ax_err) = new_figure(2, height=6.4)
 
@@ -713,20 +724,19 @@ def plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
         ax.plot(fixes["sim_time_s"], fixes["altitude_m"], linestyle="none", marker=".",
                 markersize=MARKER_GPS, alpha=0.5, color=GPS, label="GPS altitude (decoded UBX)")
     if baro["sim_time_s"]:
-        ax.plot(baro["sim_time_s"], [isa_altitude_m(p) for p in baro["pressure_pa"]],
+        ax.plot(baro["sim_time_s"], [pressure_altitude_geometric_m(p) for p in baro["pressure_pa"]],
                 linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.6, color=BARO,
-                label="pressure altitude (BMP390, ISA inverted)")
-    if radalt["sim_time_s"]:
-        ax.plot(radalt["sim_time_s"], radalt["range_m"], linestyle="none", marker=".",
-                markersize=2.0, alpha=0.4, color=RADALT, label="radar height AGL (no terrain model)")
+                label="pressure altitude (BMP390, ISA inverted, as geometric height)")
     ax.set_ylabel("altitude [m]")
-    # The title counts the sources that actually produced data. On case 11 that
-    # is four and the figure is a consistency check; on case 12 it is one, and a
-    # title still promising four would be describing the wiring instead of the
-    # flight.
-    surviving = 1 + sum(1 for series in (fixes, baro, radalt) if series["sim_time_s"])
-    ax.set_title("Four independent altitudes of the same aircraft" if surviving == 4
-                 else f"Only {surviving} of the four altitude sources produced data on this flight",
+    # The title counts the measured sources that actually produced data; plant
+    # truth is the reference, not a source. On case 11 both do and the figure is
+    # a consistency check; on case 12 only the barometer does, and a title still
+    # promising two would be describing the wiring instead of the flight.
+    sources = (fixes, baro)
+    surviving = sum(1 for series in sources if series["sim_time_s"])
+    ax.set_title("Two independent altitudes of the same aircraft, against plant truth"
+                 if surviving == len(sources)
+                 else f"Only {surviving} of the {len(sources)} altitude sources produced data on this flight",
                  fontsize=10)
     add_headroom(ax, 0.34)
     legend(ax, loc="upper left", framed=True)
@@ -745,17 +755,10 @@ def plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
         any_residual = True
     if baro["sim_time_s"]:
         ax_err.plot(baro["sim_time_s"],
-                    [isa_altitude_m(p) - interpolate(truth["time"], truth["alt_m"], t)
+                    [pressure_altitude_geometric_m(p) - interpolate(truth["time"], truth["alt_m"], t)
                      for t, p in zip(baro["sim_time_s"], baro["pressure_pa"])],
                     linestyle="none", marker=".", markersize=MARKER_SENSOR, alpha=0.6, color=BARO,
                     label="pressure altitude - truth")
-        any_residual = True
-    if radalt["sim_time_s"]:
-        ax_err.plot(radalt["sim_time_s"],
-                    [r - interpolate(truth["time"], truth["alt_m"], t)
-                     for t, r in zip(radalt["sim_time_s"], radalt["range_m"])],
-                    linestyle="none", marker=".", markersize=2.0, alpha=0.4, color=RADALT,
-                    label="radar height - truth")
         any_residual = True
     if not any_residual:
         ax_err.annotate("no stack produced a usable altitude on this flight",
@@ -1025,13 +1028,12 @@ def plot_imu_body_rates(truth, imu, out: Path, prefix: str, caption: str) -> str
     return save(fig, out, prefix, "imu_body_rates", caption)
 
 
-def plot_clock_divergence(baro, radalt, imu, config: dict[str, str],
-                          out: Path, prefix: str, caption: str) -> str:
+def plot_clock_divergence(baro, imu, config: dict[str, str], out: Path, prefix: str, caption: str) -> str:
     """Each part's clock against the flight computer's, and its sample jitter.
 
     The top panel is the quantity a filter has to absorb: ``part_time_s`` minus
     ``host_time_s``, which is what the part says minus when the sample actually
-    turned up. Three parts give three straight lines of three different slopes,
+    turned up. Two parts give two straight lines of two different slopes,
     because each drew its own rate error from the one sigma the run configured
     -- so they separate from each other, not merely from the master's clock.
     That separation is the reason the item exists: a filter fusing these streams
@@ -1040,7 +1042,7 @@ def plot_clock_divergence(baro, radalt, imu, config: dict[str, str],
 
     Two cautions the panel is annotated with rather than hiding. The *absolute*
     slope of each line also contains the host's own pacing error against
-    simulation time, which is common to all three parts and cancels in their
+    simulation time, which is common to both parts and cancels in their
     differences -- so the differences are the honest measure of skew, and the
     figure quotes each part's drift relative to the IMU as well as its raw
     slope. And a run that is not paced (``--rtf 1``) has no meaningful host
@@ -1054,7 +1056,7 @@ def plot_clock_divergence(baro, radalt, imu, config: dict[str, str],
     """
     fig, (ax_drift, ax_jitter) = new_figure(2, height=6.6, sharex=False)
 
-    series = [("IMU", imu, TRUTH), ("barometer", baro, BARO), ("radar altimeter", radalt, RADALT)]
+    series = [("IMU", imu, TRUTH), ("barometer", baro, BARO)]
     slopes: dict[str, float] = {}
     for label, data, color in series:
         part = data.get("part_time_s") or []
@@ -1130,14 +1132,15 @@ def plot_clock_divergence(baro, radalt, imu, config: dict[str, str],
     return save(fig, out, prefix, "clock_divergence", caption)
 
 
-def plot_sensor_envelopes(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
-                          fix_epochs, radalt_epochs, out: Path, prefix: str, caption: str) -> str:
+def plot_sensor_envelopes(truth, fixes, baro, gps_gaps, fix_epochs, out: Path, prefix: str, caption: str) -> str:
     """Each environment-dependent stack against the limit that bounds it.
 
-    One figure, four panels, and the whole difference between the two
+    One figure, three panels, and the whole difference between the two
     check-cases: on case 11 every trace sits clear of its line for 200 s; on
-    case 12 three of the four are on the wrong side of it from the first
-    epoch, while every part keeps talking. That is the distinction the example
+    case 12 the receiver and the barometer each sit on the wrong side of one
+    of theirs from the first epoch (on Aetherion 0.18.2 the barometer's is the
+    die temperature; pressure holds just above its floor), while every part
+    keeps talking. That is the distinction the example
     is built to make — an envelope violation is not a silent bus.
 
     The GPS panel plots speed and altitude together on purpose. COCOM is an
@@ -1148,11 +1151,11 @@ def plot_sensor_envelopes(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
     airborne platform model's own 500 m/s bound, which is a different limit
     with a different reason, drawn separately.
     """
-    fig, axes = plt.subplots(4, 1, figsize=(8.4, 11.6), dpi=150, sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(8.4, 8.9), dpi=150, sharex=True)
     fig.patch.set_facecolor(SURFACE)
     for ax in axes:
         style_axis(ax)
-    ax_gps, ax_radalt, ax_press, ax_temp = axes
+    ax_gps, ax_press, ax_temp = axes
 
     # --- GPS ---------------------------------------------------------------
     # Two thresholds 15 m/s apart on a 500 m/s axis cannot carry a label each
@@ -1192,26 +1195,11 @@ def plot_sensor_envelopes(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
                     xy=(0.99, 0.04), xycoords="axes fraction", ha="right", va="bottom",
                     fontsize=7.5, color=INK_2)
 
-    # --- Radar altimeter ---------------------------------------------------
-    shade_gaps(ax_radalt, radalt_gaps, "no ground return")
-    ax_radalt.plot(truth["time"], truth["h_agl_m"], color=TRUTH, linewidth=1.4,
-                   label="height the part was driven with")
-    if radalt["sim_time_s"]:
-        ax_radalt.plot(radalt["sim_time_s"], radalt["range_m"], linestyle="none", marker=".",
-                       markersize=2.0, alpha=0.4, color=RADALT, label="decoded range")
-    ax_radalt.set_ylim(0.0, max(RADALT_MAX_RANGE_M * 1.15, max(truth["h_agl_m"]) * 1.15))
-    limit_line(ax_radalt, RADALT_MAX_RANGE_M, "maximum tracking range, 6000 m")
-    ax_radalt.set_ylabel("height AGL [m]")
-    returns = len(radalt["sim_time_s"])
-    ax_radalt.set_title(f"Radar altimeter: {returns} of {radalt_epochs} returns found the ground",
-                        fontsize=10)
-    legend(ax_radalt, loc="lower left", framed=True)
-
     # --- Barometer ---------------------------------------------------------
     if baro["sim_time_s"]:
         ax_press.plot(baro["sim_time_s"], baro["pressure_pa"], linestyle="none", marker=".",
                       markersize=MARKER_SENSOR, alpha=0.6, color=BARO, label="BMP390 compensated pressure")
-    ax_press.plot(truth["time"], [isa_pressure_pa(h) for h in truth["alt_m"]], color=TRUTH,
+    ax_press.plot(truth["time"], [isa_pressure_pa(geopotential_m(h)) for h in truth["alt_m"]], color=TRUTH,
                   linewidth=1.2, alpha=0.8, label="ISA pressure at true altitude")
     ax_press.set_ylim(min(BMP390_P_MIN_PA * 0.9, min(baro["pressure_pa"], default=BMP390_P_MIN_PA) * 0.95),
                       max(baro["pressure_pa"], default=BMP390_P_MAX_PA) * 1.08)
@@ -1476,7 +1464,6 @@ def main() -> None:
     parser.add_argument("--imu", type=Path, default=Path("results/imu_samples.csv"))
     parser.add_argument("--baro", type=Path, default=Path("results/baro_samples.csv"))
     parser.add_argument("--mag", type=Path, default=Path("results/mag_samples.csv"))
-    parser.add_argument("--radalt", type=Path, default=Path("results/radalt_samples.csv"))
     parser.add_argument("--reference", type=Path, action="append", default=[],
                         help="published NESC check-case CSV; repeatable, draws the participant envelope")
     parser.add_argument("--out", type=Path, default=Path("plots"))
@@ -1493,31 +1480,24 @@ def main() -> None:
     fixes = read_samples(args.fixes) if args.fixes.exists() else empty
     baro = read_samples(args.baro) if args.baro.exists() else empty
     mag = read_samples(args.mag) if args.mag.exists() else empty
-    radalt = read_samples(args.radalt) if args.radalt.exists() else empty
     imu = read_samples(args.imu) if args.imu.exists() else empty
-    for series in (fixes, baro, mag, radalt, imu):
+    for series in (fixes, baro, mag, imu):
         series.setdefault("sim_time_s", [])
 
     gps_gaps = read_gaps(args.fixes)
-    radalt_gaps = read_gaps(args.radalt)
     fix_epochs = count_rows(args.fixes)
-    radalt_epochs = count_rows(args.radalt)
 
     if fix_epochs and not fixes["sim_time_s"]:
         print(f"none of the {fix_epochs} NAV-PVT epochs carried a fix "
               f"(the receiver reported throughout; its envelope refused every solution)")
     elif fix_epochs > len(fixes["sim_time_s"]):
         print(f"{fix_epochs - len(fixes['sim_time_s'])} of {fix_epochs} NAV-PVT epochs carried no fix")
-    if radalt_epochs > len(radalt["sim_time_s"]):
-        print(f"{radalt_epochs - len(radalt['sim_time_s'])} of {radalt_epochs} radar returns found no ground")
 
     written = [
         plot_ground_track(truth, fixes, gps_gaps, args.out, prefix, caption),
-        plot_altitude_consistency(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
-                                  args.out, prefix, caption),
+        plot_altitude_consistency(truth, fixes, baro, gps_gaps, args.out, prefix, caption),
         plot_heading_consistency(truth, fixes, mag, gps_gaps, config, args.out, prefix, caption),
-        plot_sensor_envelopes(truth, fixes, baro, radalt, gps_gaps, radalt_gaps,
-                              fix_epochs, radalt_epochs, args.out, prefix, caption),
+        plot_sensor_envelopes(truth, fixes, baro, gps_gaps, fix_epochs, args.out, prefix, caption),
     ]
     if imu["sim_time_s"]:
         written.append(plot_imu_specific_force(truth, imu, args.out, prefix, caption))
@@ -1528,7 +1508,7 @@ def main() -> None:
     clock_on = (float(config.get("sensor_clock_skew_ppm", "0") or 0.0) != 0.0
                 or float(config.get("sensor_clock_jitter_s", "0") or 0.0) != 0.0)
     if clock_on and imu.get("part_time_s"):
-        written.append(plot_clock_divergence(baro, radalt, imu, config, args.out, prefix, caption))
+        written.append(plot_clock_divergence(baro, imu, config, args.out, prefix, caption))
 
 
     # Fifty fixes is the least an autocorrelation says anything about; a

@@ -16,7 +16,7 @@ one ``--run`` directory per case:
 
 Each run directory is one ``f16_autopilot_cosim`` output: the truth log, its
 ``.config`` sidecar (which carries the commanded values and their step times,
-so a response figure can draw its own cause) and the five decoded-sensor logs
+so a response figure can draw its own cause) and the four decoded-sensor logs
 ``f16_flight_computer`` wrote beside it. ``--nesc-data`` is the root holding
 ``Atmos_13p1_SubsonicAltitudeChangeF16/`` and its three siblings; the
 participant solutions are located from the check-case, so there is no
@@ -58,7 +58,8 @@ SURFACE = "#fcfcfb"
 OUTAGE = "#eceae5"
 LIMIT = "#b4632a"
 BARO = "#7b5bd6"
-RADALT = "#c2185b"
+# The lateral-deviation command's ink on the response figures.
+LATDEV = "#c2185b"
 # The magnetometer needs an ink of its own on the cadence figure, where it sits
 # directly under the barometer and the two would otherwise read as one stack.
 MAG = "#0f7b8a"
@@ -94,10 +95,11 @@ def read_truth(path: Path) -> dict[str, list[float]]:
     """Reads the host truth log into {short_name: column}.
 
     Same Ecos ``csv_writer`` shape as the trim example, and the same reason for
-    stripping to the last ``::`` segment: the log carries variables from four
-    instances, and only the prefix tells ``f16::out.alt_m`` from
-    ``radalt::h_agl_m``. Here it also carries the ``ap::`` loop signals, so
-    ``cmd.altCmd_ft`` and ``ctrl.el_deg`` arrive under their own names.
+    stripping to the last ``::`` segment: the log carries variables from
+    several instances, and the prefix is what tells the plant's ``f16::out.*``
+    from the sensor inputs (``imu::``, ``mag::``). Here it also carries the
+    ``ap::`` loop signals, so ``cmd.altCmd_ft`` and ``ctrl.el_deg`` arrive under
+    their own names.
     """
     with path.open(newline="") as f:
         rows = list(csv.reader(f))
@@ -467,7 +469,7 @@ def plot_hold_quantities(runs: dict[str, dict], out: Path, caption: str) -> str:
     """
     fig, axes = plt.subplots(2, 2, figsize=(11.0, 7.2), dpi=150)
     fig.patch.set_facecolor(SURFACE)
-    colors = {"altitude": TRUTH, "keas": GPS, "heading": BARO, "latdev": RADALT}
+    colors = {"altitude": TRUTH, "keas": GPS, "heading": BARO, "latdev": LATDEV}
 
     for ax, case in zip(axes.flat, sorted(CASES)):
         style_axis(ax)
@@ -561,7 +563,7 @@ def plot_lateral_offset(run: dict, out: Path, caption: str) -> str:
     add_headroom(ax, 0.30)
     legend(ax, loc="upper left")
 
-    ax_fb.plot(truth["time"], truth["cmd.latOffset_ft"], color=RADALT, linewidth=1.5,
+    ax_fb.plot(truth["time"], truth["cmd.latOffset_ft"], color=LATDEV, linewidth=1.5,
                label="cmd.latOffset_ft — what the controller was handed", zorder=3)
     if step is not None:
         value, step_time = step
@@ -596,12 +598,11 @@ def plot_sensor_cadence(run: dict, case: str, out: Path, caption: str) -> str:
     """
     stacks = [
         ("GPS (UBX-NAV-PVT)", run["gps"], GPS, 0.1, "0.1 s hint → 10 Hz"),
-        ("radar altimeter", run["radalt"], RADALT, 1.0 / 25.0, "1/25 s hint → 25 Hz"),
         ("IMU (SPI burst)", run["imu"], TRUTH, 0.01, "base step → 100 Hz"),
         ("BMP390 (I2C poll)", run["baro"], BARO, None, "no hint: the flight computer's loop rate"),
         ("MMC5983MA (I2C poll)", run["mag"], MAG, None, "no hint: the flight computer's loop rate"),
     ]
-    fig, axes = plt.subplots(len(stacks), 1, figsize=(8.6, 9.4), dpi=150, sharex=True)
+    fig, axes = plt.subplots(len(stacks), 1, figsize=(8.6, 7.6), dpi=150, sharex=True)
     fig.patch.set_facecolor(SURFACE)
 
     for ax, (name, samples, color, period, note) in zip(axes, stacks):
@@ -660,7 +661,6 @@ def load_run(directory: Path, nesc_data: Path | None) -> tuple[str, dict] | None
         "imu": read_samples(directory / "imu_samples.csv"),
         "baro": read_samples(directory / "baro_samples.csv"),
         "mag": read_samples(directory / "mag_samples.csv"),
-        "radalt": read_samples(directory / "radalt_samples.csv"),
     }
 
 

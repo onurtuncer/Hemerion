@@ -12,7 +12,7 @@ leaves off at "Then: the EKF itself".
 
 Already built and verified here, so nobody repeats it:
 
-- Five sensor FMUs (GPS, IMU, BMP390, MMC5983MA, radar altimeter) with
+- Four sensor FMUs (GPS, IMU, BMP390, MMC5983MA) with
   correlated GPS error, IMU bias walk, scale factor and misalignment, range
   selection, clock skew and jitter, GPS latency, soft and hard iron, WMM2025.
 - The on-target drivers run unchanged in the host flight computer; every log
@@ -168,11 +168,14 @@ before this change.
       speed/course noise, deriving speed and course from it as a receiver
       does. Better for the filter; changes the receiver Paper 1 documents
       (its parameter table quotes speed 0.1 m/s and course 1.0°).
-- [ ] **Radar altimeter rate at a fine step.** `f16_trim_cosim` steps the
+- [x] **Radar altimeter rate at a fine step.** `f16_trim_cosim` steps the
       radalt FMU every base step with at least one return, so `--step 0.01`
       makes the "25 Hz" part 100 Hz (2000 returns in 20 s). Not in the
       16-state filter; fix it the way `--gps-period` was (a step-size hint
       when 1/rate is a whole number of steps), as the autopilot host does.
+      **Closed 2026-11-13: removed from Hemerion by maintainer decision.**
+      The radar altimeter FMU and its host wiring no longer exist, so there
+      is no rate to fix.
 - [ ] **Paper 1 against v0.18.0.** The rocket now flies the corrected
       dynamics: still inside the NESC envelope at every sample, but stage-2
       ignition 138.38 km (paper 138.52), stage-2 burnout 229.10 km (paper

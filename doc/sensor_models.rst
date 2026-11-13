@@ -10,8 +10,8 @@
 Sensor Models (``modules/sensors``)
 ===================================
 
-``modules/sensors`` ships five *hardware-simulator FMUs* — GPS, IMU,
-barometer, radar altimeter, and magnetometer — each packaged as an FMI
+``modules/sensors`` ships four *hardware-simulator FMUs* — GPS, IMU,
+barometer and magnetometer — each packaged as an FMI
 co-simulation slave. Every one follows the same pattern established by the
 GPS FMU in :ref:`rocket_gps_ecos_cosim`:
 
@@ -37,7 +37,7 @@ GPS FMU in :ref:`rocket_gps_ecos_cosim`:
    │                  │                   │  + packet emitter           │  sensor bus   │  + parser + conv.  │
    └──────────────────┘                   └─────────────────────────────┘               └────────────────────┘
 
-Which bus depends on the part. Four of the five are modelled as *talkers* —
+Which bus depends on the part. Three of the four are modelled as *talkers* —
 a receiver or a sensor that pushes frames down a line whenever it has them —
 and their byte stream goes out over UDP, standing in for a UART RX line (or
 Renode's emulated one). The IMU is not: it is an **SPI peripheral**, and a
@@ -57,7 +57,7 @@ on-target conversion code one directory up.
 
 ---
 
-Overview of the five models
+Overview of the four models
 ---------------------------
 
 .. list-table::
@@ -92,13 +92,6 @@ Overview of the five models
      - ``B7 7B``
      - UDP 5764
      - 50 Hz
-   * - Radar altimeter
-     - small FMCW altimeter
-     - height above ground
-     - Hemerion radalt frame
-     - ``C9 9C``
-     - UDP 5765
-     - 25 Hz
    * - Magnetometer
      - RM3100 / IIS2MDC-class
      - body-frame field [µT]
@@ -107,22 +100,22 @@ Overview of the five models
      - UDP 5766
      - 100 Hz
 
-The four UDP FMUs take their destination from the environment
+The three UDP FMUs take their destination from the environment
 (``HEMERION_<SENSOR>_FMU_UDP_HOST`` / ``HEMERION_<SENSOR>_FMU_UDP_PORT``,
-with ``<SENSOR>`` one of ``GPS``, ``BARO``, ``RADALT``, ``MAG``), defaulting
+with ``<SENSOR>`` one of ``GPS``, ``BARO``, ``MAG``), defaulting
 to ``127.0.0.1`` and the port above; the IMU takes its bus name from
 ``HEMERION_IMU_FMU_SPI_BUS`` the same way. Doing this through the environment
 rather than through FMI String parameters keeps every simulator free of
 String-typed variables, and lets a launch script retarget a stream without
 repackaging the archive.
 
-The four register-count sensors expose a ``sample_rate_hz`` FMI parameter:
+The three register-count sensors expose a ``sample_rate_hz`` FMI parameter:
 each communication step produces ``round(step · rate)`` frames, so the sensor
 rate is decoupled from the co-simulation communication step. The GPS FMU
 instead emits exactly one NAV-PVT frame per communication step, matching a
 receiver's navigation epoch.
 
-None of the five implements the FMI interface itself. Each
+None of the four implements the FMI interface itself. Each
 ``include/Hemerion/<sensor>/fmu/fmu_main.cpp`` derives one class from
 ``fmu4cpp::fmu_base``, registers the variables named above and implements
 ``do_step()``; the vendored fmu4cpp export layer (:file:`vendor/fmu4cpp/`)
@@ -177,7 +170,7 @@ where
   count is 0.061 deg/s and every body rate on the calm F-16 flyout falls
   inside it; at ±250 it is 0.0076 deg/s;
 * :math:`\operatorname{sat}(\cdot)` saturates at the register's full-scale
-  range (int16 for IMU/mag, 24-bit words for baro/radalt) the way real
+  range (int16 for IMU/mag, 24-bit words for baro) the way real
   silicon clips, rather than wrapping.
 
 Setting any :math:`\sigma` to zero disables that term cleanly (the models
@@ -663,7 +656,7 @@ The IMU's SPI interface
 
 An inertial part does not push samples at a flight computer; the flight
 computer goes and gets them. Modelling the IMU as a UDP talker like the other
-four would have exercised the packet parser and nothing else — no register
+three would have exercised the packet parser and nothing else — no register
 map, no FIFO, no chip select, none of the polling sequence firmware actually
 runs. So the IMU simulator is an SPI peripheral, and the pieces split three
 ways along the boundaries a real design has:
@@ -813,77 +806,6 @@ as MS5611-class parts output 24-bit compensated words.
 
 FMI inputs: ``h_m`` (truth altitude above MSL); parameter
 ``sample_rate_hz`` (default 50 Hz).
-
-Radar altimeter model
----------------------
-
-:file: ``modules/sensors/include/Hemerion/radalt/fmu/radalt_noise_model.h``
-
-``RadAltNoiseModel`` approximates a small FMCW radar altimeter:
-centimeter-class resolution (100 LSB/m), decimeter-class noise, a few
-kilometers of tracking range. Its distinguishing feature is the
-**loss-of-track** behavior: beyond the configured maximum tracking range —
-or below zero truth height — the model reports
-``kRadAltStatusNoReturn`` with a *zeroed* range word, exactly as a real
-part loses ground track rather than clipping at full scale. Within range,
-the standard bias + noise chain applies, floored at zero (a radar range is
-never negative) and saturated at the 24-bit range register.
-
-.. list-table:: ``RadAltNoiseConfig`` defaults
-   :header-rows: 1
-   :widths: 40 20 40
-
-   * - Parameter
-     - Default
-     - Meaning
-   * - ``range_noise_m``
-     - 0.1 m
-     - white noise 1-sigma
-   * - ``range_bias_sigma_m``
-     - 0.05 m
-     - turn-on bias 1-sigma
-   * - ``max_range_m``
-     - 6000 m
-     - beyond this the model reports no return
-   * - ``scale``
-     - 100 LSB/m
-     - register sensitivity, must match the driver's ``RadAltScale``
-
-FMI inputs: ``h_agl_m`` (truth height above ground, measured
-*vertically*); parameter ``sample_rate_hz`` (default 25 Hz).
-
-Beam geometry and terrain
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The part measures along a beam fixed to the airframe, not straight down. Over
-flat ground the range it reports is
-
-.. math::
-
-   r = \frac{h}{\cos\phi \, \cos\theta}
-
-for bank :math:`\phi` and pitch :math:`\theta` — always *longer* than the
-height, never shorter, and second order in the tilt, so it is negligible in
-cruise and not negligible in a turn. Banked 15°, a 1000 m height reads
-1035.3 m. Roll and pitch combine through the product of their cosines rather
-than by adding, which is why they are one term and not two.
-
-Past ``beam_half_angle_rad`` the ground leaves the footprint and the part
-reports ``kRadAltStatusNoReturn`` — the same report as out of range, because
-the firmware cannot distinguish the two cases either. A typical installation is
-20–40° (0.35–0.70 rad). The default is **0, which disables the geometry
-entirely** and returns the height as given, exactly as the part did before this
-existed.
-
-Terrain is deliberately *not* here. Slant range and dropout are properties of
-the part given an attitude, so they belong to the model; ground elevation is a
-property of the world, so the host subtracts it before the connection
-(``--terrain``), as it does for the magnetic field and for the same reason. The
-examples model one elevation with no relief, because inventing a height field
-would be inventing data.
-
-FMI inputs gain ``roll_rad`` and ``pitch_rad``; parameter
-``beam_half_angle_deg`` (degrees on the FMI boundary, radians in the model).
 
 Magnetometer model
 ------------------
@@ -1103,7 +1025,7 @@ Which parts have a clock, and why not all of them
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A clock is only worth modelling where something downstream can *read* the
-part's idea of time. Three parts qualify:
+part's idea of time. Two parts qualify:
 
 .. list-table::
    :header-rows: 1
@@ -1115,9 +1037,6 @@ part's idea of time. Three parts qualify:
    * - IMU
      - the sample's frame timestamp
      - Skewed and jittered.
-   * - Radar altimeter
-     - the frame timestamp
-     - Likewise.
    * - BMP390
      - ``SENSORTIME``
      - A counter on the die that the driver reads to learn when a conversion
@@ -1157,8 +1076,8 @@ are:
    * - Column
      - Meaning
    * - ``part_time_s``
-     - When the part says the sample was taken, on its own oscillator. IMU,
-       radar altimeter and barometer logs.
+     - When the part says the sample was taken, on its own oscillator. IMU
+       and barometer logs.
    * - ``host_time_s``
      - When the flight computer drained it, on the flight computer's own
        clock. Every log. Samples arriving in one burst share it, as they share
@@ -1195,7 +1114,7 @@ independent 500 µs jitters predicts. With the clock off the same run reports
 The Hemerion sensor wire protocol
 ---------------------------------
 
-The GPS FMU speaks real UBX; the other four share a minimal binary framing
+The GPS FMU speaks real UBX; the other three share a minimal binary framing
 that deliberately follows the same shape as UBX — sync bytes, message id,
 little-endian length, payload, two-byte Fletcher checksum — so each parser
 mirrors the proven ``UbxParser`` structure:
@@ -1211,11 +1130,11 @@ mirrors the proven ``UbxParser`` structure:
       5+n     2  checksum ck_a, ck_b (UBX-style Fletcher over id + length + payload)
 
 Each sensor uses **distinct sync bytes** (IMU ``A5 5A``, baro ``B7 7B``,
-radalt ``C9 9C``, mag ``D1 1D``, vs. UBX's ``B5 62``), so an interleaved
+mag ``D1 1D``, vs. UBX's ``B5 62``), so an interleaved
 multi-sensor byte stream can never desync one parser into another's frames.
 Payload lengths differ per sensor: 32 bytes for the IMU (6 × int32 counts),
-16 for the barometer (pressure + temperature), 16 for the radar altimeter
-(range + status word), 20 for the magnetometer (3 × int32 counts) — each
+16 for the barometer (pressure + temperature), 20 for the magnetometer
+(3 × int32 counts) — each
 followed by the uint64 sample timestamp in microseconds, carried from the
 *sender's* clock.
 
@@ -1258,10 +1177,7 @@ repeated:
    * - GPS
      - :doc:`api/sensors_gps` — fix types, the NMEA and UBX parsers, and the
        receiver noise and dynamics models.
-   * - Radar altimeter
-     - :doc:`api/sensors_radalt` — sample types, wire protocol, and the
-       signal-level error model.
 
-:doc:`api/sensors` explains the shape all five share, and
+:doc:`api/sensors` explains the shape all four share, and
 :doc:`api/sim` documents the simulated buses the register-accurate parts answer
 on.

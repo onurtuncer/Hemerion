@@ -7,17 +7,17 @@
 
 .. _f16_trim_ecos_cosim:
 
-F-16 Trim Flyouts → Five Sensor FMUs → Flight Software Co-Simulation (``examples/f16_trim_ecos``)
+F-16 Trim Flyouts → Four Sensor FMUs → Flight Software Co-Simulation (``examples/f16_trim_ecos``)
 =================================================================================================
 
 ``examples/f16_trim_ecos`` flies NASA TM-2015-218675's two open-loop **trim
 flyouts** — atmospheric check-cases 11 and 12, selected with ``--case`` —
 through the full sensor complement: Aetherion's ``F16Plant.fmu`` supplies
-truth, **five** Hemerion hardware-simulator FMUs turn it into bus traffic, and
-one flight-computer process consumes all five buses with the unmodified
+truth, **four** Hemerion hardware-simulator FMUs turn it into bus traffic, and
+one flight-computer process consumes all four buses with the unmodified
 ``modules/sensors`` stacks the STM32H743 firmware cross-compiles.
 
-Four of the six pieces are documented in detail on the rocket page
+Four of the five pieces are documented in detail on the rocket page
 (:ref:`rocket_gps_ecos_cosim`): the GPS FMU (wire-exact UBX-NAV-PVT over UDP,
 gated by the receiver's :ref:`dynamics envelope <gps_dynamics_envelope>`), the
 IMU FMU (register counts into a FIFO behind a shared-memory
@@ -32,14 +32,8 @@ covers what is new here:
    the control deflections from the result, so nothing closes a loop — the
    aircraft simply flies out of trim conditions for 200 s, and the slow
    phugoid drift that follows is the check-case's content, not an error.
-2. **The radar altimeter FMU** (``hemerion_radalt_fmu.fmu``), the fifth
-   sensor: a pulsed talker like the GPS, on its own UDP port, whose frames are
-   fed byte-at-a-time to the unmodified ``RadAltPacketParser`` and converted
-   with the part's register sensitivity. Beyond the model's 6000 m maximum
-   tracking range its frames carry a *no-return* flag rather than falling
-   silent.
-3. **Two check-cases over one wiring** — one where every environment-dependent
-   stack is in band for the whole flight, and one where three of the four are
+2. **Two check-cases over one wiring** — one where every environment-dependent
+   stack is in band for the whole flight, and one where two of the three are
    out of their envelopes at once, exercised through exactly the same code
    paths.
 
@@ -55,12 +49,10 @@ covers what is new here:
    │                      │  altitude              ┌──────────────────────┐  I2C transactions │                         │
    │                      ├───────────────────────>│ hemerion_bmp390_fmu  │<─── shared mem ──>│  Mmc5983maDriver + …    │
    │                      │  position + attitude   ┌──────────────────────┐  I2C transactions │                         │
-   │                      ├───────────────────────>│ hemerion_mmc5983ma   │<─── shared mem ──>│  RadAltPacketParser +   │
-   │                      │  (host-computed)       └──────────────────────┘                   │  convert_raw_to_si      │
-   │                      │  altitude as AGL       ┌──────────────────────┐  raw-sample frames│                         │
-   │                      ├───────────────────────>│ hemerion_radalt_fmu  ├──────────────────>│  — the same modules/    │
-   └──────────────────────┘                        └──────────────────────┘  UDP 5765         │  sensors code the STM32 │
-           │                                                                                  │  H743 firmware runs     │
+   │                      ├───────────────────────>│ hemerion_mmc5983ma   │<─── shared mem ──>│  — the same modules/    │
+   │                      │  (host-computed)       └──────────────────────┘                   │  sensors code the STM32 │
+   └──────────────────────┘                                                                   │  H743 firmware runs     │
+           │                                                                                  │                         │
            └────────────── f16_trim_cosim (Ecos master, fixed-step 10 Hz) ────────────────────┴─────────────────────────┘
 
 The two check-cases
@@ -82,22 +74,20 @@ rather than a second example:
      - what happens to it
    * - ``11`` (default)
      - 10 013 ft, 565.685 ft/s TAS (335 KTAS), Mach 0.52
-     - GPS / baro / mag / radalt
+     - GPS / baro / mag
      - **everything in band, all 200 s** — 2001 of 2001 GPS epochs carry a
-       fix, 3052 m AGL is inside the radar altimeter's range, the barometer
-       is squarely in band, 36° N gives the magnetometer a strong,
+       fix, the barometer is squarely in band, 36° N gives the magnetometer a strong,
        near-constant field (49.3–49.5 µT)
    * - ``12``
      - 30 013 ft, 2000 ft/s TAS, Mach 2.01
-     - GPS / baro / radalt
-     - **all three out of their envelopes at once**, while still talking; only
+     - GPS / baro
+     - **both out of their envelopes at once**, while still talking; only
        the magnetometer (and the IMU) stay in band
 
-Case 11 is the only scenario in the NESC set where all four
+Case 11 is the only scenario in the NESC set where all three
 environment-dependent sensor stacks are valid at the same time — the
-**cross-sensor consistency reference**: baro altitude against GPS altitude
-against radar height, magnetic heading against GPS course, all on one
-trajectory. It is the case the EKF in ``modules/gnc`` will be judged on.
+**cross-sensor consistency reference**: baro altitude against GPS altitude,
+magnetic heading against GPS course, all on one trajectory. It is the case the EKF in ``modules/gnc`` will be judged on.
 
 Case 12 is that EKF's degraded-mode counterpart: the flight where fusion has
 to fall back on the IMU and the magnetometer, because everything else is
@@ -121,15 +111,7 @@ Before that port existed the host summed thrust and aero itself, which meant
 asserting host-side that thrust acts along body +X; the plant knows its own
 installation geometry, and the bench no longer has to guess.
 
-Three connections deserve their own paragraph:
-
-**The radar altimeter measures height above ground, and there is no terrain
-model.** ``radalt::h_agl_m`` is fed the plant's MSL altitude — correct to
-within the terrain elevation at Kitty Hawk, a few metres of coastal North
-Carolina. Over mountains this connection would be wrong, and it is wired bare
-rather than through a nominal offset so the assumption is visible in one
-line. On case 12 the same connection feeds it 9148 m, past the part's 6000 m
-tracking range, so the approximation never matters there.
+Two connections deserve their own paragraph:
 
 **The magnetic field is host-computed, not an Ecos connection.** The field a
 magnetometer sees depends on where the vehicle is *and* how it is pointing —
@@ -204,8 +186,9 @@ Case 12: the flight the sensors cannot follow
 ---------------------------------------------
 
 ``./f16_trim_cosim --case 12`` — no other change. Measured over a full 200 s
-paced run (``--rtf 1``), the same run the figures at the foot of this page are
-drawn from:
+run (``--case 12 --seed 11 --gps-period 0.1 --step 0.01 --rtf 1``, Aetherion
+0.18.2 @ 49e75b8, Windows 11 / MSVC, 2026-11-13), the same run the case-12
+figures at the foot of this page are drawn from:
 
 .. list-table::
    :header-rows: 1
@@ -226,31 +209,31 @@ drawn from:
        This is the one flight in the NESC set that tells COCOM's AND apart
        from an OR; the rocket crosses both thresholds within seconds of each
        other and cannot.
-   * - radar altimeter
-     - **6003 of 6003 returns report no ground.** 9148 m is past the part's
-       6000 m tracking range. The part keeps reporting — a sensor that is
-       working and has nothing to say — and ``valid`` is a CSV column rather
-       than a filter precisely so this record is not an empty file.
    * - BMP390
-     - **709 of 768 conversions below the part's 300 hPa rated pressure
-       floor** (minimum 291.2 hPa), and **all 768 with the die below its
-       −40 °C rating** — it sits at −45.7 °C, since the FMU drives die
-       temperature with ambient air. The part model saturates only at the ADC
-       rails, so the out-of-rating conversions read plausibly — as on the real
-       silicon, which offers no out-of-rating indication either. The FMU adds
-       the side channel the part cannot: its ``conversions`` /
+     - **All 1232 decoded conversions with the die below its −40 °C
+       rating** — it sits at −44.1 °C, since the FMU drives die temperature
+       with ambient air. Pressure stays *inside* its rating: the aircraft
+       holds 9148 m, and the lowest reading is 300.8 hPa, 0.8 hPa above the
+       300 hPa floor (0 of 1232 below it). The part model saturates only at
+       the ADC rails, so the out-of-rating conversions read plausibly — as on
+       the real silicon, which offers no out-of-rating indication either. The
+       FMU adds the side channel the part cannot: its ``conversions`` /
        ``conversions_out_of_rating`` FMI outputs count the violation (the host
-       prints them in its summary), and each envelope crossing is debug-logged
-       once with the offending value. These two counts are the ones that move
-       with pacing: unpaced, the same flight yields 286 conversions and the
-       same proportions.
+       prints them in its summary: 9998 of 9998 latched), and each envelope
+       crossing is debug-logged once with the offending value. The decoded
+       count is the one that moves with pacing, and on the Windows host this
+       run came from the paced loop fell behind (200 s of flight took about
+       470 s of wall clock), so the flight computer read the part at about
+       6 Hz of simulation time rather than at its ODR.
    * - magnetometer, IMU
      - In band. On this flight they are all the sensor fusion has left.
 
-The plant's phugoid is bigger here — +218 m peak altitude excursion and
-+0.47° of heading over the window — and the published participants split the
-same way they do on case 11: ``sim_02`` climbs +140 m through its phugoid
-while ``sim_04``/``sim_05`` hold altitude to 0.3 m.
+On Aetherion 0.18.2 the plant holds its trim on this flight: altitude stays within
+0.44 m of 9148 m over the window, and heading turns +0.88°. (On the
+pre-0.17.4 plant the same flight showed a +218 m phugoid and +0.47° of
+heading.) The published participants split the way they do on case 11:
+``sim_02`` climbs +140 m through its phugoid while ``sim_04``/``sim_05`` hold
+altitude to 0.3 m.
 
 Against Aetherion's standalone ``F16SupersonicTrim`` (≥ 0.14.1) the run
 verifies exactly as case 11 does: 0.491 m constant initial offset (the same
@@ -301,9 +284,8 @@ unchanged between the two — which is itself the result.
 polled, and their sample rate is the flight computer's loop rate, not the ODR
 programmed into their registers. Unpaced, the co-simulation finishes far
 faster than wall clock and starves them: 200 s of flight yields about **37
-baro conversions**, while ``--rtf 1`` yields roughly 23× the rate. The GPS,
-IMU and radar altimeter are unaffected — their data queues in a socket or a
-FIFO. :ref:`rocket_gps_ecos_pacing` has the full mechanics, and the note
+baro conversions**, while ``--rtf 1`` yields roughly 23× the rate. The GPS and
+IMU are unaffected — their data queues in a socket or a FIFO. :ref:`rocket_gps_ecos_pacing` has the full mechanics, and the note
 there about Ecos' ``tar``/``unzip`` spawning applies here too
 (``f16_trim_cosim`` runs the same preflight check).
 
@@ -360,8 +342,8 @@ information.
 Results
 -------
 
-``plot_results.py`` (matplotlib) renders the six CSVs — the host's truth log
-and the flight computer's five decoded-sensor logs — into eight figures per
+``plot_results.py`` (matplotlib) renders the five CSVs — the host's truth log
+and the flight computer's four decoded-sensor logs — into eight figures per
 check-case:
 
 .. code-block:: console
@@ -386,12 +368,13 @@ run was paced.
 figure, whose record — 3548 s of fixes, 35 correlation times — is unpaced:
 the receiver's data queues in a socket, so pacing changes nothing about it,
 and a record that long at 2× real time would otherwise take an afternoon. Unpaced, 200 s of
-flight yields about 37 barometer conversions against the 896 here, and the
+flight yields about 37 barometer conversions against 628–896 on the paced
+case-11 runs here, and the
 altitude- and heading-consistency figures become a scatter of dots through
-which no trace can be read. The GPS, IMU and radar-altimeter figures are
+which no trace can be read. The GPS and IMU figures are
 unaffected either way — their data queues in a socket or a FIFO — which is why
 the barometer is the only stack whose counts move with the pacing. The case-12
-table above is measured on the same paced run as these figures.
+table above is measured on the same paced run as the case-12 figures.
 
 Check-case 11: the cross-sensor reference
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -415,31 +398,37 @@ Check-case 11: the cross-sensor reference
 
 .. figure:: _static/f16_trim_ecos/case11_altitude_consistency.png
    :width: 100%
-   :alt: Upper panel, four altitude traces following one phugoid from 3052 to 3083 m; lower panel, their residuals against truth — GPS scattered over ±10 m, barometer a tight band near +1.3 m, radar altimeter flat on zero
+   :alt: Upper panel, plant truth flat at 3052 m with GPS altitudes scattered about it and pressure altitude a band about 5 m above; lower panel, their residuals against truth — GPS scattered over ±10 m, barometer a tight band near +5 m
 
-   The figure check-case 11 exists for. Barometric altitude, GNSS altitude and
-   radar height are three physically unrelated measurements — a pressure, a
-   set of ranging solutions, a time of flight to the ground — and a filter that
-   is going to trust their agreement should be shown that agreement first, on a
-   flight where all three are valid for all 200 s.
+   The figure check-case 11 exists for. Barometric altitude and GNSS altitude
+   are physically unrelated measurements — a pressure and a set of ranging
+   solutions — and a filter that is going to trust their agreement should be
+   shown that agreement first, on a flight where both are valid for all 200 s.
+   On Aetherion 0.18.2 the aircraft holds its trim altitude (3051.8–3052.0 m
+   over the window), so what the panels show is the sensors, not the flight.
 
-   The lower panel is the content, and the three error *characters* are the
-   point rather than the three magnitudes:
+   The lower panel is the content, and the two error *characters* are the
+   point rather than the two magnitudes:
 
-   * **GPS is noise.** Mean −0.08 m, RMS 3.07 m over 2001 fixes — which is
+   * **GPS is noise.** Mean −0.04 m, RMS 3.05 m over 2001 fixes — which is
      ``GpsNoiseConfig``'s 3 m vertical 1-sigma recovered end to end, through
      the UBX encoder, the socket and the parser, with nothing added.
-   * **The barometer is bias.** Mean **+1.32 m**, RMS 1.36 m: the scatter is
-     almost all offset. In pressure it is a constant −11.7 Pa with 3.1 Pa of
-     scatter — the BMP390 model's per-run turn-on offset (30 Pa 1-sigma, drawn
-     once) sitting on its datasheet noise floor, read through the ISA at
+   * **The barometer is bias.** Mean **+5.04 m**, RMS 5.05 m, scatter 0.34 m:
+     the residual is almost all offset. In pressure it is a constant −44.6 Pa
+     with 3.0 Pa of scatter — the BMP390 model's per-run turn-on offset
+     (30 Pa 1-sigma, drawn once; seed 11 draws −44.7 Pa, which the truth log
+     records) sitting on its datasheet noise floor, read through the ISA at
      0.904 kg/m³. No amount of averaging removes it; only a reference pressure
-     does.
-   * **The radar altimeter is the noise floor.** RMS 0.123 m about a mean of
-     −0.07 m — the model's 0.1 m range noise on its 5 cm turn-on bias, then
-     quantised. It is the most accurate altitude on the page and the least
-     useful on its own, since it measures height above terrain that this
-     scenario does not model.
+     does. Pressure altitude is converted from the ISA's geopotential altitude
+     to geometric height before it is compared with truth; read raw it would
+     carry a further −1.47 m that belongs to the altitude convention, not to
+     the sensor.
+
+   Drawn from ``f16_trim_cosim --case 11 --seed 11 --gps-period 0.1
+   --step 0.01 --rtf 1`` against Aetherion 0.18.2 @ 49e75b8, on Windows 11
+   (MSVC). The paced loop fell behind there — 200 s of flight took about
+   595 s of wall clock — and the polled barometer delivered 628 conversions;
+   the gaps in its band are that, not the part. The GPS fixes are unaffected.
 
 .. figure:: _static/f16_trim_ecos/case11_heading_consistency.png
    :width: 100%
@@ -630,15 +619,17 @@ for no reason at all.
 
 .. figure:: _static/f16_trim_ecos/case11_hotday_altitude.png
    :width: 100%
-   :alt: Four altitude traces where the barometer sits 200 m below truth while GPS and radar height stay on it, and a residual panel showing a flat -195 m offset
+   :alt: Altitude traces where the barometer sits about 195 m below truth while GPS stays on it, and a residual panel showing a flat -195 m offset
 
    A hot day: ISA + 20 K, nothing else changed. The barometer reads **195 m
-   low** for the whole flight while GNSS and the radar altimeter sit on truth.
+   low** for the whole flight (−194.5 m mean over 538 conversions) while GNSS
+   sits on truth. Drawn from ``--seed 11 --atmosphere 20,0 --step 0.01
+   --rtf 1`` against Aetherion 0.18.2.
 
    Nothing is broken. Pressure altitude is not geometric altitude, and on a
    warm day the two differ by hundreds of feet — which is precisely why a
    barometer is *fused* with GNSS rather than trusted, and why the altitude
-   figure further up, where all four agreed to a metre, was quietly answering
+   figure further up, where they all agreed to a metre, was quietly answering
    an easier question than the one a filter faces. The plant re-trims at
    α = 2.834° against 2.639° in the same condition on a standard day, because
    the air really is thinner.
@@ -673,7 +664,7 @@ for no reason at all.
 
 .. figure:: _static/f16_trim_ecos/case11_clock_divergence.png
    :width: 100%
-   :alt: Three fitted lines of different slopes showing each part's clock drifting against the flight computer's, above a Gaussian histogram of IMU sample intervals
+   :alt: Fitted lines of different slopes showing each part's clock drifting against the flight computer's, above a Gaussian histogram of IMU sample intervals
 
    Each part on its own oscillator, run with
    ``--sensor-clock 2000,0.0005 --rtf 1``. **2000 ppm is deliberately large** —
@@ -681,10 +672,16 @@ for no reason at all.
    enough to see; the mechanism is what the figure is about, not the
    magnitude.
 
-   The three fitted lines have three different slopes because each part drew
-   its own rate error from the one sigma the run configured: the barometer
-   runs **5045 ppm** slower than the IMU and the radar altimeter **5783 ppm**
-   slower. That is the point of the item. A filter fusing these streams cannot
+   This figure and its numbers are from a 2026-09 run, unseeded, on the
+   plant before Aetherion 0.17.4, and its third line is the radar altimeter,
+   since removed. A re-run on Windows was held back: there the paced loop
+   ran host time 1.7× simulation time with about 0.8 s rms residual, which
+   swamps the per-part skew this figure exists to show. It is to be re-drawn
+   from a Linux run.
+
+   The fitted lines have different slopes because each part drew its own
+   rate error from the one sigma the run configured: the barometer runs
+   **5045 ppm** slower than the IMU. That is the point of the item. A filter fusing these streams cannot
    treat a sample the IMU stamps 10.00 s as contemporaneous with one the
    barometer stamps 10.00 s, and before this existed it could, because every
    part shared the master's clock exactly.
@@ -694,7 +691,7 @@ for no reason at all.
    arrival stamp, so the raw difference sawtooths by the burst's duration —
    which is itself a thing a real flight computer sees, and is why the drift is
    fitted rather than eyeballed. And each raw slope also contains the host's
-   own pacing error against simulation time, which is common to all three parts
+   own pacing error against simulation time, which is common to every part
    and cancels in their differences; measured against its nominal cadence
    instead, the IMU's own skew on this run is **+2814 ppm**.
 
@@ -704,19 +701,24 @@ for no reason at all.
    draws predicts, and it is the same at the end of the run as at the start
    because jitter has no memory. Skew accumulates; jitter does not.
 
-Check-case 12: three stacks outside their envelopes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Check-case 12: stacks outside their envelopes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. figure:: _static/f16_trim_ecos/case12_sensor_envelopes.png
    :width: 100%
-   :alt: Four stacked panels — ground speed above both GPS limits with the whole flight shaded as no-fix, radar height at 9.2 km far above the 6000 m tracking range and entirely shaded, barometer pressure below the 300 hPa rated floor, and die temperature below the -40 C floor
+   :alt: Stacked panels — ground speed above both GPS limits with the whole flight shaded as no-fix, barometer pressure just above the 300 hPa rated floor, and die temperature near -44 C, below the -40 C floor
 
    The whole difference between the two check-cases, in one figure. Each panel
    puts a stack against the limit that bounds it; on case 11 every trace sits
-   clear of its line for 200 s, and here three of the four are on the wrong
-   side of it from the first epoch — **while every part keeps talking**. That
-   distinction is what the example is built to make: an envelope violation is
-   not a silent bus, and none of these figures is an empty file.
+   clear of its line for 200 s, and here the receiver and the barometer are
+   each on the wrong side of one of theirs from the first epoch — **while
+   every part keeps talking**. That distinction is what the example is built
+   to make: an envelope violation is not a silent bus, and none of these
+   figures is an empty file. Drawn from ``f16_trim_cosim --case 12 --seed 11
+   --gps-period 0.1 --step 0.01 --rtf 1`` against Aetherion 0.18.2 @ 49e75b8,
+   on Windows 11 (MSVC), where the paced loop fell behind (about 470 s of wall
+   clock for 200 s of flight); that thins the barometer's points and changes
+   none of the counts' proportions.
 
    * **GPS: 0 of 2001 epochs carried a fix.** 610 m/s is past the airborne
      <4 g platform model's 500 m/s bound from the very first epoch. The
@@ -724,41 +726,49 @@ Check-case 12: three stacks outside their envelopes
      clear, no position in the payload.
    * **COCOM is an AND, and this is the flight that proves it.** The speed
      threshold (515 m/s, dotted) is exceeded and the altitude threshold is
-     not — the grey dotted trace holds 9366 m against an 18 000 m bound. An
+     not — the grey dotted trace holds 9148 m against an 18 000 m bound. An
      OR receiver would have lost the fix to COCOM here; this one does not, and
      what takes the fix is the platform model instead. The rocket scenario
      crosses both thresholds within seconds of each other and cannot tell the
      two apart.
-   * **Radar altimeter: 0 of 6003 returns found the ground.** 9.2 km is half
-     again the part's 6000 m tracking range. It keeps reporting — a sensor
-     that is working and has nothing to say — which is why ``valid`` is a CSV
-     column rather than a filter.
-   * **BMP390: 709 of 768 conversions below the rated 300 hPa floor**
-     (minimum 291.2 hPa), with the die at −45.7 °C for **all 768**, below its
-     −40 °C rating. The part model saturates only at the ADC rails, so the
-     out-of-rating conversions read plausibly — as they would on real silicon,
-     which offers no out-of-rating indication either. The FMU supplies the side
-     channel the part cannot: ``conversions_out_of_rating`` counts the
-     violation on an FMI output.
+   * **BMP390: the die is at −44.1 °C for all 1232 decoded conversions**,
+     below its −40 °C rating. Pressure is the closer call: holding 9148 m, the
+     aircraft never takes the part below its 300 hPa floor — 0 of 1232
+     conversions, minimum 300.8 hPa — so on this plant the barometer is out of
+     rating on temperature alone. (On the pre-0.17.4 plant a +218 m phugoid
+     carried it to 291.2 hPa, below the floor for 709 of 768 conversions.)
+     The part model saturates only at the ADC rails, so the out-of-rating
+     conversions read plausibly — as they would on real silicon, which offers
+     no out-of-rating indication either. The FMU supplies the side channel the
+     part cannot: ``conversions_out_of_rating`` counts the violation on an FMI
+     output.
 
 .. figure:: _static/f16_trim_ecos/case12_altitude_consistency.png
    :width: 100%
-   :alt: The same altitude figure as case 11 but with only one trace — the barometer — over a full-width no-fix wash, and a residual panel showing a -4.6 m bias
+   :alt: The same altitude figure as case 11 but with only one trace — the barometer — over a full-width no-fix wash, and a residual panel showing a +10.0 m bias
 
    The same figure as the case-11 altitude comparison, on the flight where
-   there is nothing to compare. The no-fix wash runs the full width, the radar
-   altimeter contributes nothing, and **one of the four altitude sources
-   survives** — the barometer, running 700 conversions below the pressure its
+   there is nothing to compare. The no-fix wash runs the full width, and
+   **one of the two altitude sources survives** — the barometer, every one of
+   its 1232 decoded conversions made with its die below the temperature the
    part is rated for.
 
    Its residual is worth reading rather than dismissing. The bias is
-   **−4.56 m** here against +1.32 m on case 11, and it is still a bias: RMS
-   4.61 m against a mean of −4.56, so the scatter is almost entirely offset.
-   In pressure it is +20.2 Pa with the same 3 Pa of scatter — a fresh draw of
-   the model's 30 Pa turn-on offset, since every run draws its own. What the
-   flight changes is the exchange rate: at 9.2 km the air is 0.458 kg/m³,
-   half of case 11's, so **the same pressure error buys twice the altitude**.
-   The sensor has not become noisy outside its rating; a barometer's fixed
-   pressure error is simply worth more metres the higher it flies. A fusion
-   filter given this stack alone on this flight would hold altitude
-   confidently, and hold it four and a half metres low.
+   **+9.97 m** here against +5.04 m on case 11, and it is still a bias: RMS
+   9.99 m against a mean of +9.97, scatter 0.66 m, so the residual is almost
+   entirely offset. In pressure it is −44.7 Pa with the same 3.0 Pa of
+   scatter — *the same* turn-on offset as case 11, since both runs are
+   ``--seed 11`` and the seed fixes the draw. What the flight changes is the
+   exchange rate: at 9.15 km the air is 0.458 kg/m³, half of case 11's
+   0.904, so **the same pressure error buys twice the altitude** — 1.98×,
+   measured. The sensor has not become noisy outside its rating; a
+   barometer's fixed pressure error is simply worth more metres the higher it
+   flies. A fusion filter given this stack alone on this flight would hold
+   altitude confidently, and hold it ten metres high. (Read raw, without the
+   geopotential-to-geometric conversion, the residual would carry a further
+   −13.1 m of altitude convention at this height and appear as −3.2 m.)
+
+   Drawn from the same run as the envelope figure above: ``--case 12
+   --seed 11 --gps-period 0.1 --step 0.01 --rtf 1``, Aetherion 0.18.2 @
+   49e75b8, Windows 11 (MSVC); the clusters and gaps in the barometer's
+   points are that host's polling, not the part.
