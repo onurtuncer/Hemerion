@@ -242,13 +242,18 @@ GPS.
       (which would also have put every fix stamp off by 10× unless the flight
       computer got `--fix-period 0.01`). Rejected unless it is a whole number
       of steps.
-- [ ] **Tell Aetherion** (its `TODO-sensor-fusion.md`, step "Rates"): design
+- [x] **Tell Aetherion** (its `TODO-sensor-fusion.md`, step "Rates"): design
       rates IMU 100 Hz / GNSS 10 Hz, barometer at the programmed ODR; noise
       densities 5e-3 m/s²/√Hz and 2e-4 rad/s/√Hz (the 100 Hz per-sample
       defaults, 0.05 m/s² and 0.002 rad/s); GNSS velocity now logged, with the
       caveat on `sAcc` above; `nominal_time_s` now the validity time; drawn
       errors in the truth log under the names in `drawn_error_variables()`;
       for manoeuvring cases run `--step 0.01` (the GPS stays at 10 Hz).
+      Closed 2026-11-13: Aetherion's file says all of it since `c1f43de`
+      (PR #119, merged to its `main` at `b3be6b7`, 2026-11-05) — "Rates"
+      ticked as decided here, the 0.01 s step baseline, and its step-2 and
+      step-6 Hemerion items (velocity, datum, rocket attitude, validity
+      stamp, drawn errors) ticked against `be5a19a`.
 
 ### Step 2 — Log contract (shared; Aetherion holds the definition)
 
