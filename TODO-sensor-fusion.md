@@ -139,6 +139,13 @@ Not built:
   its Aetherion commit, CppADCodeGen's version and the configuration hash.
   Aetherion keeps the generator source (MIT) and the golden vectors (data).
   Step 9 checks the banner on delivery.
+- **Barometer conventions.**
+  - Barometer residuals in plots compare the pressure altitude, converted
+    from geopotential to geometric height (R = 6 356 766 m), with geometric
+    truth, as Aetherion's measurement model does.
+  - Aetherion judges the filter's barometer-bias state against the sensor
+    offset plus the atmosphere term. That needs `out.P_Pa` in the truth log,
+    which all hosts already write; keep it there.
 
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
