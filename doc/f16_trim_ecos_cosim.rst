@@ -77,7 +77,8 @@ rather than a second example:
      - GPS / baro / mag
      - **everything in band, all 200 s** — 2001 of 2001 GPS epochs carry a
        fix, the barometer is squarely in band, 36° N gives the magnetometer a strong,
-       near-constant field (49.3–49.5 µT)
+       near-constant field (48.6 µT at the trim point, WMM2025; the decoded
+       magnitude, which carries the part's own errors, holds 47.1–47.4 µT)
    * - ``12``
      - 30 013 ft, 2000 ft/s TAS, Mach 2.01
      - GPS / baro
@@ -125,7 +126,7 @@ than the WMM and what that costs at this site.
 **The magnetometer's die temperature is ambient air** (``out.T_K`` through a
 Kelvin→Celsius modifier) — near enough for a part whose temperature channel
 quantizes at 0.8 °C, but it matters on case 12, where ambient at 30 013 ft is
-−45.9 °C and the part is rated to −40 °C (see below).
+−44.4 °C and the part is rated to −40 °C (see below).
 
 Case 11: the cross-sensor reference
 -----------------------------------
@@ -172,15 +173,27 @@ Two findings this comparison surfaced, one closed and one open:
   with no Earth-rotation or curvature terms while the integrator flies over a
   rotating round Earth; at this flight condition those terms relieve 0.42 %
   of the required lift, predicting a trim-alpha shift of the right sign and
-  order (135 % of the observed gap). A lead, not a finding.
+  order (135 % of the observed gap). A lead, not a finding. Those figures
+  are from 0.14.1. On 0.18.2 ``F16Plant.fmu`` starts case 11 at a pitch of
+  2.638943° (t = 0 of the seed-11 run below), 0.0044° *under* the published
+  value rather than 0.0128° over it; the analysis has not been redone
+  against that plant.
 
 Against the published NESC participant solutions the check is a sanity bound,
 not a precision test: at t = 180 s ``Atmos_11_sim_02`` has drifted −0.66° of
 heading and +44.7 ft while ``sim_04``/``sim_05`` drift +0.53° *the other way*
-and hold altitude to a tenth of a foot. This run drifts more than any
-published participant — up to ~16 m of altitude and 0.44° of heading beyond
-the participants' own spread, in ``sim_02``'s direction — which is the open
-Aetherion-side trim question above showing up in the flyout.
+and hold altitude to a tenth of a foot. On Aetherion 0.18.2 this run holds
+altitude with ``sim_04``/``sim_05`` (−0.10 m at t = 180 s, −0.12 m at
+cut-off) and turns −0.18° of heading by t = 180 s — ``sim_02``'s direction,
+at less than a third of its drift. It sits inside the participants' spread
+from t = 117 s on; before that its heading lies up to 0.20° outside it
+(t ≈ 54 s, while ``sim_02`` is still turning the other way), and its
+altitude never more than 0.08 m below it. Measured from
+``--case 11 --seed 11 --gps-period 0.1 --step 0.01 --rtf 1`` against
+Aetherion 0.18.2 @ 49e75b8 (Windows 11 / MSVC, 2026-11-13). On the
+pre-0.17.4 plant the same flyout drifted more than any published
+participant — up to ~16 m of altitude and 0.44° of heading beyond their
+spread, in ``sim_02``'s direction.
 
 Case 12: the flight the sensors cannot follow
 ---------------------------------------------
@@ -381,7 +394,7 @@ Check-case 11: the cross-sensor reference
 
 .. figure:: _static/f16_trim_ecos/case11_ground_track.png
    :width: 100%
-   :alt: Two panels — a straight 34.5 km ground track at true aspect ratio, and cross-track departure growing to -369 m over the same distance with the GPS fixes scattered about it
+   :alt: Two panels — a straight 34.5 km ground track at true aspect ratio, and cross-track departure growing to -138 m over the same distance with the GPS fixes scattered about it
 
    The flyout, and the departure the flyout cannot show. At true aspect ratio
    (left) an open-loop trim flyout is a straight line: 34.5 km on a 45°
@@ -391,10 +404,14 @@ Check-case 11: the cross-sensor reference
 
    The right panel is the same flight with the commanded heading rotated out:
    cross-track departure in metres against kilometres flown. The aircraft is
-   asked to hold 45° and the phugoid turns it, reaching **−369 m by cut-off**
-   — and *this* is the quantity the published participants disagree about. It
-   is also the scale at which the receiver's error is finally visible as what
-   it is: a metre-scale scatter about a track that departs by hundreds.
+   asked to hold 45° and does not quite, reaching **−138 m by cut-off**
+   (−369 m on the pre-0.17.4 plant, whose phugoid turned it further) — and
+   *this* is the quantity the published
+   participants disagree about. It is also the scale at which the receiver's
+   error is finally visible as what it is: a metre-scale scatter about a
+   track that departs by more than a hundred. Drawn from
+   ``--case 11 --seed 11 --gps-period 0.1 --step 0.01 --rtf 1`` against
+   Aetherion 0.18.2 @ 49e75b8, on Windows 11 / MSVC, 2026-11-13.
 
 .. figure:: _static/f16_trim_ecos/case11_altitude_consistency.png
    :width: 100%
@@ -549,7 +566,7 @@ Check-case 11: the cross-sensor reference
 
 .. figure:: _static/f16_trim_ecos/case11_nesc_envelope.png
    :width: 100%
-   :alt: Altitude and yaw against time with the published participants drawn as three dashed lines and the spread between them shaded, this run's trace outside the band on both panels, and a marker at t=180 s past which only one reference continues
+   :alt: Altitude and yaw against time with the published participants drawn as three dashed lines and the spread between them shaded, this run's altitude on the band's lower edge with sim_04 and sim_05, its yaw below the band early and inside it from about t=117 s, and a marker at t=180 s past which only one reference continues
 
    This run against the published participant solutions — a sanity bound, not
    a precision test, and the figure is drawn to make that unmistakable. The
@@ -557,12 +574,18 @@ Check-case 11: the cross-sensor reference
    narrow the participants agree and a deviation means something, and where it
    is wide they do not and it does not.
 
-   On altitude the band is wide by t = 100 s, and this run sits above it,
-   drifting +31.4 m through its phugoid where ``sim_04`` and ``sim_05`` hold
-   altitude to a tenth of a foot. On heading the participants disagree about
-   the *direction* of the drift, and this run turns −1.16° — ``sim_02``'s way,
-   past ``sim_02``. Both are the open Aetherion-side trim question of the case
-   sections above, showing up in the flyout.
+   On altitude the band is wide by t = 100 s only because ``sim_02`` climbs
+   (+13.6 m by t = 180 s); this run holds altitude with ``sim_04`` and
+   ``sim_05``, −0.10 m at t = 180 s against their +0.03 / −0.02 m. On heading
+   the participants disagree about the *direction* of the drift, and this run
+   turns −0.18° by t = 180 s — ``sim_02``'s way, but inside the spread from
+   t = 117 s on; before that it sits up to 0.20° below the band (t ≈ 54 s),
+   while ``sim_02`` is still turning positive. Drawn from
+   ``--case 11 --seed 11 --gps-period 0.1 --step 0.01 --rtf 1`` against
+   Aetherion 0.18.2 @ 49e75b8, on Windows 11 / MSVC, 2026-11-13: the figure is
+   plant truth only, so the host's pacing does not enter it. On the
+   pre-0.17.4 plant this run sat above the altitude band, drifting +31.4 m
+   through its phugoid, and turned −1.16°, past ``sim_02``.
 
    The band stops before the plot does, and is marked where it stops. Only
    ``sim_02`` reaches t = 200 s; a verifier that compares nothing but the times

@@ -37,8 +37,8 @@ at the same time**; case 12 takes two of them out of band at once, over the same
 | stack | case 11 (10 013 ft, 172 m/s) | case 12 (30 013 ft, 610 m/s) | the rocket scenario |
 |---|---|---|---|
 | GPS | clears every envelope limit; **2001 of 2001 epochs carry a fix** | past dynModel 8's 500 m/s from t = 0; **0 of 2001 epochs carry a fix** | loses the fix at t = 31 s |
-| barometer | 10 013 ft is squarely in band | most of the flight below the part's 300 hPa rated floor | leaves the atmosphere |
-| magnetometer | 36° N gives a strong, near-constant field (49.3–49.5 µT) | still in band — the one survivor | field magnitude swings 10% with altitude |
+| barometer | 10 013 ft is squarely in band | the whole flight below the part's −40 °C rated die temperature; pressure just above its 300 hPa floor | leaves the atmosphere |
+| magnetometer | 36° N gives a strong, near-constant field (48.6 µT at the trim point, WMM2025; decoded magnitude 47.1–47.4 µT) | still in band — the one survivor | field magnitude swings 10% with altitude |
 
 That is what makes the case-11 run the **cross-sensor consistency reference** — baro altitude against GPS
 altitude, magnetic heading against GPS course, all on one trajectory. It is the case the
@@ -63,16 +63,23 @@ the flight computer changes; measured over a full 200 s run:
   9214 m. That is COCOM's AND holding: the cut-off needs 18 000 m *and* 515 m/s, and 9.2 km is half the
   altitude threshold. This is the one flight in the NESC set that tells COCOM's AND apart from an OR — the
   rocket crosses both thresholds within seconds of each other and cannot.
-* **BMP390: 253 of 286 conversions below the part's 300 hPa rated pressure floor** (minimum 290.9 hPa), with
-  the die at **−45.9 °C, below its −40 °C rating** (the FMU uses ambient air as die temperature). The part
-  model saturates only at the ADC rails, so the conversions read plausibly — as they do on the real silicon,
+* **BMP390: all 1232 decoded conversions with the die at −44.1 °C, below its −40 °C rating** (the FMU uses
+  ambient air, −44.4 °C here, as die temperature). Pressure stays inside its rating: the aircraft holds
+  9148 m and the lowest reading is 300.8 hPa, 0 of 1232 below the 300 hPa floor. (On the pre-0.17.4 plant a
+  +218 m phugoid took 253 of 286 conversions below that floor, minimum 290.9 hPa, with the die at −45.9 °C.)
+  The part model saturates only at the ADC rails, so the conversions read plausibly — as they do on the real silicon,
   which offers no out-of-rating indication either. What the FMU adds is a side channel the part cannot: its
   `conversions` / `conversions_out_of_rating` FMI outputs count the violation (the host prints them in its
   summary), and each envelope crossing is debug-logged once with the offending value.
 * **The magnetometer stays in band**, and with the IMU it is all the sensor fusion has left.
-* **The plant's phugoid is bigger here**: +218 m peak altitude excursion and +0.47° of heading over the
-  window. The published participants split the same way they do on case 11 — `sim_02` climbs +140 m through
-  its phugoid while `sim_04`/`sim_05` hold altitude to 0.3 m.
+* **The plant holds its trim**: on Aetherion 0.18.2 altitude stays within 0.44 m of 9148 m over the window
+  and heading turns +0.88°. (On the pre-0.17.4 plant the same flight showed a +218 m phugoid and +0.47° of
+  heading.) The published participants split the same way they do on case 11 — `sim_02` climbs +140 m
+  through its phugoid while `sim_04`/`sim_05` hold altitude to 0.3 m.
+
+Measured from `--case 12 --seed 11 --gps-period 0.1 --step 0.01 --rtf 1` against Aetherion 0.18.2 @ 49e75b8,
+on Windows 11 / MSVC, 2026-11-13. The decoded conversion count moves with pacing, and on that host the paced
+loop fell behind and starved the polled part; the latched counter (9998 of 9998 out of rating) does not.
 
 Against Aetherion's standalone `F16SupersonicTrim` (≥ 0.14.1) the run verifies exactly as case 11 does:
 0.491 m constant initial offset (the same five-decimal Kitty Hawk rounding), 0.000 m worst altitude
@@ -183,11 +190,15 @@ trim did not change — its initial pitch is identical to 4×10⁻¹¹ deg betwe
 this example's version floor stays at 0.14.0: nothing it consumes moved. Comparing against a standalone run
 **older than 0.14.1** reproduces the old disagreement, and the verifier fails it on all three checks.
 
-### Open: this run drifts more than any published participant
+### Open: this run's trim is not the published one
 
-Up to ~16 m in altitude and 0.44° in heading beyond the participants' own spread, in `sim_02`'s direction — and
-still after 0.14.1, because that release made Aetherion self-consistent, not consistent with the check-case.
-Both Aetherion paths now trim to the same point, and it is not the published one:
+On Aetherion 0.18.2 the case-11 flyout sits inside the participants' spread from t = 117 s on: it holds
+altitude with `sim_04`/`sim_05` (−0.10 m at t = 180 s) and turns −0.18° of heading by then, `sim_02`'s
+direction, lying up to 0.20° outside the spread before t = 117 s (seed-11 baseline run, 2026-11-13). On the
+pre-0.17.4 plant it drifted more than any published participant — up to ~16 m in altitude and 0.44° in heading
+beyond their spread — and still did after 0.14.1, because that release made Aetherion self-consistent, not
+consistent with the check-case. At 0.14.1 both Aetherion paths trimmed to the same point, and it was not the
+published one:
 
 | source | initial pitch (= trim angle of attack) |
 |---|---|
@@ -195,6 +206,10 @@ Both Aetherion paths now trim to the same point, and it is not the published one
 | NESC published initial condition | **2.643331°** |
 
 It is no longer a weight question: Aetherion's trim weight is 20 509.3 lbf against NASA's 20 509.4 lbf.
+
+On 0.18.2 `F16Plant.fmu` starts case 11 at a pitch of **2.638943°** (t = 0 of the seed-11 run), 0.0044°
+*under* the published value rather than 0.0128° over it. The table above and the analysis below are from
+0.14.1 and have not been redone against that plant.
 
 **Leading suspect, not yet a finding.** `TrimSolver` balances lift against weight with no Earth-rotation or
 curvature terms, while the integrator flies the aircraft over a rotating round Earth. For level flight at this

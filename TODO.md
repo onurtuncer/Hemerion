@@ -32,6 +32,12 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
     die at **−45.9 °C, below the −40 °C rating** (the FMU uses ambient air as die temperature). The
     part model only saturates at the ADC rails; it models neither rating.
   - Plant drifts +218 m peak / +0.47 deg (sim_02: +140 m; sim_04/05 hold altitude to 0.3 m).
+  *2026-11-13, on the 0.18.2 plant (Aetherion 0.18.2 @ 49e75b8; `--case 12 --seed 11 --gps-period 0.1
+  --step 0.01 --rtf 1`, Windows 11 / MSVC): the plant holds its trim — altitude within 0.44 m of 9148 m,
+  heading +0.88° over 200 s. Ambient is −44.4 °C (out.T_K 228.77 K) and the die reads −44.1 °C on all
+  1232 decoded conversions; pressure stays above the 300 hPa floor (minimum 300.8 hPa, 0 of 1232 below);
+  9998 of 9998 latched conversions out of rating, on temperature alone. The figures above are the
+  pre-0.17.4 plant's.*
 
   Docs closed out: the example README carries the case-12 section with the figures above and the
   verification/regeneration commands, both file headers and the in-band comments cover both cases,
@@ -56,6 +62,11 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   not re-measured — the install ships no example executables and the local Aetherion checkout is
   v0.11.3-era, so regenerating `f16_s12` still needs a ≥ 0.14.1 build tree.
   *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
+  *2026-11-13: the +217.7 m / +0.470° drift above is the pre-0.17.4 plant's. Against Aetherion 0.18.2
+  @ 49e75b8 the same seed-11 baseline flight (`--step 0.01 --gps-period 0.1 --rtf 1`) drifts −0.44 m /
+  +0.88°: no phugoid. The −45.9 / −46.1 °C die readings become −44.1 °C (ambient −44.4 °C), and the
+  pressure-floor violations are gone (minimum 300.8 hPa); the counter's 100 % now comes from the
+  temperature rating alone.*
 
 * **Regenerating the Aetherion standalone references** (needed for `verify_trajectory.py
   --aetherion`, must be a build that includes 0.14.1's `TrimWeight.h`), from the Aetherion root:
@@ -166,6 +177,12 @@ and the autopilot example **reuses the `f16_flight_computer` executable** rather
   required lift, predicting −0.0172 deg against the −0.0128 deg gap (right sign and order, 135 % of
   size). Case 12 is a second data point for testing it — Eötvös and curvature grow with v and v² — but
   needs the alpha-per-weight sensitivity at Mach 2 first. Not yet written up for Aetherion.
+  *2026-11-13: on Aetherion 0.18.2 @ 49e75b8 `F16Plant.fmu` starts at a pitch of 2.638943 deg (case 11)
+  and −0.741564 deg (case 12), read at t = 0 of the seed-11 baseline runs: 0.0044 deg under and
+  0.0050 deg under the published values, where 0.14.1 was 0.0128 over and 0.0028 over. The case-11
+  flyout now sits inside the NESC participants' spread from t = 117 s on (altitude −0.10 m and heading
+  −0.18° at t = 180 s; at most 0.20° outside the heading spread, t ≈ 54 s). The lead above is from
+  0.14.1 and has not been re-derived against 0.18.2.*
 
 * **Documentation figures — done (2026-09-19).** `plot_results.py` in both examples, and a
   `Results` section on each doc page: 7 figures per check-case for the trim example
