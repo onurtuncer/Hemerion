@@ -146,6 +146,19 @@ Not built:
   - Aetherion judges the filter's barometer-bias state against the sensor
     offset plus the atmosphere term. That needs `out.P_Pa` in the truth log,
     which all hosts already write; keep it there.
+- [x] **First step-7 log batch on Linux (2026-11-14).**
+      [Run 43482563098](https://github.com/onurtuncer/Hemerion/actions/runs/43482563098)
+      flew case 11 for seeds 1–20 (W20 8, turbulence seed = seed, 200 s,
+      baseline settings, plant 0.18.2): 20 of 20 passed every check.
+      Every seed has 2000 GNSS position and 2000 velocity updates and
+      9998–9999 barometer updates, so the Linux barometer channel is
+      reproducible. The first attempt (run 43481383124) was stopped by the
+      recipe guard after Dependabot bumped `actions/cache` in
+      `integration.yml` only; PR #64 matched the versions. Aetherion's
+      per-block NEES over these logs is in its step 7. Arrival stamps are not
+      a clock on the CI runner either: host time fits 1.30 × part time with
+      307 ms rms residual (seed 1). That matters for step 10's
+      delayed-measurement handling.
 
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
