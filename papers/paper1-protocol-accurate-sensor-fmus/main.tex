@@ -1120,9 +1120,11 @@ pad until the vehicle passes 16\,km at $t\approx30$\,s, where the reference
 part's ADC bottoms out. Inverted through the standard atmosphere, as flight
 software does with a static-pressure measurement, the altimeter tracks truth to
 $\sim$16\,km and then saturates while the vehicle climbs another 220\,km. Below
-15\,km the decoded pressure altitude differs from truth altitude by $-0.4$\,m in
-the mean with a standard deviation of 5.3\,m over 144 conversions, a figure
-that includes the part's injected noise and turn-on bias.
+15\,km the decoded pressure altitude, converted from the atmosphere's
+geopotential altitude to the geometric height in which truth is expressed,
+differs from truth altitude by $+6.7$\,m in the mean with a standard deviation
+of 4.4\,m over 144 conversions, a figure that includes the part's injected
+noise and turn-on bias.
 
 The floor itself is not a constant, and that is a detail only a register-level
 model produces. What saturates is the raw pressure word; the temperature word

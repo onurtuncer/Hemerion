@@ -124,13 +124,26 @@ def isa_alt(pp):
         return 44330.77 * (1.0 - (pp / 101325.0) ** 0.190263)
     return 11000.0 + 6341.62 * math.log(22632.06 / pp)
 print(f"  ISA altitude at floor {isa_alt(floor) / 1000:.2f} km")
+# isa_alt returns geopotential altitude (the standard atmosphere is tabulated in it); plant truth
+# out.alt_m is geometric height. Subtracting one from the other directly books H - h = -h^2/(R + h)
+# as barometer error (-35 m at 15 km), so the pressure altitude is converted to geometric height
+# with R = 6 356 766 m first, as Aetherion's barometer measurement model and
+# examples/rocket_gps_ecos/plot_results.py do (maintainer decision 2026-11-13, option A).
+# The alignment and the 15 km window are unchanged.
+GEOPOTENTIAL_RADIUS_M = 6356766.0
+
+
+def geometric_m(geopotential_alt_m):
+    return GEOPOTENTIAL_RADIUS_M * geopotential_alt_m / (GEOPOTENTIAL_RADIUS_M - geopotential_alt_m)
+
+
 errs = []
 for tt, pp in zip(b["part_time_s"], p):
     j = int(math.ceil(tt / H - 1e-6)) - 1
     if 0 <= j < len(t) and T["out.alt_m"][j] < 15000.0:
-        errs.append(isa_alt(pp) - T["out.alt_m"][j])
+        errs.append(geometric_m(isa_alt(pp)) - T["out.alt_m"][j])
 if errs:
-    print(f"  pressure-altitude minus truth below 15 km: mean {mean(errs):+.1f} m  std {std(errs):.1f} m  (n={len(errs)})")
+    print(f"  geometric pressure altitude minus truth below 15 km: mean {mean(errs):+.1f} m  std {std(errs):.1f} m  (n={len(errs)})")
 
 # ---- MAG ----
 g2 = load("mag_samples.csv")
