@@ -113,6 +113,53 @@ Not built:
       Aetherion's step 7 (tuning and consistency over seeds) and this repo's
       step 10 (Monte Carlo over the hosts).
 
+## Decided (2026-11-13)
+
+- **Logs for Aetherion's step 7 come from Linux.** A local MSVC build of
+  the pinned v0.18.2 (2026-11-13, branch `ci/local-pinned-baseline`) passes
+  the case-11 gate, but on Windows three runs at seed 11 gave 122 / 111 /
+  101 barometer updates in 20 s (Linux CI: 999), a BMP390 log with no
+  sample times in common between runs, and `host_time_s` running 1.16–1.24×
+  simulation time (fit residual 161–411 ms rms). GPS values are identical
+  across the runs and IMU values agree at every shared `part_time_s`. So
+  tuning logs are produced on Linux (CI or a Linux host) at the baseline
+  settings, with the Aetherion build at the pinned commit. Windows runs stay
+  usable for smoke checks and for the GPS and IMU channels only.
+- [ ] Hemerion task, not a blocker for step 7: the Windows `--rtf 1`
+      pacing and the polled BMP390's starvation. Fixing it changes what the
+      barometer logs on Windows.
+- **Licence of the generated filter C: it ships only here, under
+  GPL-3.0-only.** Aetherion's generator uses CppADCodeGen, which is
+  dual-licensed EPL-1.0 or GPL-3.0 and says nothing about its output.
+  Rather than rely on the reading that the output is Aetherion's own work,
+  the generated C and header are never published by Aetherion: not
+  committed there, not installed, not in a release. They are checked in
+  under `modules/gnc/src/` with this repository's banner and
+  `SPDX-License-Identifier: GPL-3.0-only`, plus a line naming the generator,
+  its Aetherion commit, CppADCodeGen's version and the configuration hash.
+  Aetherion keeps the generator source (MIT) and the golden vectors (data).
+  Step 9 checks the banner on delivery.
+- **Barometer conventions.**
+  - Barometer residuals in plots compare the pressure altitude, converted
+    from geopotential to geometric height (R = 6 356 766 m), with geometric
+    truth, as Aetherion's measurement model does.
+  - Aetherion judges the filter's barometer-bias state against the sensor
+    offset plus the atmosphere term. That needs `out.P_Pa` in the truth log,
+    which all hosts already write; keep it there.
+- [x] **First step-7 log batch on Linux (2026-11-14).**
+      [Run 43482563098](https://github.com/onurtuncer/Hemerion/actions/runs/43482563098)
+      flew case 11 for seeds 1–20 (W20 8, turbulence seed = seed, 200 s,
+      baseline settings, plant 0.18.2): 20 of 20 passed every check.
+      Every seed has 2000 GNSS position and 2000 velocity updates and
+      9998–9999 barometer updates, so the Linux barometer channel is
+      reproducible. The first attempt (run 43481383124) was stopped by the
+      recipe guard after Dependabot bumped `actions/cache` in
+      `integration.yml` only; PR #64 matched the versions. Aetherion's
+      per-block NEES over these logs is in its step 7. Arrival stamps are not
+      a clock on the CI runner either: host time fits 1.30 × part time with
+      307 ms rms residual (seed 1). That matters for step 10's
+      delayed-measurement handling.
+
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
 - **GPS validity time.** Both flight computers stamped `nominal_time_s` =
@@ -245,13 +292,18 @@ GPS.
       (which would also have put every fix stamp off by 10× unless the flight
       computer got `--fix-period 0.01`). Rejected unless it is a whole number
       of steps.
-- [ ] **Tell Aetherion** (its `TODO-sensor-fusion.md`, step "Rates"): design
+- [x] **Tell Aetherion** (its `TODO-sensor-fusion.md`, step "Rates"): design
       rates IMU 100 Hz / GNSS 10 Hz, barometer at the programmed ODR; noise
       densities 5e-3 m/s²/√Hz and 2e-4 rad/s/√Hz (the 100 Hz per-sample
       defaults, 0.05 m/s² and 0.002 rad/s); GNSS velocity now logged, with the
       caveat on `sAcc` above; `nominal_time_s` now the validity time; drawn
       errors in the truth log under the names in `drawn_error_variables()`;
       for manoeuvring cases run `--step 0.01` (the GPS stays at 10 Hz).
+      Closed 2026-11-13: Aetherion's file says all of it since `c1f43de`
+      (PR #119, merged to its `main` at `b3be6b7`, 2026-11-05) — "Rates"
+      ticked as decided here, the 0.01 s step baseline, and its step-2 and
+      step-6 Hemerion items (velocity, datum, rocket attitude, validity
+      stamp, drawn errors) ticked against `be5a19a`.
 
 ### Step 2 — Log contract (shared; Aetherion holds the definition)
 
