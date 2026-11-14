@@ -838,26 +838,35 @@ PNG detached from its caption has no other way to tell you which it is.
 
 .. figure:: _static/rocket_gps_ecos/baro_pressure.png
    :width: 100%
-   :alt: Static pressure vs time, log scale: BMP390 conversions riding the ISA curve down to the part's range floor
+   :alt: Static pressure vs time, log scale: BMP390 conversions riding the US1976 curve down to the part's range floor, the curve ending at the model's 84.9 km ceiling
 
    The BMP390 channel: compensated pressure decoded by the on-target
-   ``Bmp390Driver`` over the simulated I2C bus, against the ISA pressure at
-   the true altitude. The samples are produced by *inverting the real Bosch
-   compensation polynomial* in the FMU and recovered by running it forward in
+   ``Bmp390Driver`` over the simulated I2C bus, against the US1976 pressure
+   at the true altitude — the plant's own atmosphere, which tabulates
+   geopotential altitude, so geometric truth is converted before the table is
+   read; the curve stops at the model's 84.9 km ceiling rather than copying
+   the plant's extension above it. The samples are produced by *inverting the
+   real Bosch compensation polynomial* in the FMU and recovered by running it forward in
    the driver, with the calibration coefficients travelling as the 21 NVM
    bytes a physical part serves — so agreement here is agreement between two
    executions of the same arithmetic across a register interface, not between
    a model and its copy. The flatline is the reference part's ADC bottoming
-   out near 105 hPa.
+   out, between 99 and 118 hPa as the die temperature moves the compensated
+   floor. This figure and the next are drawn from ``--seed 17 --rtf 1`` at
+   the default 0.1 s step (not the 0.01 s baseline) against Aetherion 0.18.2
+   @ 49e75b8, on Windows 11 / MSVC, 2026-11-13; the page's other figures are
+   from the earlier, unseeded run its transcripts come from.
 
 .. figure:: _static/rocket_gps_ecos/baro_altitude.png
    :width: 100%
    :alt: Pressure altitude from BMP390 samples against true altitude, flatlining near 16 km as the rocket continues to climb
 
-   The same samples inverted through the ISA, which is what flight software
-   does with a static-pressure measurement. The altimeter is honest to
-   ~16 km and then stops being an altimeter while the vehicle climbs another
-   220 km — the barometric equivalent of the GPS figure's COCOM cut-off, and
+   The same samples inverted through the standard atmosphere, which is what
+   flight software does with a static-pressure measurement, and converted
+   from geopotential to geometric height so they are comparable with
+   geometric truth. The altimeter is honest to ~16 km and then stops being an
+   altimeter while the vehicle climbs another 233 km (to 249 km on this
+   run) — the barometric equivalent of the GPS figure's COCOM cut-off, and
    the reason a launch vehicle carries all three sensors at once. Each sample
    is timestamped from the part's own ``SENSORTIME`` counter, read in the
    same shadowed burst as the data registers.

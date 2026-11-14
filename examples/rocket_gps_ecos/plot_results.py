@@ -751,31 +751,86 @@ def plot_imu_body_rates(truth, imu, out: Path, caption: str) -> None:
     plt.close(fig)
 
 
-# The ICAO Standard Atmosphere layers of the BMP390 FMU's measurement model
-# (BaroNoiseModel::isa_pressure_pa): 6.5 K/km troposphere to 11 km, then the
-# isothermal stratosphere extended upward. Reimplemented here (rather than
-# imported from anywhere) because a plotting script wants no build products.
-_ISA_P0 = 101325.0
-_ISA_T0 = 288.15
-_ISA_LAPSE = 0.0065
-_ISA_H_TROPO = 11000.0
-_ISA_T_TROPO = 216.65
-_ISA_G = 9.80665
-_ISA_R = 287.05287
-_ISA_P_TROPO = _ISA_P0 * (_ISA_T_TROPO / _ISA_T0) ** (_ISA_G / (_ISA_LAPSE * _ISA_R))
+# The atmosphere the BMP390 sits in is the plant's: rocket_gps_cosim wires
+# rocket::out.P_Pa to baro::p_Pa, and Aetherion computes that pressure from the
+# U.S. Standard Atmosphere 1976 (Environment/Atmosphere.h). This rocket climbs
+# through every one of its layers, so the two-layer ISA the F-16 script uses
+# (troposphere plus an isothermal stratosphere extended upward) would be off by
+# 30 % at 47 km and a factor of two at the ceiling. Reimplemented here (rather
+# than imported from anywhere) because a plotting script wants no build
+# products. Standard day only: this host has no atmosphere-offset flags.
+_US1976_HB_M = (0.0, 11000.0, 20000.0, 32000.0, 47000.0, 51000.0, 71000.0, 84852.0)
+_US1976_TB_K = (288.15, 216.65, 216.65, 228.65, 270.65, 270.65, 214.65, 186.946)
+_US1976_PB_PA = (101325.0, 22632.1, 5474.89, 868.019, 110.906, 66.9389, 3.95642, 0.3734)
+_US1976_LB_K_PER_M = (-0.0065, 0.0, 0.0010, 0.0028, 0.0, -0.0028, -0.0020, 0.0)
+_US1976_G0 = 9.80665
+_US1976_R = 287.05287
+
+# The table is in geopotential altitude, plant truth (out.alt_m) is geometric,
+# and Aetherion converts between them with this radius before it evaluates the
+# table. Comparing a table-inverted pressure altitude with geometric truth
+# directly books H - h = -h^2 / (R + h) as barometer error: -35 m at 15 km.
+# Local copies of examples/f16_trim_ecos/plot_results.py's geopotential_m and
+# geometric_m -- same radius, same convention -- since neither script imports
+# from the other.
+_US1976_GEOPOTENTIAL_RADIUS_M = 6356766.0
+# Aetherion clamps the table at 84 852 m of *geometric* height and continues
+# above it with an isothermal decay of its own, which is not US1976. Neither
+# function below extrapolates past it: they return NaN, which matplotlib leaves
+# undrawn.
+_US1976_CEILING_GEOMETRIC_M = 84852.0
 
 
-def isa_pressure_pa(altitude_m: float) -> float:
-    if altitude_m <= _ISA_H_TROPO:
-        return _ISA_P0 * (1.0 - _ISA_LAPSE * altitude_m / _ISA_T0) ** (_ISA_G / (_ISA_LAPSE * _ISA_R))
-    return _ISA_P_TROPO * math.exp(-_ISA_G * (altitude_m - _ISA_H_TROPO) / (_ISA_R * _ISA_T_TROPO))
+def geopotential_m(height_m: float) -> float:
+    """Geometric height -> geopotential altitude, the table's argument."""
+    return _US1976_GEOPOTENTIAL_RADIUS_M * height_m / (_US1976_GEOPOTENTIAL_RADIUS_M + height_m)
 
 
-def isa_altitude_m(pressure_pa: float) -> float:
-    """Inverse of isa_pressure_pa -- the pressure altimeter a flight computer runs."""
-    if pressure_pa >= _ISA_P_TROPO:
-        return (_ISA_T0 / _ISA_LAPSE) * (1.0 - (pressure_pa / _ISA_P0) ** (_ISA_LAPSE * _ISA_R / _ISA_G))
-    return _ISA_H_TROPO - (_ISA_R * _ISA_T_TROPO / _ISA_G) * math.log(pressure_pa / _ISA_P_TROPO)
+def geometric_m(geopotential_alt_m: float) -> float:
+    """Geopotential altitude -> geometric height, plant truth's convention."""
+    return _US1976_GEOPOTENTIAL_RADIUS_M * geopotential_alt_m / (_US1976_GEOPOTENTIAL_RADIUS_M - geopotential_alt_m)
+
+
+def _us1976_layer_pressure_pa(layer: int, geopotential_alt_m: float) -> float:
+    hb, tb, pb, lb = (_US1976_HB_M[layer], _US1976_TB_K[layer], _US1976_PB_PA[layer], _US1976_LB_K_PER_M[layer])
+    if lb == 0.0:
+        return pb * math.exp(-_US1976_G0 * (geopotential_alt_m - hb) / (_US1976_R * tb))
+    return pb * ((tb + lb * (geopotential_alt_m - hb)) / tb) ** (-_US1976_G0 / (lb * _US1976_R))
+
+
+_US1976_CEILING_PA = _us1976_layer_pressure_pa(6, geopotential_m(_US1976_CEILING_GEOMETRIC_M))
+
+
+def us1976_pressure_pa(height_m: float) -> float:
+    """Standard-day static pressure at a geometric height -- what the plant fed the part.
+
+    Below sea level the plant clamps to sea level; above the ceiling this
+    returns NaN rather than copying the plant's non-standard extension.
+    """
+    if height_m > _US1976_CEILING_GEOMETRIC_M:
+        return math.nan
+    alt = geopotential_m(max(height_m, 0.0))
+    layer = max(i for i, hb in enumerate(_US1976_HB_M[:7]) if alt >= hb)
+    return _us1976_layer_pressure_pa(layer, alt)
+
+
+def pressure_altitude_geometric_m(pressure_pa: float) -> float:
+    """The pressure altimeter a flight computer runs, as a geometric height comparable with truth.
+
+    The table inverted layer by layer, then converted from geopotential.
+    Pressures above sea-level pressure extrapolate the tropospheric layer
+    downwards (a negative altitude); pressures below the ceiling's, and
+    non-positive ones, return NaN.
+    """
+    if not pressure_pa >= _US1976_CEILING_PA:
+        return math.nan
+    layer = max(i for i, pb in enumerate(_US1976_PB_PA[:7]) if pressure_pa <= pb or i == 0)
+    hb, tb, pb, lb = (_US1976_HB_M[layer], _US1976_TB_K[layer], _US1976_PB_PA[layer], _US1976_LB_K_PER_M[layer])
+    if lb == 0.0:
+        alt = hb - _US1976_R * tb / _US1976_G0 * math.log(pressure_pa / pb)
+    else:
+        alt = hb + (tb * (pressure_pa / pb) ** (-lb * _US1976_R / _US1976_G0) - tb) / lb
+    return geometric_m(alt)
 
 
 def plot_baro_pressure(truth, baro, out: Path, caption: str) -> None:
@@ -783,10 +838,11 @@ def plot_baro_pressure(truth, baro, out: Path, caption: str) -> None:
     ax.plot(baro["sim_time_s"], baro["pressure_pa"],
             linestyle="none", marker=".", markersize=3, alpha=0.5, color=GPS,
             label="BMP390 compensated pressure (decoded over I2C)")
-    ax.plot(truth["time"], [isa_pressure_pa(h) for h in truth["alt_m"]],
-            color=TRUTH, linewidth=1.4, label="ISA pressure at true altitude")
+    ax.plot(truth["time"], [us1976_pressure_pa(h) for h in truth["alt_m"]],
+            color=TRUTH, linewidth=1.4,
+            label="US1976 at true altitude (the plant's atmosphere, to 84.9 km)")
     ax.set_yscale("log")
-    ax.annotate("range floor: the reference part's ADC\nbottoms out near 105 hPa (~16 km)",
+    ax.annotate("range floor: the reference part's ADC\nbottoms out near 100-120 hPa (~16 km)",
                 xy=(0.98, 0.10), xycoords="axes fraction", ha="right", fontsize=8, color=INK_2)
     ax.set_xlabel("simulation time [s]")
     ax.set_ylabel("static pressure [Pa]")
@@ -798,14 +854,14 @@ def plot_baro_pressure(truth, baro, out: Path, caption: str) -> None:
 
 
 def plot_baro_altitude(truth, baro, out: Path, caption: str) -> None:
-    # What the flight software would do with these samples: invert the ISA.
-    # Above the part's range floor the derived altitude flatlines while the
-    # vehicle keeps climbing -- the honest failure mode of a pressure
-    # altimeter on a rocket, and the reason GPS exists.
+    # What the flight software would do with these samples: invert the
+    # standard atmosphere. Above the part's range floor the derived altitude
+    # flatlines while the vehicle keeps climbing -- the honest failure mode of
+    # a pressure altimeter on a rocket, and the reason GPS exists.
     fig, ax = new_figure()
-    ax.plot(baro["sim_time_s"], [isa_altitude_m(p) / 1000.0 for p in baro["pressure_pa"]],
+    ax.plot(baro["sim_time_s"], [pressure_altitude_geometric_m(p) / 1000.0 for p in baro["pressure_pa"]],
             linestyle="none", marker=".", markersize=3, alpha=0.5, color=GPS,
-            label="pressure altitude from BMP390 samples")
+            label="pressure altitude from BMP390 samples (as geometric height)")
     ax.plot(truth["time"], [h / 1000.0 for h in truth["alt_m"]],
             color=TRUTH, linewidth=1.4, label="true altitude")
     ax.set_xlabel("simulation time [s]")

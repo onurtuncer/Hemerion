@@ -219,7 +219,7 @@ On a standard day this is a small correction — the plants integrate US1976
 while the part inverted ICAO ISA, and the two differ by 13 Pa at 3 km, a
 systematic 1.46 m of indicated altitude. On a non-standard day it is the whole
 difference between a barometer that reads the book and one that reads the air:
-:ref:`f16_trim_ecos_cosim` shows a 195 m offset on ISA + 20 K.
+:ref:`f16_trim_ecos_cosim` shows a 193 m offset on ISA + 20 K.
 
 ``GpsNoiseModel`` perturbs the truth trajectory at the *fix* level — a
 receiver outputs a navigation solution, not register counts — producing a

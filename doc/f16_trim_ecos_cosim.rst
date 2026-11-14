@@ -619,12 +619,20 @@ for no reason at all.
 
 .. figure:: _static/f16_trim_ecos/case11_hotday_altitude.png
    :width: 100%
-   :alt: Altitude traces where the barometer sits about 195 m below truth while GPS stays on it, and a residual panel showing a flat -195 m offset
+   :alt: Altitude traces where the barometer sits about 193 m below truth while GPS stays on it, and a residual panel showing a flat -193 m offset
 
-   A hot day: ISA + 20 K, nothing else changed. The barometer reads **195 m
-   low** for the whole flight (−194.5 m mean over 538 conversions) while GNSS
-   sits on truth. Drawn from ``--seed 11 --atmosphere 20,0 --step 0.01
-   --rtf 1`` against Aetherion 0.18.2.
+   A hot day: ISA + 20 K, nothing else changed. The barometer reads **193 m
+   low** for the whole flight (−193.2 m mean, 0.3 m standard deviation, over
+   538 conversions) while GNSS sits on truth (−0.04 m mean over 2001 fixes).
+   Pressure altitude is converted from the standard atmosphere's geopotential
+   altitude to geometric height before it is compared with geometric truth,
+   as Aetherion's barometer measurement model does; without that conversion
+   1.3 m of altitude convention reads as barometer error (−194.5 m). Drawn
+   from ``--seed 11 --atmosphere 20,0 --gps-period 0.1 --step 0.01 --rtf 1``
+   against Aetherion 0.18.2 @ 49e75b8, on Windows 11 / MSVC, 2026-11-13. The
+   gaps in the barometer trace are that host's paced loop starving the
+   polled part (538 decoded of 9998 latched conversions); they thin the trace
+   and do not move the offset.
 
    Nothing is broken. Pressure altitude is not geometric altitude, and on a
    warm day the two differ by hundreds of feet — which is precisely why a

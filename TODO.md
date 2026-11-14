@@ -335,6 +335,10 @@ turbulence, a non-standard atmosphere — is Aetherion's and is written up as
   barometer **195 m** below truth while GNSS and radar hold it; a 10 m/s crosswind opens **2.28°**
   between GNSS course and yaw. All three were invisible in calm, standard-day air.
   *2026-11-13: the radar altimeter was removed from Hemerion by maintainer decision; the radar references above are history.*
+  *2026-11-13: with pressure altitude converted from geopotential to geometric height before it is
+  compared with geometric truth (maintainer decision, option A; R = 6 356 766 m, as Aetherion's
+  barometer measurement model does), the ISA + 20 K offset is **−193.2 m** mean over 538 conversions
+  (−194.5 m without the conversion), seed 11, step 0.01, Aetherion 0.18.2 @ 49e75b8.*
 
 * **Still open in 3b:** the field model is still a centred dipole, whose declination at Kitty Hawk
   is +0.69° against the real field's ≈ −11°. WMM/IGRF needs an authoritative coefficient set — it
