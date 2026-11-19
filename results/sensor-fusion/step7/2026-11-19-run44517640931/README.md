@@ -30,8 +30,11 @@ flight or replay step. These tables cover only the seeds that ran:
 | 13.3 | 9 |
 | 13.4 | 16 |
 
-The missing seeds are to be flown in a follow-up run once the apt retries
-(#71) are merged; its summaries go in a sibling directory.
+The missing seeds were flown again after the apt retries (#71) landed, and
+all passed: [`../2026-11-19-reruns/`](../2026-11-19-reruns/README.md). The
+full 20-seed tables per case are in
+[`../2026-11-19-combined/`](../2026-11-19-combined/README.md); prefer those
+to the partial figures below.
 
 ## Medians per case (second half of each run)
 

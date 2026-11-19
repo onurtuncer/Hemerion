@@ -1,0 +1,2 @@
+run,case,seed,turbulence_w20_mps,turbulence_seed,stop_s,passed,summary,duration_s,imu_steps,gnss_pos_updates,gnss_vel_updates,baro_updates,fixes_skipped,anees_nav,nis_gnss_pos,nis_gnss_vel,nis_baro,rms_position_m,rms_velocity_mps,rms_tilt_deg,rms_yaw_deg,cosim_wall_s,convention,hemerion_commit,aetherion_commit
+step7-case11-seed-5,11,5,8,5,200,yes,yes,199.99,19999,2000,2000,9999,0,0.813587,1.01693,1.04141,0.114368,0.224213,0.021467,0.116666,0.668225,205.9,right-invariant,1927309f7f22a4ab9ecd280a3ec762f7119d40fb,49e75b814534e6d58c9216a52df2fb7151dfd2f9
