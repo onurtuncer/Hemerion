@@ -94,6 +94,8 @@ Two terminals, both in `build/examples-native/examples/f16_trim_ecos/`:
                               # peak roll rate goes from 0.7 gyro counts to 47
 ./f16_trim_cosim --seed 11 --atmosphere 20,0 --wind 0,10,0     # ISA+20 K and a 10 m/s crosswind:
                               # the barometer reads 195 m low, GPS course crabs 2.3 deg off yaw
+./f16_trim_cosim --gps-velocity speed-course   # the GNSS velocity model before 2026-11-19 (default doppler:
+                              # per-axis NED errors, sAcc 0.071 m/s instead of ~1.7 m/s at 172 m/s)
 ./f16_trim_cosim --imu-range 250   # an aircraft-appropriate gyro range; pass the same to
                               # f16_flight_computer -- sensitivity is not on the wire
                               # over a window long enough to show its 100 s correlation time

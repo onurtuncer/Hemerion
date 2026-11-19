@@ -173,13 +173,52 @@ struct GpsErrorModel
   double accuracy_scale;
   double vertical_speed_noise_mps;       ///< velD white 1-sigma; appended last, as the FMU registers it.
   double vertical_speed_correlated_mps;  ///< velD Gauss-Markov stationary 1-sigma, tau velocity_correlation_time_s.
+  // The Doppler velocity model's white per-axis 1-sigma [m/s]. The speed, course and vertical-speed terms above
+  // apply under the speed/course model only, these under Doppler only; which one a run flies is its own option
+  // (GpsVelocityModel), not part of the receiver, so either receiver can fly either.
+  double doppler_north_noise_mps;
+  double doppler_east_noise_mps;
+  double doppler_down_noise_mps;
 };
+
+/// The GPS FMU's `velocity_error_model` parameter, as the hosts select it
+/// (--gps-velocity). Doppler is the FMU's default since 2026-11-19;
+/// speed/course is the model before it, which a run that must reproduce an
+/// earlier one (Paper 1's rocket case) selects.
+enum class GpsVelocityModel : int
+{
+  kDoppler = 0,
+  kSpeedCourse = 1
+};
+
+/// @brief The name a sidecar and a console line give the velocity model.
+[[nodiscard]] constexpr const char* gps_velocity_model_name(GpsVelocityModel model)
+{
+  return model == GpsVelocityModel::kDoppler ? "doppler" : "speed_course";
+}
+
+/// @brief Reads --gps-velocity's argument: `doppler` or `speed-course`.
+/// @return false, leaving `model` unchanged, for anything else.
+[[nodiscard]] inline bool gps_velocity_model_from_option(std::string_view text, GpsVelocityModel& model)
+{
+  if (text == "doppler")
+  {
+    model = GpsVelocityModel::kDoppler;
+    return true;
+  }
+  if (text == "speed-course")
+  {
+    model = GpsVelocityModel::kSpeedCourse;
+    return true;
+  }
+  return false;
+}
 
 /// The FMU's own defaults: white per epoch, an honest hAcc/vAcc/sAcc. Written
 /// to the parameter set explicitly even though the FMU would default to them,
 /// so the sidecar is always a complete record.
-inline constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1,  1.0, 0.0, 0.0,
-                                               100.0,   0.0, 0.0, 10.0, 1.0, 0.2, 0.0 };
+inline constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5,  3.0, 0.1, 1.0, 0.0,  0.0,  100.0, 0.0,
+                                               0.0,     10.0, 1.0, 0.2, 0.0, 0.05, 0.05, 0.10 };
 
 /// The realistic receiver. Each position channel's total 1-sigma stays within
 /// 2 % of the default's -- nothing on a published figure moves by magnitude,
@@ -192,8 +231,11 @@ inline constexpr GpsErrorModel kWhiteReceiver{ "white", 1.5, 3.0, 0.1,  1.0, 0.0
 /// flatter an arithmetic claim rather than to be plausible. The values are tabulated in doc/sensor_models.rst.
 /// Vertical velocity follows speed at twice the size, white and correlated
 /// alike (0.1 + 0.2 m/s, total 0.224 against the white receiver's 0.2).
-inline constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3, 0.6, 0.05, 0.3, 1.5, 3.0,
-                                                    100.0,        0.1, 1.0, 10.0, 0.7, 0.1, 0.2 };
+/// Under the Doppler velocity model these velocity terms do not apply: its
+/// error is white per axis (0.05, 0.05, 0.10 m/s, as the white receiver's),
+/// with no correlated term yet.
+inline constexpr GpsErrorModel kCorrelatedReceiver{ "correlated", 0.3,  0.6, 0.05, 0.3, 1.5,  3.0,  100.0, 0.1,
+                                                    1.0,          10.0, 0.7, 0.1,  0.2, 0.05, 0.05, 0.10 };
 
 /// @brief Total 1-sigma of a channel whose error is white plus correlated.
 [[nodiscard]] inline double total_sigma(double white, double correlated) { return std::hypot(white, correlated); }

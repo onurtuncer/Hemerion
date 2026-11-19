@@ -8,7 +8,9 @@
 // Error model of the GPS FMU simulator
 // (modules/sensors/include/Hemerion/gps/fmu/gpsNoiseModel.hpp): the white
 // per-epoch term, the time-correlated Gauss-Markov term, the reported
-// accuracy, and reproducibility from a seed.
+// accuracy, reproducibility from a seed, and the two velocity error models --
+// per-axis Doppler (the default) and speed/course, which must reproduce the
+// model as it stood before Doppler existed, bit for bit.
 //
 // These assert *statistics*, not that the code ran: the sample
 // autocorrelation of a long error sequence at chosen lags, and its RMS,
@@ -21,10 +23,12 @@
 //
 // Plain asserts + exit code, matching test_gps_dynamics.cpp.
 // ------------------------------------------------------------------------------
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <numbers>
 #include <vector>
 
@@ -34,6 +38,7 @@ using hemerion::sensors::gps::GpsFix;
 using hemerion::sensors::gps::fmu::GpsNoiseConfig;
 using hemerion::sensors::gps::fmu::GpsNoiseModel;
 using hemerion::sensors::gps::fmu::GpsTruthSample;
+using hemerion::sensors::gps::fmu::GpsVelocityErrorModel;
 
 namespace
 {
@@ -113,6 +118,13 @@ double autocorrelation(const std::vector<double>& x, std::size_t lag)
 }
 
 bool near(double value, double expected, double tolerance) { return std::fabs(value - expected) <= tolerance; }
+
+/// The speed/course model, every other setting as `base`.
+GpsNoiseConfig speed_course(GpsNoiseConfig base = {})
+{
+  base.velocity_error_model = GpsVelocityErrorModel::kSpeedCourse;
+  return base;
+}
 
 // Same seed, same configuration: the same fixes, bit for bit. This is what
 // the FMU's `seed` parameter buys a co-simulation.
@@ -279,7 +291,7 @@ void test_speed_floor_and_course_wrap()
 // would break, since it caches half of each pair across calls.
 void test_vertical_velocity_moves_no_other_channel()
 {
-  GpsNoiseConfig without;
+  GpsNoiseConfig without = speed_course();
   without.horizontal_pos_correlated_m = 1.5F;
   without.vertical_pos_correlated_m = 3.0F;
   without.speed_correlated_mps = 0.1F;
@@ -313,18 +325,23 @@ void test_vertical_velocity_moves_no_other_channel()
 }
 
 // NAV-PVT's fields agree with each other, as a real receiver's do: the
-// horizontal velocity is the speed along the course.
+// horizontal velocity is the speed along the course -- in the speed/course
+// model by construction, in the Doppler model because speed and course are
+// derived from the noisy north and east components.
 void test_velocity_agrees_with_speed_and_course()
 {
-  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/22);
-  for (int k = 1; k <= 500; ++k)
+  for (const GpsNoiseConfig& config : { speed_course(), GpsNoiseConfig{} })
   {
-    const GpsFix fix = model.apply(truth_at(static_cast<std::uint64_t>(k) * kEpochUs));
-    assert(fix.ned_velocity_valid);
-    assert(near(std::hypot(fix.vel_north_mps, fix.vel_east_mps), fix.ground_speed_mps, 1e-3));
-    double course = std::atan2(fix.vel_east_mps, fix.vel_north_mps) * 180.0 / std::numbers::pi;
-    course = std::fmod(course + 360.0, 360.0);
-    assert(near(course, fix.course_deg, 1e-3));
+    GpsNoiseModel model(config, /*seed=*/22);
+    for (int k = 1; k <= 500; ++k)
+    {
+      const GpsFix fix = model.apply(truth_at(static_cast<std::uint64_t>(k) * kEpochUs));
+      assert(fix.ned_velocity_valid);
+      assert(near(std::hypot(fix.vel_north_mps, fix.vel_east_mps), fix.ground_speed_mps, 1e-3));
+      double course = std::atan2(fix.vel_east_mps, fix.vel_north_mps) * 180.0 / std::numbers::pi;
+      course = std::fmod(course + 360.0, 360.0);
+      assert(near(course, fix.course_deg, 1e-3));
+    }
   }
 }
 
@@ -333,7 +350,7 @@ void test_velocity_agrees_with_speed_and_course()
 void test_vertical_velocity_statistics()
 {
   std::vector<double> errors;
-  GpsNoiseModel white(GpsNoiseConfig{}, /*seed=*/23);
+  GpsNoiseModel white(speed_course(), /*seed=*/23);
   for (int k = 1; k <= kSamples; ++k)
   {
     GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
@@ -344,7 +361,7 @@ void test_vertical_velocity_statistics()
   assert(near(mean(errors), 0.0, 0.005));
   assert(std::fabs(autocorrelation(errors, 1)) < 0.03);
 
-  GpsNoiseConfig config;
+  GpsNoiseConfig config = speed_course();
   config.vertical_speed_noise_mps = 0.0F;
   config.vertical_speed_correlated_mps = 0.5F;
   config.velocity_correlation_time_s = 10.0F;  // 100 epochs
@@ -365,7 +382,7 @@ void test_vertical_velocity_statistics()
 // 3 m/s across track) and the error is far from isotropic.
 void test_speed_accuracy_is_honest_on_average()
 {
-  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/25);
+  GpsNoiseModel model(speed_course(), /*seed=*/25);
   constexpr double kDeg = std::numbers::pi / 180.0;
   double sum_squared = 0.0;
   double reported = 0.0;
@@ -387,11 +404,315 @@ void test_speed_accuracy_is_honest_on_average()
 
   // An optimistic receiver scales sAcc like hAcc and vAcc; a slow one
   // reports little more than its speed and vertical terms.
-  GpsNoiseConfig optimistic;
+  GpsNoiseConfig optimistic = speed_course();
   optimistic.accuracy_scale = 0.7F;
   GpsNoiseModel scaled(optimistic, /*seed=*/25);
   assert(near(scaled.apply(truth_at(kEpochUs)).speed_accuracy_mps, 0.7 * model.velocity_sigma_mps(172.0F), 0.01));
   assert(near(model.velocity_sigma_mps(0.0F), std::sqrt((0.01 + 0.04) / 3.0), 1e-6));
+}
+
+// ---------------------------------------------------------------------------
+// Velocity error models
+// ---------------------------------------------------------------------------
+
+/// FNV-1a over the bytes of every numeric field of the fixes of a fixed
+/// scenario: three configurations (defaults; every correlated term on; that
+/// with an optimistic receiver and no white speed error), 2000 fixes each,
+/// every third one at zero speed, velD non-zero.
+std::uint64_t scenario_hash(const GpsNoiseConfig& base)
+{
+  std::uint64_t hash = 0xcbf29ce484222325ULL;
+  const auto mix = [&hash](const auto& value) {
+    unsigned char bytes[sizeof value];
+    std::memcpy(bytes, &value, sizeof value);
+    for (const unsigned char byte : bytes)
+    {
+      hash = (hash ^ byte) * 0x100000001b3ULL;
+    }
+  };
+  for (int variant = 0; variant < 3; ++variant)
+  {
+    GpsNoiseConfig config = base;
+    if (variant >= 1)
+    {
+      config.horizontal_pos_correlated_m = 1.5F;
+      config.vertical_pos_correlated_m = 3.0F;
+      config.speed_correlated_mps = 0.1F;
+      config.course_correlated_deg = 1.0F;
+      config.vertical_speed_correlated_mps = 0.2F;
+    }
+    if (variant == 2)
+    {
+      config.accuracy_scale = 0.7F;
+      config.speed_noise_mps = 0.0F;
+    }
+    GpsNoiseModel model(config, 17U + static_cast<std::uint64_t>(variant));
+    for (int k = 1; k <= 2000; ++k)
+    {
+      GpsTruthSample truth = truth_at(100000ULL * static_cast<std::uint64_t>(k));
+      truth.altitude_m = 3052.0F;
+      truth.ground_speed_mps = (k % 3 == 0) ? 0.0F : 172.0F;
+      truth.course_deg = 45.0F + 0.01F * static_cast<float>(k);
+      truth.v_down_mps = -3.0F;
+      const GpsFix fix = model.apply(truth);
+      mix(fix.latitude_deg);
+      mix(fix.longitude_deg);
+      mix(fix.altitude_m);
+      mix(fix.ground_speed_mps);
+      mix(fix.course_deg);
+      mix(fix.vel_north_mps);
+      mix(fix.vel_east_mps);
+      mix(fix.vel_down_mps);
+      mix(fix.speed_accuracy_mps);
+      mix(fix.horizontal_accuracy_m);
+      mix(fix.vertical_accuracy_m);
+    }
+  }
+  return hash;
+}
+
+// Speed/course mode is the model as it stood before the Doppler model
+// (commit 2ad8c56), bit for bit: the scenario's hash is the one that model
+// produced. std::normal_distribution is not specified draw for draw, so the
+// reference is per standard library -- both computed from 2ad8c56's
+// gpsNoiseModel.hpp on 2026-11-19 (clang 20 on the MSVC STL; g++ 13 on
+// libstdc++), each identical at -O0 and -O2. Another library has no
+// reference and is reported, not failed.
+void test_speed_course_reproduces_the_previous_model()
+{
+  const std::uint64_t hash = scenario_hash(speed_course());
+#if defined(_MSVC_STL_VERSION)
+  assert(hash == 0x6035EC2ED604FADCULL);
+#elif defined(__GLIBCXX__)
+  assert(hash == 0x6714E70BACB962FDULL);
+#else
+  std::printf("test_gps_noise: no speed/course reference for this standard library (hash 0x%016llX)\n",
+              static_cast<unsigned long long>(hash));
+#endif
+  // And the Doppler model is something else.
+  assert(scenario_hash(GpsNoiseConfig{}) != hash);
+}
+
+// Which velocity model is selected moves no position draw: the main stream
+// draws speed and course errors in both, so latitude, longitude and altitude
+// are identical, and so are hAcc and vAcc.
+void test_velocity_model_moves_no_position_draw()
+{
+  GpsNoiseConfig doppler;
+  doppler.horizontal_pos_correlated_m = 1.5F;
+  doppler.course_correlated_deg = 1.0F;
+  GpsNoiseModel a(doppler, /*seed=*/31);
+  GpsNoiseModel b(speed_course(doppler), /*seed=*/31);
+  for (int k = 1; k <= 2000; ++k)
+  {
+    const GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    const GpsFix fa = a.apply(truth);
+    const GpsFix fb = b.apply(truth);
+    assert(fa.latitude_deg == fb.latitude_deg);
+    assert(fa.longitude_deg == fb.longitude_deg);
+    assert(fa.altitude_m == fb.altitude_m);
+    assert(fa.horizontal_accuracy_m == fb.horizontal_accuracy_m);
+    assert(fa.vertical_accuracy_m == fb.vertical_accuracy_m);
+  }
+}
+
+/// Per-axis NED velocity errors of a run of Doppler fixes.
+struct AxisErrors
+{
+  std::vector<double> north;
+  std::vector<double> east;
+  std::vector<double> down;
+};
+
+AxisErrors doppler_errors(GpsNoiseModel& model, float speed_mps, int count)
+{
+  constexpr double kDeg = std::numbers::pi / 180.0;
+  AxisErrors errors;
+  for (int k = 1; k <= count; ++k)
+  {
+    GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    truth.ground_speed_mps = speed_mps;
+    truth.v_down_mps = -7.0F;
+    const GpsFix fix = model.apply(truth);
+    errors.north.push_back(fix.vel_north_mps - (speed_mps * std::cos(45.0 * kDeg)));
+    errors.east.push_back(fix.vel_east_mps - (speed_mps * std::sin(45.0 * kDeg)));
+    errors.down.push_back(static_cast<double>(fix.vel_down_mps) + 7.0);
+  }
+  return errors;
+}
+
+/// The sample sigma matches `sigma` to four standard errors (sigma / sqrt(2n)
+/// for a normal sample), the mean is zero to four (sigma / sqrt(n)), and there
+/// is no memory between fixes.
+void assert_white_at(const std::vector<double>& errors, double sigma)
+{
+  const double n = static_cast<double>(errors.size());
+  assert(near(rms(errors), sigma, 4.0 * sigma / std::sqrt(2.0 * n)));
+  assert(near(mean(errors), 0.0, 4.0 * sigma / std::sqrt(n)));
+  assert(std::fabs(autocorrelation(errors, 1)) < 0.03);
+}
+
+// The Doppler default: white per-axis errors at 0.05, 0.05 and 0.10 m/s, the
+// same at rest as at 172 m/s -- speed-independent, unlike the course term of
+// the speed/course model, which is 3 m/s across track at that speed.
+void test_doppler_axes_are_white_and_speed_independent()
+{
+  const GpsNoiseConfig defaults;
+  assert(defaults.velocity_error_model == GpsVelocityErrorModel::kDoppler);
+  assert(defaults.doppler_north_noise_mps == 0.05F);
+  assert(defaults.doppler_east_noise_mps == 0.05F);
+  assert(defaults.doppler_down_noise_mps == 0.10F);
+
+  for (const float speed_mps : { 0.0F, 172.0F })
+  {
+    GpsNoiseModel model(defaults, /*seed=*/32);
+    const AxisErrors errors = doppler_errors(model, speed_mps, kSamples);
+    assert_white_at(errors.north, 0.05);
+    assert_white_at(errors.east, 0.05);
+    assert_white_at(errors.down, 0.10);
+  }
+
+  // Per axis, not shared: a different sigma on each comes back on each.
+  GpsNoiseConfig config;
+  config.doppler_north_noise_mps = 0.02F;
+  config.doppler_east_noise_mps = 0.08F;
+  config.doppler_down_noise_mps = 0.3F;
+  GpsNoiseModel model(config, /*seed=*/33);
+  const AxisErrors errors = doppler_errors(model, 172.0F, kSamples);
+  assert_white_at(errors.north, 0.02);
+  assert_white_at(errors.east, 0.08);
+  assert_white_at(errors.down, 0.3);
+  // And independent: the sample correlation of north and east is zero to
+  // about four standard errors (1 / sqrt(n) = 0.007).
+  double cross = 0.0;
+  for (std::size_t k = 0; k < errors.north.size(); ++k)
+  {
+    cross += errors.north[k] * errors.east[k];
+  }
+  cross /= static_cast<double>(errors.north.size()) * rms(errors.north) * rms(errors.east);
+  assert(std::fabs(cross) < 0.03);
+}
+
+// sAcc under Doppler: sqrt((sN^2 + sE^2 + sD^2) / 3) times accuracy_scale,
+// whatever the speed -- 0.0707 m/s at the defaults -- and honest on average:
+// the measured per-axis RMS of the velocity error is that number.
+void test_doppler_speed_accuracy()
+{
+  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/34);
+  const double expected = std::sqrt((0.05 * 0.05 + 0.05 * 0.05 + 0.10 * 0.10) / 3.0);  // 0.0707
+  assert(near(model.velocity_sigma_mps(0.0F), expected, 1e-6));
+  assert(near(model.velocity_sigma_mps(172.0F), expected, 1e-6));
+
+  GpsTruthSample truth = truth_at(kEpochUs);
+  assert(near(model.apply(truth).speed_accuracy_mps, expected, 1e-6));
+  truth.ground_speed_mps = 0.0F;
+  assert(near(model.apply(truth).speed_accuracy_mps, expected, 1e-6));
+
+  GpsNoiseConfig optimistic;
+  optimistic.accuracy_scale = 0.7F;
+  GpsNoiseModel scaled(optimistic, /*seed=*/34);
+  assert(near(scaled.apply(truth_at(kEpochUs)).speed_accuracy_mps, 0.7 * expected, 1e-6));
+
+  GpsNoiseModel measured(GpsNoiseConfig{}, /*seed=*/35);
+  const AxisErrors errors = doppler_errors(measured, 172.0F, kSamples);
+  const double per_axis = std::sqrt((rms(errors.north) * rms(errors.north) + rms(errors.east) * rms(errors.east) +
+                                     rms(errors.down) * rms(errors.down)) /
+                                    3.0);
+  assert(near(per_axis, expected, 0.02 * expected));
+}
+
+// Speed over ground is the magnitude of the noisy horizontal velocity at
+// every speed. The course is its direction above ten horizontal sigmas
+// (0.5 m/s at the defaults); below, the derived direction would be mostly
+// the noise's, so the course is the speed/course model's -- truth plus the
+// configured course error -- as it was before the Doppler model existed.
+void test_doppler_course_at_low_speed()
+{
+  GpsNoiseModel model(GpsNoiseConfig{}, /*seed=*/36);
+  double worst_course_error_deg = 0.0;
+  bool any_derived_off_track = false;
+  for (int k = 1; k <= 2000; ++k)
+  {
+    for (const float speed_mps : { 0.0F, 0.2F })
+    {
+      GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+      truth.ground_speed_mps = speed_mps;
+      const GpsFix fix = model.apply(truth);
+      assert(near(std::hypot(fix.vel_north_mps, fix.vel_east_mps), fix.ground_speed_mps, 1e-6));
+      assert(fix.course_deg >= 0.0F && fix.course_deg < 360.0F);
+      worst_course_error_deg = std::max(worst_course_error_deg, std::fabs(static_cast<double>(fix.course_deg) - 45.0));
+      const double derived = std::atan2(fix.vel_east_mps, fix.vel_north_mps) * 180.0 / std::numbers::pi;
+      any_derived_off_track = any_derived_off_track || std::fabs(derived - 45.0) > 30.0;
+    }
+  }
+  // 1 deg of course noise: 4000 draws stay inside 6 sigma, while the noise's
+  // own direction at these speeds goes everywhere.
+  assert(worst_course_error_deg < 6.0);
+  assert(any_derived_off_track);
+
+  // Above the threshold the course is the derived one.
+  GpsTruthSample truth = truth_at(kEpochUs);
+  truth.ground_speed_mps = 1.0F;
+  const GpsFix fix = model.apply(truth);
+  const double derived = std::atan2(fix.vel_east_mps, fix.vel_north_mps) * 180.0 / std::numbers::pi;
+  assert(near(fix.course_deg, std::fmod(derived + 360.0, 360.0), 1e-3));
+}
+
+// A zero Doppler sigma draws nothing: that axis is exactly the truth, with no
+// zero-width distribution constructed (MSVC debug builds abort on one), and
+// with every sigma zero the velocity is the truth and sAcc is zero.
+void test_doppler_zero_sigma_is_exact()
+{
+  GpsNoiseConfig config;
+  config.doppler_north_noise_mps = 0.0F;
+  config.doppler_east_noise_mps = 0.0F;
+  config.doppler_down_noise_mps = 0.0F;
+  GpsNoiseModel model(config, /*seed=*/37);
+  constexpr double kDeg = std::numbers::pi / 180.0;
+  GpsTruthSample truth = truth_at(kEpochUs);
+  truth.v_down_mps = 2.5F;
+  const GpsFix fix = model.apply(truth);
+  assert(near(fix.vel_north_mps, 172.0 * std::cos(45.0 * kDeg), 1e-4));
+  assert(near(fix.vel_east_mps, 172.0 * std::sin(45.0 * kDeg), 1e-4));
+  assert(fix.vel_down_mps == 2.5F);
+  assert(near(fix.ground_speed_mps, 172.0, 1e-4));
+  assert(near(fix.course_deg, 45.0, 1e-4));
+  assert(fix.speed_accuracy_mps == 0.0F);
+}
+
+// Same seed, same Doppler fixes, bit for bit; another seed, other fixes.
+void test_doppler_seed_reproduces_the_sequence()
+{
+  GpsNoiseModel a(GpsNoiseConfig{}, /*seed=*/42);
+  GpsNoiseModel b(GpsNoiseConfig{}, /*seed=*/42);
+  GpsNoiseModel c(GpsNoiseConfig{}, /*seed=*/43);
+  bool differs = false;
+  for (int k = 1; k <= 200; ++k)
+  {
+    const GpsTruthSample truth = truth_at(static_cast<std::uint64_t>(k) * kEpochUs);
+    const GpsFix fa = a.apply(truth);
+    const GpsFix fb = b.apply(truth);
+    const GpsFix fc = c.apply(truth);
+    assert(fa.vel_north_mps == fb.vel_north_mps);
+    assert(fa.vel_east_mps == fb.vel_east_mps);
+    assert(fa.vel_down_mps == fb.vel_down_mps);
+    assert(fa.ground_speed_mps == fb.ground_speed_mps);
+    assert(fa.course_deg == fb.course_deg);
+    differs = differs || (fa.vel_north_mps != fc.vel_north_mps);
+  }
+  assert(differs);
+}
+
+// The FMU's integer parameter: 0 and 1 are the two models, anything else is
+// refused and leaves the selection alone.
+void test_velocity_model_codes()
+{
+  using hemerion::sensors::gps::fmu::velocity_error_model_from_code;
+  GpsVelocityErrorModel model = GpsVelocityErrorModel::kSpeedCourse;
+  assert(velocity_error_model_from_code(0, model) && model == GpsVelocityErrorModel::kDoppler);
+  assert(velocity_error_model_from_code(1, model) && model == GpsVelocityErrorModel::kSpeedCourse);
+  assert(!velocity_error_model_from_code(2, model) && model == GpsVelocityErrorModel::kSpeedCourse);
+  assert(!velocity_error_model_from_code(-1, model));
 }
 
 }  // namespace
@@ -410,6 +731,14 @@ int main()
   test_reported_accuracy();
   test_state_hold_and_reset();
   test_speed_floor_and_course_wrap();
+  test_speed_course_reproduces_the_previous_model();
+  test_velocity_model_moves_no_position_draw();
+  test_doppler_axes_are_white_and_speed_independent();
+  test_doppler_speed_accuracy();
+  test_doppler_course_at_low_speed();
+  test_doppler_zero_sigma_is_exact();
+  test_doppler_seed_reproduces_the_sequence();
+  test_velocity_model_codes();
 
   std::puts("test_gps_noise: all checks passed");
   return 0;

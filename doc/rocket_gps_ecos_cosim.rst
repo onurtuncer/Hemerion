@@ -255,6 +255,15 @@ receiver, and consumers are expected to gate on the fix type.
 ``gps_flight_computer`` does, logs the epoch with its ``fix_type`` column but
 without the meaningless position, and reports the window.
 
+The receiver's **velocity error model** is written explicitly too, and here it
+is not the FMU's default. Since 2026-11-19 the GPS FMU defaults to per-axis
+NED Doppler errors (:ref:`sensor_models`); this host selects the earlier
+speed/course model (``gps::velocity_error_model`` = 1) unless given
+``--gps-velocity doppler``, because this scenario is Paper 1's case study and
+its figures and statistics were made with that receiver. With it a seeded run
+reproduces every number bit for bit; under Doppler the positions are still
+identical and only the velocity fields differ.
+
 Driving the IMU over SPI
 ------------------------
 
