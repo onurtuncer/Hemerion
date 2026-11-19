@@ -52,9 +52,8 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get update
           # libtbb-dev: Ecos links -ltbb on Linux (doc/rocket_gps_ecos_cosim.rst lists the same packages).
-          sudo apt-get install -y g++-13 g++-14 ninja-build unzip libtbb-dev
+          hemerion/.github/scripts/apt-install.sh g++-13 g++-14 ninja-build unzip libtbb-dev
 
       # ── Aetherion at the pinned commit ──────────────────────────────────────
       # Cached by commit and AETHERION_RECIPE: bump the recipe number whenever

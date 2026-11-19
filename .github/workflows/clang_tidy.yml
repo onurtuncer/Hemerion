@@ -38,9 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build clang-18 clang-tidy-18
+          .github/scripts/apt-install.sh --no-install-recommends ninja-build clang-18 clang-tidy-18
 
       # Direct cmake call (no preset) to avoid -Rpass=.* from clang-debug
       # which floods the log with thousands of inlining notes.

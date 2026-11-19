@@ -35,8 +35,15 @@ jobs:
       # rather than anything naming the real cause.
       - name: Install git for actions/checkout
         run: |
-          apt-get update -q
-          apt-get install -y --no-install-recommends git ca-certificates
+          # Before checkout, so .github/scripts/apt-install.sh is not here yet: the same retry, inline.
+          for attempt in 1 2 3 4 5; do
+            apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -q \
+              && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+                 install -y --no-install-recommends git ca-certificates && break
+            [ "$attempt" -lt 5 ] || { echo "::error::apt-get failed after 5 attempts"; exit 1; }
+            echo "::warning::apt-get failed (attempt $attempt/5); retrying in $((attempt * 30)) s"
+            sleep $((attempt * 30))
+          done
 
       - uses: actions/checkout@v7
         with:
@@ -48,10 +55,10 @@ jobs:
       # g++-14 the native workflows pin (see README.md) is not required.
       - name: Install build dependencies
         run: |
-          apt-get install -y --no-install-recommends cmake ninja-build python3-pip
-          command -v arm-none-eabi-g++ >/dev/null || apt-get install -y --no-install-recommends \
+          .github/scripts/apt-install.sh --no-install-recommends cmake ninja-build python3-pip
+          command -v arm-none-eabi-g++ >/dev/null || .github/scripts/apt-install.sh --no-install-recommends \
             gcc-arm-none-eabi libnewlib-arm-none-eabi libnewlib-dev libstdc++-arm-none-eabi-newlib
-          command -v g++ >/dev/null || apt-get install -y --no-install-recommends g++
+          command -v g++ >/dev/null || .github/scripts/apt-install.sh --no-install-recommends g++
           # Install from the requirements file, not `pip3 install pyrenode3`, which was wrong three ways:
           # pyrenode3 is not on PyPI at all (antmicro ship it only from git, hence the commit pin in that
           # file), pytest was never installed even though ctest invokes `python3 -m pytest`, and PEP 668
