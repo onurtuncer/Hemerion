@@ -24,6 +24,7 @@
 // Plain asserts + exit code, matching test_gps_dynamics.cpp.
 // ------------------------------------------------------------------------------
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -423,8 +424,8 @@ std::uint64_t scenario_hash(const GpsNoiseConfig& base)
 {
   std::uint64_t hash = 0xcbf29ce484222325ULL;
   const auto mix = [&hash](const auto& value) {
-    unsigned char bytes[sizeof value];
-    std::memcpy(bytes, &value, sizeof value);
+    std::array<unsigned char, sizeof value> bytes{};
+    std::memcpy(bytes.data(), &value, sizeof value);
     for (const unsigned char byte : bytes)
     {
       hash = (hash ^ byte) * 0x100000001b3ULL;
@@ -546,7 +547,7 @@ AxisErrors doppler_errors(GpsNoiseModel& model, float speed_mps, int count)
 /// is no memory between fixes.
 void assert_white_at(const std::vector<double>& errors, double sigma)
 {
-  const double n = static_cast<double>(errors.size());
+  const auto n = static_cast<double>(errors.size());
   assert(near(rms(errors), sigma, 4.0 * sigma / std::sqrt(2.0 * n)));
   assert(near(mean(errors), 0.0, 4.0 * sigma / std::sqrt(n)));
   assert(std::fabs(autocorrelation(errors, 1)) < 0.03);
