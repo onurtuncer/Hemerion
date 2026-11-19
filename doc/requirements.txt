@@ -17,7 +17,7 @@ sphinx-rtd-theme
 # was scoped to semver-major updates and the bump got through anyway, and
 # build-docs has been red on main since. The ignore entry now covers every
 # breathe version.
-breathe==4.36.0
+breathe==5.1.0
 sphinxcontrib-bibtex
 
 # Measures cyclomatic complexity for doc/generate_metrixpp_report.py, which
