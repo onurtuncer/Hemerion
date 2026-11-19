@@ -495,6 +495,17 @@ jobs:
             W20 ${{ needs.plan.outputs.turbulence }} m/s, Aetherion ${{ needs.plan.outputs.version }}
             (${{ needs.plan.outputs.commit }}), Linux
         run: |
+          # download-artifact extracts a lone matching artifact straight into its path, without the directory
+          # named after it (a one-seed dispatch, run 44530268940). Put it back under the name the fly job gave it,
+          # read from the sidecar every case writes.
+          if [ -f step7-runs/f16_truth.config ]; then
+            lone_case=$(sed -n 's/^check_case=//p' step7-runs/f16_truth.config)
+            lone_seed=$(sed -n 's/^seed=//p' step7-runs/f16_truth.config)
+            lone="step7-case${lone_case}-seed-${lone_seed}"
+            mkdir "step7-runs/$lone"
+            find step7-runs -mindepth 1 -maxdepth 1 ! -name "$lone" -exec mv {} "step7-runs/$lone/" \;
+            echo "One artifact, extracted flat: moved it under step7-runs/$lone"
+          fi
           mkdir -p step7-summary
           status=0
           for c in $(python3 -c "import json, os; print(' '.join(json.loads(os.environ['CASE_LIST'])))"); do
