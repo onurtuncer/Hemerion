@@ -16,8 +16,7 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-14
+          .github/scripts/apt-install.sh g++-14
 
       # The WMM table is generated from vendor/wmm/WMM.COF and committed, so the build
       # needs no Python -- which leaves exactly one failure mode, a committed table that
@@ -48,8 +47,7 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-14
+          .github/scripts/apt-install.sh g++-14
 
       - name: Configure
         run: cmake --preset=fmu-native

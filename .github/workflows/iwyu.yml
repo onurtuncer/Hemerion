@@ -38,9 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build clang iwyu
+          .github/scripts/apt-install.sh --no-install-recommends ninja-build clang iwyu
 
       # Use a direct cmake call instead of --preset=clang-debug to avoid the
       # -Rpass=.* remarks flag, which floods the build log with thousands of

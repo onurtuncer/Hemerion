@@ -75,13 +75,9 @@ jobs:
         # runs out of four (the others took ~1 min), with no timeout to end it
         # before GitHub's 6 h default. Network timeouts make a stalled mirror
         # fail and retry instead of waiting forever.
-        timeout-minutes: 10
-        env:
-          DEBIAN_FRONTEND: noninteractive
+        timeout-minutes: 20
         run: |
-          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-          sudo -E apt-get $APT_OPTS update -qq
-          sudo -E apt-get $APT_OPTS install -y -qq doxygen graphviz \
+          .github/scripts/apt-install.sh -qq doxygen graphviz \
             texlive-latex-extra texlive-pictures texlive-fonts-recommended \
             poppler-utils
           echo "Doxygen version: $(doxygen --version)"

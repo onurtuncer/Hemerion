@@ -181,10 +181,9 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get update
           # libtbb-dev: Ecos links -ltbb on Linux (doc/rocket_gps_ecos_cosim.rst lists the same packages).
           # python3-yaml: the recipe comparison below.
-          sudo apt-get install -y g++-13 g++-14 ninja-build unzip libtbb-dev python3-yaml
+          hemerion/.github/scripts/apt-install.sh g++-13 g++-14 ninja-build unzip libtbb-dev python3-yaml
 
       - name: Check the Aetherion recipe matches integration.yml
         run: |
@@ -336,8 +335,7 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-14 ninja-build unzip libtbb-dev
+          hemerion/.github/scripts/apt-install.sh g++-14 ninja-build unzip libtbb-dev
 
       # Built by the plan job (or by integration.yml, which shares the entry); never rebuilt per seed.
       - name: Restore the pinned Aetherion build
