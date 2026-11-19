@@ -59,4 +59,8 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME scripts.aggregate_replay_summaries
            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_aggregate_replay_summaries.py")
   set_tests_properties(scripts.aggregate_replay_summaries PROPERTIES LABELS "unit")
+  # The arrival-clock fit (scripts/fit_arrival_clock.py) against synthetic logs with a known clock.
+  add_test(NAME scripts.fit_arrival_clock COMMAND "${Python3_EXECUTABLE}"
+                                                  "${CMAKE_CURRENT_SOURCE_DIR}/test_fit_arrival_clock.py")
+  set_tests_properties(scripts.fit_arrival_clock PROPERTIES LABELS "unit")
 endif()
