@@ -34,7 +34,7 @@ updates:
       # "Cannot find file" and build-docs fails. doc/requirements.txt said so
       # in a comment and was bumped regardless on 2026-09-30, so the guard
       # belongs here where the bot reads it. Drop this entry when a release
-      # fixes it, and re-test build-docs on the PR before merging.
+      # fixes it, and re-test build-docs on the PR before merging. 5.1.0 got
+      # through on 2026-10-07 while this entry was scoped to semver-major
+      # updates, so it now ignores every version.
       - dependency-name: "breathe"
-        update-types:
-          - "version-update:semver-major"
