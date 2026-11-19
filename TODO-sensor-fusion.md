@@ -159,6 +159,25 @@ Not built:
       a clock on the CI runner either: host time fits 1.30 × part time with
       307 ms rms residual (seed 1). That matters for step 10's
       delayed-measurement handling.
+- [ ] **Step-7 batch for the other cases (2026-11-19).** `step7-log-batch.yml`
+      now takes `cases` (11, 12, 13.1–13.4) beside `seeds`: one job per case
+      and seed, each case over its reference window unless `duration_s` is
+      given (11 and 12: 200 s, 13.1: 60 s, 13.3 and 13.4: 240 s), 13.x
+      through `f16_autopilot_cosim`, one table per case. The runner gained
+      `--case`; for case 12 its GNSS check wants every epoch logged and no 3D
+      fix, since at Mach 2.01 the receiver is outside its dynamics envelope
+      for the whole run and the BMP390 below its rated floor (a Windows smoke
+      run at 20 s: 200 epochs, 0 fixes, 997 of 997 conversions outside the
+      envelope; the replay runs on IMU and barometer alone and exits 0). The
+      table leaves NIS empty for a measurement with no updates rather than
+      averaging in the replay's 0. Every sensor runs at its FMU defaults; no
+      receiver option is passed. To dispatch once merged:
+      `gh workflow run step7-log-batch.yml --ref main -f cases=12,13.1,13.3,13.4 -f seeds=1-20 -f turbulence=8 -f max_parallel=20`.
+      **The batch will be re-run after the Doppler default lands**
+      (maintainer decision 2026-11-19: per-axis NED Doppler becomes the GPS
+      FMU's default velocity error model). Because the batch uses the FMU
+      default, the re-run is only a dispatch; case 11's batch above was flown
+      on the speed/course model and is re-run with them.
 
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
