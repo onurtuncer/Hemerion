@@ -60,8 +60,8 @@ optional tail-end work.
 
 P1J and P2 both block on the *same* body of work. Do it once, write it twice.
 
-1. Run baro, mag, radalt end-to-end in a case study — currently modelled but never
-   validated. Gives P1J its "one pattern, five parts" breadth.
+1. Run baro and mag end-to-end in a case study — currently modelled but never
+   validated. Gives P1J its "one pattern, four parts" breadth.
 2. Run the identical decoder in three tiers: native, Renode, physical STM32H743.
    Show byte-level results carry across. This is P1J item 2 *and* P2's core
    evidence.
