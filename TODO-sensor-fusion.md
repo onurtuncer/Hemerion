@@ -179,6 +179,46 @@ Not built:
       default, the re-run is only a dispatch; case 11's batch above was flown
       on the speed/course model and is re-run with them.
 
+## Decided (2026-11-19)
+
+- **GNSS velocity error model: per-axis NED Doppler by default; speed/course
+  kept, selectable.** Maintainer decision, implemented on branch
+  `sensors/gps-doppler-velocity`.
+  - The GPS FMU has a fixed integer parameter `velocity_error_model`: 0 =
+    Doppler (default), 1 = speed/course, the model before this change. Any
+    other value fails initialisation.
+  - Doppler: independent white per-fix errors on velN, velE and velD,
+    `doppler_north_noise_mps` = `doppler_east_noise_mps` = 0.05 m/s and
+    `doppler_down_noise_mps` = 0.10 m/s, speed-independent. No correlated
+    term for now; one would come behind its own parameter, 0 = off.
+  - Speed over ground and course (NAV-PVT `gSpeed`, `headMot`) are derived
+    from the noisy velN/velE, as a receiver does. Below ten horizontal sigmas
+    of ground speed (0.5 m/s at the defaults) the derived course would be
+    mostly noise, so there the course stays what the model gave before: truth
+    plus `course_noise_deg`. A rocket on the pad keeps a steady heading.
+  - `sAcc` = `accuracy_scale` × sqrt((σN² + σE² + σD²) / 3), the existing
+    trace-honest convention: 0.0707 m/s at the defaults (71 mm/s on the
+    wire), at any speed, where speed/course reports ~1.7 m/s at 172 m/s.
+    Measured end to end on case 11 (seed 5, 20 s, Windows): velocity error
+    RMS 0.051 / 0.053 / 0.108 m/s.
+  - RNG: Doppler draws come from a third stream (`seed` ^ a constant). The
+    main stream is drawn exactly as before under both models, so the choice
+    moves no position draw (lat/lon/alt, hAcc, vAcc identical), and
+    speed/course mode is bit-identical to the old model.
+    `sensors.gps_noise` asserts the latter against hashes of 2ad8c56's
+    output, one per standard library (MSVC STL, libstdc++). It was also
+    checked directly against 2ad8c56's header over 18 000 fixes on both.
+  - Examples: `--gps-velocity doppler|speed-course` on all three hosts,
+    recorded in the sidecar as `gps_velocity_error_model` with the
+    `gps_doppler_*` sigmas. The F-16 hosts default to `doppler` (the FMU's
+    default). `rocket_gps_cosim` defaults to `speed-course`: it is Paper 1's
+    case study, and a seeded run there must reproduce the published numbers.
+- **Step-7 batches are to be (re)run after this lands**, including case 11 of
+  2026-11-14 (run 43482563098): that batch flew the speed/course receiver,
+  whose GNSS-velocity update was weak (sAcc ~1.7 m/s). The step-7 workflow
+  passes no receiver option, so the re-run is only a dispatch, and the GNSS
+  position errors of each seed will be the same as before.
+
 ## Done since (2026-10-19), against Aetherion's step-2/step-6 findings
 
 - **GPS validity time.** Both flight computers stamped `nominal_time_s` =
@@ -199,8 +239,8 @@ Not built:
   track, 3 m/s at 172 m/s, so the default receiver reports ~1.7 m/s and the
   velocity update is weak on the F-16 cases. A Doppler receiver's velocity
   error is per axis and speed-independent (~0.05–0.1 m/s); modelling it that
-  way would change Paper 1's documented receiver, so it is a decision, not a
-  fix — see "Still open".
+  way would change Paper 1's documented receiver, so it was a decision, not a
+  fix — taken 2026-11-19, see "Decided (2026-11-19)".
 - **GPS altitude datum.** `GpsFix::altitude_m` documented as ellipsoidal from
   UBX (`height`, not `hMSL`) and MSL from NMEA (the NMEA parser does not add
   the geoid separation). Only comments changed.
@@ -230,10 +270,8 @@ before this change.
 
 ## Still open
 
-- [ ] **GNSS velocity error model.** Per-axis NED Doppler noise instead of
-      speed/course noise, deriving speed and course from it as a receiver
-      does. Better for the filter; changes the receiver Paper 1 documents
-      (its parameter table quotes speed 0.1 m/s and course 1.0°).
+- [x] **GNSS velocity error model.** Decided and done 2026-11-19: see
+      "Decided (2026-11-19)".
 - [x] **Radar altimeter rate at a fine step.** `f16_trim_cosim` steps the
       radalt FMU every base step with at least one return, so `--step 0.01`
       makes the "25 Hz" part 100 Hz (2000 returns in 20 s). Not in the

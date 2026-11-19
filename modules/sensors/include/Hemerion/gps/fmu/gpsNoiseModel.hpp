@@ -42,15 +42,34 @@
 /// converted to degrees with a flat-Earth approximation -- adequate for a
 /// sensor noise model; this is not a navigation-grade datum transform.
 ///
-/// **NED velocity.** Horizontal velocity is the noisy speed and course
-/// resolved into north and east, so the four fields agree with each other as
-/// they do in a real NAV-PVT. Vertical velocity has its own white and
-/// correlated terms, drawn from a **second RNG stream** seeded from the same
-/// seed: adding them cannot move a single draw of the position, speed or
-/// course channels, so a seeded run reproduces every number it produced
-/// before velD existed. The reported `sAcc` is the per-axis 1-sigma that an
-/// isotropic covariance would need to carry the same total error as the
-/// velocity actually has -- see speed_accuracy_mps().
+/// **Velocity: two error models** (GpsVelocityErrorModel, selected by
+/// `velocity_error_model`; decided 2026-11-19).
+///
+/// - **Doppler (the default).** A receiver measures velocity from the
+///   carrier's Doppler shift, per axis, and its error does not grow with
+///   speed: independent white errors on north, east and down (0.05, 0.05 and
+///   0.10 m/s by default), drawn from a **third RNG stream**. Speed over
+///   ground and course are then derived from the noisy north and east
+///   components, as the receiver derives them -- except at low speed, where
+///   the derived course would be the direction of the noise: below
+///   kDopplerCourseSpeedFactor horizontal sigmas the course is the
+///   speed/course model's (truth plus course error), as it always was.
+/// - **Speed/course.** The previous model, kept for runs that must
+///   reproduce (Paper 1's rocket case): white and correlated errors on speed
+///   and course, the horizontal velocity their resolution into north and
+///   east, so the four fields agree as in a real NAV-PVT; vertical velocity
+///   with its own white and correlated terms from a **second RNG stream**.
+///   Its error is not isotropic and grows with speed (1 deg of course is
+///   3 m/s across track at 172 m/s).
+///
+/// The main stream is drawn in exactly the same order whichever model is
+/// selected -- speed and course errors included, which the Doppler model
+/// then discards or uses only for its low-speed course -- so the selection
+/// moves no position draw, and in speed/course mode a seeded run reproduces
+/// every number the model produced before the Doppler model existed. The
+/// reported `sAcc` is the per-axis 1-sigma that an isotropic covariance
+/// would need to carry the same total error as the velocity actually has --
+/// see velocity_sigma_mps().
 
 #pragma once
 
@@ -79,6 +98,31 @@ struct GpsTruthSample
   std::uint64_t timestamp_us = 0;  ///< Simulation clock at this step [microseconds].
 };
 
+/// How the receiver's velocity error is modelled; see the file comment. The
+/// numeric values are the FMU's `velocity_error_model` parameter.
+enum class GpsVelocityErrorModel : std::uint8_t
+{
+  kDoppler = 0,     ///< Independent white per-axis NED errors; speed and course derived (default).
+  kSpeedCourse = 1  ///< White and correlated speed and course errors; the model before 2026-11-19.
+};
+
+/// @brief Maps the FMU's integer parameter onto the enum.
+/// @return false, leaving `model` unchanged, for a code that is not a model.
+[[nodiscard]] constexpr bool velocity_error_model_from_code(int code, GpsVelocityErrorModel& model)
+{
+  switch (code)
+  {
+    case static_cast<int>(GpsVelocityErrorModel::kDoppler):
+      model = GpsVelocityErrorModel::kDoppler;
+      return true;
+    case static_cast<int>(GpsVelocityErrorModel::kSpeedCourse):
+      model = GpsVelocityErrorModel::kSpeedCourse;
+      return true;
+    default:
+      return false;
+  }
+}
+
 /// Noise magnitudes and constant receiver-status fields applied by
 /// GpsNoiseModel. The white terms' defaults approximate a u-blox M9N in
 /// open sky; the correlated terms default to off (see the file comment).
@@ -87,8 +131,19 @@ struct GpsNoiseConfig
   // White per-epoch error, 1-sigma.
   float horizontal_pos_noise_m = 1.5F;  ///< Applied independently to north/east [m].
   float vertical_pos_noise_m = 3.0F;    ///< [m].
-  float speed_noise_mps = 0.1F;         ///< [m/s].
-  float course_noise_deg = 1.0F;        ///< [degrees].
+  float speed_noise_mps = 0.1F;         ///< [m/s]; speed/course model only.
+  float course_noise_deg = 1.0F;        ///< [degrees]; speed/course model, and the Doppler model's low-speed course.
+
+  /// Which velocity error model applies. The speed, course and vertical-speed
+  /// terms below belong to kSpeedCourse; the doppler_* terms to kDoppler.
+  GpsVelocityErrorModel velocity_error_model = GpsVelocityErrorModel::kDoppler;
+
+  // Doppler model: white per-epoch NED velocity error, 1-sigma, independent
+  // per axis and of speed. Vertical is twice horizontal, the same geometry
+  // ratio as the position defaults. A zero sigma draws nothing.
+  float doppler_north_noise_mps = 0.05F;  ///< [m/s].
+  float doppler_east_noise_mps = 0.05F;   ///< [m/s].
+  float doppler_down_noise_mps = 0.10F;   ///< [m/s], positive downwards as velD.
 
   // Time-correlated error: first-order Gauss-Markov per channel, stationary
   // 1-sigma and correlation time. A zero sigma disables the term.
@@ -99,8 +154,8 @@ struct GpsNoiseConfig
   float course_correlated_deg = 0.0F;          ///< Stationary 1-sigma [degrees].
   float velocity_correlation_time_s = 10.0F;   ///< tau for speed, course and vertical velocity [s].
 
-  /// Vertical-velocity error, white and correlated 1-sigma [m/s]. On by
-  /// default, unlike the other correlated terms, because velD used to be a
+  /// Vertical-velocity error of the speed/course model, white and correlated
+  /// 1-sigma [m/s]. On by default, unlike the other correlated terms, because velD used to be a
   /// hard-coded zero rather than a quiet default: there is no previous
   /// behaviour to preserve. Twice speed_noise_mps, the same vertical-to-
   /// horizontal ratio as the position defaults -- GNSS geometry is weaker in
@@ -126,7 +181,10 @@ public:
   /// @param seed   RNG seed; defaults to a nondeterministic seed. Pass a
   ///               fixed value for reproducible runs.
   explicit GpsNoiseModel(const GpsNoiseConfig& config = {}, std::uint64_t seed = std::random_device{}())
-    : config_(config), rng_(seed), vertical_velocity_rng_(seed ^ kVerticalVelocityStream)
+    : config_(config)
+    , rng_(seed)
+    , vertical_velocity_rng_(seed ^ kVerticalVelocityStream)
+    , doppler_rng_(seed ^ kDopplerStream)
   {
   }
 
@@ -162,19 +220,29 @@ public:
   /// @brief The NED velocity error as one per-axis 1-sigma [m/s], before
   /// `accuracy_scale` -- what an honest receiver reports as `sAcc`.
   ///
-  /// The error is not isotropic: speed error lies along the track, course
-  /// error across it at (speed x course error in radians), and vertical error
-  /// on its own. A consumer that weights a fix by `sAcc` uses it for all three
-  /// axes alike (Aetherion's replay builds sAcc^2 I), so the honest single
-  /// number is the one whose isotropic covariance has the same trace as the
-  /// real one: the root of the mean of the three variances. Then the expected
-  /// normalised innovation is right on average, even though no single axis is.
-  /// It grows with speed because the course term does: 1 deg of course error
-  /// is 3 m/s across track at 172 m/s.
+  /// A consumer that weights a fix by `sAcc` uses it for all three axes alike
+  /// (Aetherion's replay builds sAcc^2 I), so the honest single number is the
+  /// one whose isotropic covariance has the same trace as the real one: the
+  /// root of the mean of the three variances. Then the expected normalised
+  /// innovation is right on average, even where no single axis is.
   ///
-  /// @param ground_speed_mps Speed over ground the course error is scaled by [m/s].
+  /// Doppler: sqrt((sN^2 + sE^2 + sD^2) / 3), whatever the speed -- 0.071 m/s
+  /// at the defaults. Speed/course: speed error lies along the track, course
+  /// error across it at (speed x course error in radians), vertical error on
+  /// its own, so the figure grows with speed: 1 deg of course error is 3 m/s
+  /// across track at 172 m/s.
+  ///
+  /// @param ground_speed_mps Speed over ground the course error is scaled by
+  ///                         [m/s]; unused by the Doppler model.
   [[nodiscard]] float velocity_sigma_mps(float ground_speed_mps) const
   {
+    if (config_.velocity_error_model == GpsVelocityErrorModel::kDoppler)
+    {
+      const double north = config_.doppler_north_noise_mps;
+      const double east = config_.doppler_east_noise_mps;
+      const double down = config_.doppler_down_noise_mps;
+      return static_cast<float>(std::sqrt((north * north + east * east + down * down) / 3.0));
+    }
     constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
     const double along = std::hypot(config_.speed_noise_mps, config_.speed_correlated_mps);
     const double across = static_cast<double>(ground_speed_mps) *
@@ -248,6 +316,91 @@ public:
     fix.horizontal_accuracy_m = config_.accuracy_scale * total_horizontal_sigma_m();
     fix.vertical_accuracy_m = config_.accuracy_scale * total_vertical_sigma_m();
 
+    if (config_.velocity_error_model == GpsVelocityErrorModel::kDoppler)
+    {
+      apply_doppler_velocity(truth, fix);
+    }
+    else
+    {
+      apply_speed_course_velocity(truth, fix, dt_s);
+    }
+
+    fix.num_satellites = config_.num_satellites;
+    fix.fix_type = config_.fix_type;
+    fix.timestamp_us = truth.timestamp_us;
+    return fix;
+  }
+
+  /// Below this many horizontal Doppler sigmas of derived speed, the course
+  /// is not derived from the noisy velocity -- its direction would be mostly
+  /// the noise's -- and the speed/course model's course is kept instead.
+  /// Ten sigmas bounds the derived course's error near 6 deg (0.5 m/s at the
+  /// defaults); a rocket on the pad stays well below it.
+  static constexpr double kDopplerCourseSpeedFactor = 10.0;
+
+private:
+  /// Doppler model: truth NED velocity plus independent white per-axis
+  /// errors from the Doppler stream; speed over ground and course derived
+  /// from the noisy north and east, the low-speed course excepted. `fix`
+  /// arrives with the main stream's speed and course already in it.
+  void apply_doppler_velocity(const GpsTruthSample& truth, GpsFix& fix)
+  {
+    constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+    // The truth carries speed and course (the FMU's NED inputs are reduced to
+    // them); resolve them back. In double, so the round trip costs ~1e-6 m/s.
+    const double true_course_rad = static_cast<double>(truth.course_deg) * kDegToRad;
+    const double true_speed_mps = truth.ground_speed_mps;
+    const double north_mps = true_speed_mps * std::cos(true_course_rad) + doppler_draw(config_.doppler_north_noise_mps);
+    const double east_mps = true_speed_mps * std::sin(true_course_rad) + doppler_draw(config_.doppler_east_noise_mps);
+    const double down_mps = static_cast<double>(truth.v_down_mps) + doppler_draw(config_.doppler_down_noise_mps);
+
+    fix.vel_north_mps = static_cast<float>(north_mps);
+    fix.vel_east_mps = static_cast<float>(east_mps);
+    fix.vel_down_mps = static_cast<float>(down_mps);
+    const double speed_mps = std::hypot(north_mps, east_mps);
+    fix.ground_speed_mps = static_cast<float>(speed_mps);
+
+    const double horizontal_sigma_mps =
+        std::sqrt((static_cast<double>(config_.doppler_north_noise_mps) * config_.doppler_north_noise_mps +
+                   static_cast<double>(config_.doppler_east_noise_mps) * config_.doppler_east_noise_mps) /
+                  2.0);
+    if (speed_mps > 0.0 && speed_mps > kDopplerCourseSpeedFactor * horizontal_sigma_mps)
+    {
+      double course_deg = std::atan2(east_mps, north_mps) / kDegToRad;
+      if (course_deg < 0.0)
+      {
+        course_deg += 360.0;
+      }
+      fix.course_deg = static_cast<float>(course_deg);
+      if (fix.course_deg >= 360.0F)  // a course a hair below 360 can round up in float
+      {
+        fix.course_deg = 0.0F;
+      }
+    }
+    // else: fix.course_deg keeps the speed/course model's value, set in apply().
+
+    fix.speed_accuracy_mps = config_.accuracy_scale * velocity_sigma_mps(fix.ground_speed_mps);
+    fix.ned_velocity_valid = true;
+  }
+
+  /// One Doppler-stream draw at `sigma`, or exactly nothing for a disabled
+  /// axis -- no zero-width distribution is ever constructed.
+  double doppler_draw(float sigma)
+  {
+    if (sigma <= 0.0F)
+    {
+      return 0.0;
+    }
+    return static_cast<double>(sigma * doppler_unit_(doppler_rng_));
+  }
+
+  /// Speed/course model: the noisy speed and course resolved into north and
+  /// east, velD with its own terms. This is the model as it stood before the
+  /// Doppler model, statement for statement; its draws must not change.
+  void apply_speed_course_velocity(const GpsTruthSample& truth, GpsFix& fix, double dt_s)
+  {
+    constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+
     // NED velocity. Horizontal: the noisy speed and course resolved, so the
     // fields agree as a real receiver's do. Vertical: its own terms, from its
     // own stream and its own distribution objects -- a normal_distribution
@@ -271,14 +424,8 @@ public:
     fix.vel_down_mps = truth.v_down_mps + vertical_velocity_error_mps;
     fix.speed_accuracy_mps = config_.accuracy_scale * velocity_sigma_mps(fix.ground_speed_mps);
     fix.ned_velocity_valid = true;
-
-    fix.num_satellites = config_.num_satellites;
-    fix.fix_type = config_.fix_type;
-    fix.timestamp_us = truth.timestamp_us;
-    return fix;
   }
 
-private:
   /// One channel's Gauss-Markov state.
   struct Channel
   {
@@ -345,6 +492,10 @@ private:
   /// (the sensor clocks use 0x5DEECE66D).
   static constexpr std::uint64_t kVerticalVelocityStream = 0x9E3779B97F4A7C15ULL;
 
+  /// Mixed into the seed for the Doppler velocity stream; differs from the
+  /// vertical-velocity constant and the sensor clocks' 0x5DEECE66D.
+  static constexpr std::uint64_t kDopplerStream = 0xD1B54A32D192ED03ULL;
+
   GpsNoiseConfig config_;
   std::mt19937_64 rng_;
 
@@ -356,6 +507,10 @@ private:
   // The vertical-velocity channel's stream, and its own unit normal.
   std::mt19937_64 vertical_velocity_rng_;
   std::normal_distribution<float> vertical_velocity_unit_{ 0.0F, 1.0F };
+
+  // The Doppler model's stream and its own unit normal, for the same reason.
+  std::mt19937_64 doppler_rng_;
+  std::normal_distribution<float> doppler_unit_{ 0.0F, 1.0F };
 
   Channel north_;
   Channel east_;

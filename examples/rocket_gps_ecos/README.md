@@ -253,6 +253,12 @@ Useful knobs (`--help` lists all):
   time-correlated (Gauss–Markov, τ = 100 s) term, reported accuracy at 70 % of the truth. A non-zero seed
   reproduces the receiver's errors run to run. The 31 s of fixes this flight leaves cannot resolve a
   100 s correlation time; the F-16 trim example's GPS figure is where the difference is visible.
+* `--gps-velocity speed-course|doppler` — the receiver's velocity error model. **This host defaults to
+  `speed-course`**, the model before 2026-11-19, because this is Paper 1's case study and its published
+  figures and statistics came from that receiver: with it, a seeded run reproduces every number bit for bit.
+  `doppler` flies the GPS FMU's own default (independent per-axis NED errors, 0.05/0.05/0.10 m/s, speed and
+  course derived from them; see `doc/sensor_models.rst`). Positions are identical under either; only the
+  velocity fields differ. The F-16 hosts default to `doppler`.
 * `--rtf 1` — pace the co-simulation to wall-clock speed (default is as-fast-as-possible, about 1.7× real
   time on a typical desktop), e.g. to watch the fix stream come in live.
 * `HEMERION_GPS_FMU_UDP_HOST` / `HEMERION_GPS_FMU_UDP_PORT` — read by the GPS FMU at instantiation; point them

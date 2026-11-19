@@ -32,6 +32,9 @@
 #include "environment.hpp"
 
 using hemerion::examples::dryden_low_altitude;
+using hemerion::examples::gps_velocity_model_from_option;
+using hemerion::examples::gps_velocity_model_name;
+using hemerion::examples::GpsVelocityModel;
 using hemerion::examples::kCorrelatedReceiver;
 using hemerion::examples::kFeetToMetres;
 using hemerion::examples::kWhiteReceiver;
@@ -273,6 +276,30 @@ void test_gps_presets_keep_their_promise()
       near(total_sigma(kCorrelatedReceiver.vertical_speed_noise_mps, kCorrelatedReceiver.vertical_speed_correlated_mps),
            0.224,
            0.0005));
+
+  // The Doppler velocity model (the FMU's default since 2026-11-19): white per axis at the FMU's own defaults,
+  // 0.05/0.05/0.10 m/s, in both presets -- it has no correlated term for the realistic receiver to move variance
+  // into. The FMU's defaults are asserted in modules/sensors/test/test_gps_noise.cpp.
+  for (const auto* receiver : { &kWhiteReceiver, &kCorrelatedReceiver })
+  {
+    CHECK(receiver->doppler_north_noise_mps == 0.05);
+    CHECK(receiver->doppler_east_noise_mps == 0.05);
+    CHECK(receiver->doppler_down_noise_mps == 0.10);
+  }
+}
+
+// --gps-velocity: two spellings, each the FMU parameter's integer, and nothing else.
+void test_gps_velocity_option()
+{
+  GpsVelocityModel model = GpsVelocityModel::kSpeedCourse;
+  CHECK(gps_velocity_model_from_option("doppler", model) && model == GpsVelocityModel::kDoppler);
+  CHECK(gps_velocity_model_from_option("speed-course", model) && model == GpsVelocityModel::kSpeedCourse);
+  CHECK(!gps_velocity_model_from_option("speed_course", model) && model == GpsVelocityModel::kSpeedCourse);
+  CHECK(!gps_velocity_model_from_option("", model));
+  CHECK(static_cast<int>(GpsVelocityModel::kDoppler) == 0);  // the FMU's velocity_error_model codes
+  CHECK(static_cast<int>(GpsVelocityModel::kSpeedCourse) == 1);
+  CHECK(std::string(gps_velocity_model_name(GpsVelocityModel::kDoppler)) == "doppler");
+  CHECK(std::string(gps_velocity_model_name(GpsVelocityModel::kSpeedCourse)) == "speed_course");
 }
 
 }  // namespace
@@ -284,6 +311,7 @@ int main()
   test_parser_accepts_its_grammar();
   test_parser_rejects_everything_else();
   test_gps_presets_keep_their_promise();
+  test_gps_velocity_option();
 
   std::puts("test_example_environment: all checks passed");
   return 0;

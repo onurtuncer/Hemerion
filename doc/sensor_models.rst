@@ -265,13 +265,36 @@ receiver, and real ones run optimistic, reporting 50–80 % of the error they
 make. A filter that weights fixes by the reported accuracy under-weights the
 truth by that ratio, which is the point of modelling it.
 
-**NED velocity.** NAV-PVT's ``velN``/``velE`` are the noisy speed and course
-resolved, so they agree with ``gSpeed``/``headMot`` as a real receiver's do;
+**NED velocity: two error models**, selected by ``velocity_error_model``
+(decided 2026-11-19).
+
+*Doppler (0, the default).* A receiver measures velocity from the carrier's
+Doppler shift, per axis, and its error does not grow with speed. ``velN``,
+``velE`` and ``velD`` are the truth plus independent white errors,
+:math:`\sigma_N = \sigma_E` = 0.05 m/s and :math:`\sigma_D` = 0.10 m/s by
+default (vertical twice horizontal, the position defaults' geometry ratio),
+drawn per fix from their own RNG stream. ``gSpeed`` and ``headMot`` are then
+derived from the noisy north and east components, as the receiver derives
+them, so the four fields agree. One exception: below ten horizontal sigmas of
+ground speed (0.5 m/s at the defaults) the derived course would be mostly the
+direction of the noise — a rocket on the pad would report a heading spinning
+at random — so there the course is the speed/course model's (truth plus
+``course_noise_deg``), as it always was. ``sAcc`` is
+
+.. math::
+
+   \sigma_v = \sqrt{\tfrac{1}{3}\left(\sigma_N^2 + \sigma_E^2 + \sigma_D^2\right)}
+
+times ``accuracy_scale`` — 0.071 m/s at the defaults, at any speed. There is no
+correlated Doppler term yet; one would come with its own parameter, 0 = off.
+
+*Speed/course (1).* The model before 2026-11-19, kept so earlier runs
+reproduce (Paper 1's rocket case selects it). ``velN``/``velE`` are the noisy
+speed and course resolved, so they agree with ``gSpeed``/``headMot``;
 ``velD`` is the truth's vertical velocity plus its own white and correlated
 terms, drawn from a second RNG stream so that adding them moved no draw of any
-other channel (a seeded run's position, speed and course are bit-identical to
-before ``velD`` existed). ``sAcc`` is reported honestly, as the per-axis 1-sigma
-an *isotropic* covariance would need to carry the velocity error's true total:
+other channel. ``sAcc`` is the per-axis 1-sigma an *isotropic* covariance
+would need to carry the velocity error's true total:
 
 .. math::
 
@@ -284,9 +307,17 @@ because the course error is *across* track at :math:`v_h\sigma_\chi`, the
 error is not isotropic, and an isotropic consumer (Aetherion's replay uses
 :math:`\sigma_v^2 I`) gets the right normalised innovation only on average.
 It grows with speed: 1° of course noise is 3 m/s across track at 172 m/s, so
-the default receiver reports :math:`\sigma_v` ≈ 1.7 m/s on the F-16 cases.
-That is the speed/course parameterisation's property, not a Doppler
-receiver's, whose velocity error is per axis and speed-independent.
+this receiver reports :math:`\sigma_v` ≈ 1.7 m/s on the F-16 cases, where the
+Doppler default reports 0.071 m/s.
+
+**What the selection moves.** The main stream draws the speed and course
+errors under both models (Doppler discards the speed error and keeps the
+course error for its low-speed course), so switching models moves **no
+position draw**: a seeded run's latitude, longitude, altitude, ``hAcc`` and
+``vAcc`` are identical under either, and only the velocity fields differ. In
+speed/course mode every field is bit-identical to the model before Doppler
+existed; ``sensors.gps_noise`` asserts that against hashes of the previous
+model's output.
 
 .. list-table:: ``GpsNoiseConfig`` defaults (u-blox M9N, open sky)
    :header-rows: 1
@@ -301,12 +332,24 @@ receiver's, whose velocity error is per axis and speed-independent.
    * - ``vertical_pos_noise_m``
      - 3.0 m
      - 1-sigma altitude noise
+   * - ``velocity_error_model``
+     - 0 (Doppler)
+     - 0 = per-axis NED Doppler, 1 = speed/course (the model before 2026-11-19)
+   * - ``doppler_north_noise_mps``
+     - 0.05 m/s
+     - Doppler: 1-sigma north-velocity noise, white, speed-independent
+   * - ``doppler_east_noise_mps``
+     - 0.05 m/s
+     - Doppler: 1-sigma east-velocity noise
+   * - ``doppler_down_noise_mps``
+     - 0.10 m/s
+     - Doppler: 1-sigma ``velD`` noise
    * - ``speed_noise_mps``
      - 0.1 m/s
-     - 1-sigma speed-over-ground noise
+     - speed/course: 1-sigma speed-over-ground noise
    * - ``course_noise_deg``
      - 1.0°
-     - 1-sigma course noise
+     - speed/course: 1-sigma course noise (Doppler: the low-speed course)
    * - ``horizontal_pos_correlated_m``
      - 0 (off)
      - Gauss–Markov stationary 1-sigma, north and east
@@ -327,7 +370,7 @@ receiver's, whose velocity error is per axis and speed-independent.
      - :math:`\tau` for speed, course and vertical velocity
    * - ``vertical_speed_noise_mps``
      - 0.2 m/s
-     - 1-sigma ``velD`` noise — twice the speed noise, the position defaults'
+     - speed/course: 1-sigma ``velD`` noise — twice the speed noise, the position defaults'
        vertical-to-horizontal ratio. On by default: ``velD`` used to be a
        hard-coded zero, so there was no previous behaviour to keep
    * - ``vertical_speed_correlated_mps``
@@ -347,7 +390,13 @@ Every one of these is an FMI **fixed parameter** of the same name on
 ``hemerion_gps_fmu``, alongside an integer ``seed`` (0 = nondeterministic,
 any other value reproduces the receiver's error sequence). They are read once,
 when initialisation mode is exited — a part's noise does not change in
-flight — and a master that sets none of them gets the previous receiver.
+flight; a ``velocity_error_model`` that names no model fails initialisation.
+A master that sets none of them gets the previous receiver's position errors
+and the Doppler velocity; one that must reproduce a run made before
+2026-11-19 sets ``velocity_error_model`` = 1. The examples select it with
+``--gps-velocity doppler|speed-course`` (default ``doppler`` on the F-16 hosts,
+``speed-course`` on the rocket, Paper 1's case study) and record it in the
+sidecar as ``gps_velocity_error_model`` beside the ``gps_doppler_*`` sigmas.
 
 .. list-table:: The realistic receiver — ``--gps-errors correlated`` in the examples
    :header-rows: 1
@@ -376,7 +425,8 @@ flight — and a master that sets none of them gets the previous receiver.
    * - vertical velocity
      - 0.1 m/s
      - 0.2 m/s, :math:`\tau` = 10 s
-     - total 0.224 m/s — twice speed, as in the default
+     - total 0.224 m/s — twice speed, as in the default (speed/course only;
+       under Doppler both receivers are white 0.05/0.05/0.10 m/s)
    * - ``accuracy_scale``
      - 0.7
      -

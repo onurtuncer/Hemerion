@@ -139,7 +139,10 @@ namespace
 
 using hemerion::examples::dryden_low_altitude;
 using hemerion::examples::DrydenAtAltitude;
+using hemerion::examples::gps_velocity_model_from_option;
+using hemerion::examples::gps_velocity_model_name;
 using hemerion::examples::GpsErrorModel;
+using hemerion::examples::GpsVelocityModel;
 using hemerion::examples::kCorrelatedReceiver;
 using hemerion::examples::kFeetToMetres;
 using hemerion::examples::kWhiteReceiver;
@@ -263,6 +266,9 @@ struct Options
   // receiver -- and every figure drawn from it -- stays the one this example
   // was verified with until the change is asked for.
   bool gps_correlated_errors = false;
+  // The receiver's velocity error model: the FMU's default, per-axis Doppler, unless --gps-velocity
+  // speed-course selects the model before 2026-11-19 (to reproduce a run made with it).
+  GpsVelocityModel gps_velocity_model = GpsVelocityModel::kDoppler;
   // 0 = every sensor draws a fresh instrument, as an unseeded run always has.
   //
   // Any other value fixes every sensor's error stream: the sample a part produces
@@ -333,6 +339,7 @@ void print_usage()
                "                      [--mag <hemerion_mmc5983ma_fmu.fmu>] [--imu-rate <hz>]\n"
                "                      [--dyn-model <code>] [--no-cocom] [--reacq <s>]\n"
                "                      [--gps-errors white|correlated] [--gps-seed <n>]\n"
+               "                      [--gps-velocity doppler|speed-course]\n"
                "                      [--wind <n,e,d>] [--turbulence <w20>] [--atmosphere <dT,dP>]\n"
                "                      [--lat0 <deg>] [--lon0 <deg>] [--alt0 <ft>] [--vt0 <ft/s>]\n"
                "                      [--heading0 <deg>] [--roll0 <deg>]\n"
@@ -358,6 +365,10 @@ void print_usage()
                "  --reacq     re-acquisition hold-off after any limit trips [s] (default 2)\n"
                "  --gps-errors  white (default: the FMU's white-only receiver) or correlated: time-correlated\n"
                "              Gauss-Markov position/velocity errors and an optimistic reported accuracy\n"
+               "  --gps-velocity  doppler (default, the FMU's: independent per-axis NED velocity\n"
+               "              errors, 0.05/0.05/0.10 m/s) or speed-course (the earlier speed and course\n"
+               "              errors, to reproduce a run made before 2026-11-19). Positions are the\n"
+               "              same under either; only the velocity fields differ\n"
                "  --imu-range  IMU full scale in deg/s: 250, 500 or 2000 (default 2000, the launch-vehicle\n"
                "              part). Pass the same value to f16_flight_computer -- sensitivity is not\n"
                "              on the wire, so both ends must be configured alike\n"
@@ -408,7 +419,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 31> kValueOptions = { {
+constexpr std::array<ValueOption, 32> kValueOptions = { {
     // Only records the choice; the case's defaults were applied in parse_args()'s first pass.
     { "--case", [](Options& o, const char* v) { o.check_case = v; } },
     { "--f16", [](Options& o, const char* v) { o.f16_fmu = v; } },
@@ -427,6 +438,13 @@ constexpr std::array<ValueOption, 31> kValueOptions = { {
           throw std::invalid_argument("--gps-errors takes 'white' or 'correlated', not '" + model + "'");
         }
         o.gps_correlated_errors = (model == "correlated");
+      } },
+    { "--gps-velocity",
+      [](Options& o, const char* v) {
+        if (!gps_velocity_model_from_option(v, o.gps_velocity_model))
+        {
+          throw std::invalid_argument("--gps-velocity takes 'doppler' or 'speed-course', not '" + std::string(v) + "'");
+        }
       } },
     { "--seed", [](Options& o, const char* v) { o.seed = std::stoi(v); } },
     { "--mag-date",
@@ -734,6 +752,10 @@ void write_run_config(const std::filesystem::path& csv_path, const Options& opti
       << "gps_accuracy_scale=" << receiver.accuracy_scale << "\n"
       << "gps_vertical_speed_noise_mps=" << receiver.vertical_speed_noise_mps << "\n"
       << "gps_vertical_speed_correlated_mps=" << receiver.vertical_speed_correlated_mps << "\n"
+      << "gps_velocity_error_model=" << gps_velocity_model_name(options.gps_velocity_model) << "\n"
+      << "gps_doppler_north_noise_mps=" << receiver.doppler_north_noise_mps << "\n"
+      << "gps_doppler_east_noise_mps=" << receiver.doppler_east_noise_mps << "\n"
+      << "gps_doppler_down_noise_mps=" << receiver.doppler_down_noise_mps << "\n"
       << "wind_north_mps=" << options.wind_north_mps << "\n"
       << "wind_east_mps=" << options.wind_east_mps << "\n"
       << "wind_down_mps=" << options.wind_down_mps << "\n"
@@ -1018,6 +1040,10 @@ int main(int argc, char** argv)
     trim_point["gps::accuracy_scale"] = receiver.accuracy_scale;
     trim_point["gps::vertical_speed_noise_mps"] = receiver.vertical_speed_noise_mps;
     trim_point["gps::vertical_speed_correlated_mps"] = receiver.vertical_speed_correlated_mps;
+    trim_point["gps::velocity_error_model"] = static_cast<int>(options.gps_velocity_model);
+    trim_point["gps::doppler_north_noise_mps"] = receiver.doppler_north_noise_mps;
+    trim_point["gps::doppler_east_noise_mps"] = receiver.doppler_east_noise_mps;
+    trim_point["gps::doppler_down_noise_mps"] = receiver.doppler_down_noise_mps;
 
     // The plant's environment. Written unconditionally, because every one of
     // these defaults to the calm standard day: a run that asks for nothing gets
@@ -1157,6 +1183,8 @@ int main(int argc, char** argv)
     std::cout << "[cosim] GPS errors: "
               << (options.gps_correlated_errors ? "time-correlated (Gauss-Markov) + white, hAcc/vAcc at 70 %" :
                                                   "white per epoch, hAcc/vAcc honest")
+              << "; velocity "
+              << (options.gps_velocity_model == GpsVelocityModel::kDoppler ? "per-axis Doppler" : "speed/course")
               << (options.gps_seed != 0 ? " (seed " + std::to_string(options.gps_seed) + ")" : "") << "\n";
 
     long print_counter = 0;

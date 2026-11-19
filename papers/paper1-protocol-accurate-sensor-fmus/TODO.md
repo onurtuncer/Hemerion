@@ -19,8 +19,10 @@ when. Branch `papers/paper1-smpt-resync`, as of 2026-10-09.
       standard error). Run N seeds and report the distribution against the
       analytic expectation. GPS and IMU samples are pacing-independent, so
       unpaced runs (~25 s each) suffice; the magnetometer needs paced runs.
-      Mechanics: `rocket_gps_cosim --seed <n>` + `run_statistics.py` per
-      results directory.
+      Mechanics: `rocket_gps_cosim --seed <n> --gps-velocity speed-course` +
+      `run_statistics.py` per results directory (speed-course is this host's
+      default, written out so the runs stay the paper's receiver whatever the
+      default becomes).
 - [ ] **SIL → HWIL on physical hardware.** The paper now claims only
       co-simulation and Renode. Put the same decoders on an STM32H743 with a
       measured byte-level comparison across the three tiers. First step is
@@ -69,6 +71,16 @@ when. Branch `papers/paper1-smpt-resync`, as of 2026-10-09.
       and the three entries BibTeX flags as missing pages (`pedersen2016fmi`,
       `mikelsons2017virtual`, `jackson2011daveml`).
 - [ ] Cover letter and suggested reviewers.
+- [ ] **Reproducibility paragraph: a second sensor-model change.** Since
+      2026-11-19 the GPS FMU's velocity error model is selectable and defaults
+      to per-axis NED Doppler. The paper's receiver is the speed/course model
+      (Table 1: speed 0.1 m/s, course 1.0°), which `rocket_gps_cosim` selects
+      by default (`--gps-velocity speed-course`, FMU parameter
+      `velocity_error_model` = 1); in that mode the receiver is bit for bit
+      the earlier one (`sensors.gps_noise` asserts it), and under either model
+      positions are identical. So the reference run still reproduces from the
+      current tree, but `main.tex`'s "the one sensor-model change since that
+      commit" is now one of two: say so, and name the flag.
 
 ## Repository follow-ups the paper surfaced
 

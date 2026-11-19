@@ -24,9 +24,12 @@
 ///
 /// The error model (gpsNoiseModel.hpp) is configured through a further set
 /// of fixed parameters: the white and time-correlated 1-sigma per channel,
-/// the two correlation times, the reported-accuracy scale, and `seed`. Their
-/// start values are the previous, white-only model, so a master that sets
-/// none of them gets the receiver it had; the examples' `--gps-errors
+/// the two correlation times, the reported-accuracy scale, `seed`, and the
+/// velocity error model with its Doppler sigmas. The position start values
+/// are the previous, white-only model; the velocity model defaults to
+/// per-axis Doppler (0), and a master that must reproduce a run made before
+/// 2026-11-19 sets `velocity_error_model` = 1 (speed/course), which with
+/// the same seed gives the same fixes bit for bit. The examples' `--gps-errors
 /// correlated` sets the realistic configuration through them. They are
 /// fixed rather than tunable because a part's noise does not change in
 /// flight, and are read once, when initialisation mode is exited.
@@ -214,6 +217,22 @@ public:
                     &vertical_speed_correlated_mps_,
                     "Time-correlated vertical-velocity error stationary 1-sigma [m/s], correlation time "
                     "velocity_correlation_time_s; 0 = off");
+    // The velocity error model (decided 2026-11-19), registered after everything above for the same reason.
+    register_integer("velocity_error_model", &velocity_error_model_code_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Velocity error model: 0 = per-axis NED Doppler (default; speed over ground and course "
+                        "derived from the noisy north/east velocity), 1 = speed/course (the model before "
+                        "2026-11-19: speed_*, course_* and vertical_speed_* errors)");
+    noise_parameter("doppler_north_noise_mps",
+                    &doppler_north_noise_mps_,
+                    "Doppler model: white north-velocity error 1-sigma [m/s], speed-independent");
+    noise_parameter("doppler_east_noise_mps",
+                    &doppler_east_noise_mps_,
+                    "Doppler model: white east-velocity error 1-sigma [m/s], speed-independent");
+    noise_parameter("doppler_down_noise_mps",
+                    &doppler_down_noise_mps_,
+                    "Doppler model: white down-velocity (velD) error 1-sigma [m/s], speed-independent");
   }
 
   /// Opens the UDP socket. Deliberately not done in the constructor: the
@@ -256,6 +275,10 @@ public:
     accuracy_scale_ = kDefaultNoise.accuracy_scale;
     vertical_speed_noise_mps_ = kDefaultNoise.vertical_speed_noise_mps;
     vertical_speed_correlated_mps_ = kDefaultNoise.vertical_speed_correlated_mps;
+    velocity_error_model_code_ = static_cast<int>(kDefaultNoise.velocity_error_model);
+    doppler_north_noise_mps_ = kDefaultNoise.doppler_north_noise_mps;
+    doppler_east_noise_mps_ = kDefaultNoise.doppler_east_noise_mps;
+    doppler_down_noise_mps_ = kDefaultNoise.doppler_down_noise_mps;
 
     truth_ = GpsTruthSample{};
     altitude_m_ = 0.0;
@@ -382,6 +405,16 @@ private:
     config.accuracy_scale = static_cast<float>(accuracy_scale_);
     config.vertical_speed_noise_mps = static_cast<float>(vertical_speed_noise_mps_);
     config.vertical_speed_correlated_mps = static_cast<float>(vertical_speed_correlated_mps_);
+    if (!velocity_error_model_from_code(velocity_error_model_code_, config.velocity_error_model))
+    {
+      // Fixed and read once: a code that names no model is a configuration error, not something to guess at.
+      throw fmu4cpp::fatal_error("[hemerion_gps_fmu] velocity_error_model " +
+                                 std::to_string(velocity_error_model_code_) +
+                                 " is not a model (0 = Doppler, 1 = speed/course)");
+    }
+    config.doppler_north_noise_mps = static_cast<float>(doppler_north_noise_mps_);
+    config.doppler_east_noise_mps = static_cast<float>(doppler_east_noise_mps_);
+    config.doppler_down_noise_mps = static_cast<float>(doppler_down_noise_mps_);
     noise_model_ = (seed_ == 0) ? GpsNoiseModel(config) : GpsNoiseModel(config, static_cast<std::uint64_t>(seed_));
   }
 
@@ -425,6 +458,10 @@ private:
   double accuracy_scale_ = kDefaultNoise.accuracy_scale;
   double vertical_speed_noise_mps_ = kDefaultNoise.vertical_speed_noise_mps;
   double vertical_speed_correlated_mps_ = kDefaultNoise.vertical_speed_correlated_mps;
+  int velocity_error_model_code_ = static_cast<int>(kDefaultNoise.velocity_error_model);
+  double doppler_north_noise_mps_ = kDefaultNoise.doppler_north_noise_mps;
+  double doppler_east_noise_mps_ = kDefaultNoise.doppler_east_noise_mps;
+  double doppler_down_noise_mps_ = kDefaultNoise.doppler_down_noise_mps;
 };
 
 }  // namespace hemerion::sensors::gps::fmu
