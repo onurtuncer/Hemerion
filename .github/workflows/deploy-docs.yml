@@ -71,9 +71,17 @@ jobs:
           echo "Breathe version: $(python -c 'import breathe; print(breathe.__version__)')"
 
       - name: Install system dependencies
+        # Bounded and retried: on 2026-11-19 this step hung indefinitely on two
+        # runs out of four (the others took ~1 min), with no timeout to end it
+        # before GitHub's 6 h default. Network timeouts make a stalled mirror
+        # fail and retry instead of waiting forever.
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq doxygen graphviz \
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo -E apt-get $APT_OPTS update -qq
+          sudo -E apt-get $APT_OPTS install -y -qq doxygen graphviz \
             texlive-latex-extra texlive-pictures texlive-fonts-recommended \
             poppler-utils
           echo "Doxygen version: $(doxygen --version)"
