@@ -73,4 +73,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME scripts.fit_arrival_clock COMMAND "${Python3_EXECUTABLE}"
                                                   "${CMAKE_CURRENT_SOURCE_DIR}/test_fit_arrival_clock.py")
   set_tests_properties(scripts.fit_arrival_clock PROPERTIES LABELS "unit")
+  # Two runs' value columns compared exactly (scripts/compare_run_values.py): the check that a timing change moved no
+  # sensor value.
+  add_test(NAME scripts.compare_run_values COMMAND "${Python3_EXECUTABLE}"
+                                                   "${CMAKE_CURRENT_SOURCE_DIR}/test_compare_run_values.py")
+  set_tests_properties(scripts.compare_run_values PROPERTIES LABELS "unit")
 endif()

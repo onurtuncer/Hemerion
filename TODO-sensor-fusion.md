@@ -125,9 +125,18 @@ Not built:
   tuning logs are produced on Linux (CI or a Linux host) at the baseline
   settings, with the Aetherion build at the pinned commit. Windows runs stay
   usable for smoke checks and for the GPS and IMU channels only.
-- [ ] Hemerion task, not a blocker for step 7: the Windows `--rtf 1`
-      pacing and the polled BMP390's starvation. Fixing it changes what the
-      barometer logs on Windows.
+- [x] Hemerion task, not a blocker for step 7: the Windows `--rtf 1`
+      pacing and the polled BMP390's starvation. **Fixed in part,
+      2026-11-19, branch `examples/arrival-stamps`; see "Host-clock
+      residual".**
+      - The starvation had a Windows cause: 15.6 ms timer ticks under the
+        shared-memory buses' 50 µs back-off. It is fixed. In a paired run
+        that kept the plant out of it (`--rtf 0.25`), the BMP390 got 870–889
+        of ~1000 conversions in 20 s, against 274–383 before.
+      - The pacing drift is the plant's step cost and is still open, with
+        Aetherion. It now shows in each run's sidecar (`pacing_*`) and in the
+        step-7 tables (`clock_ok`).
+      - Windows barometer logs change; that change was approved.
 - **Licence of the generated filter C: it ships only here, under
   GPL-3.0-only.** Aetherion's generator uses CppADCodeGen, which is
   dual-licensed EPL-1.0 or GPL-3.0 and says nothing about its output.
@@ -291,6 +300,72 @@ before this change.
       `host = offset + scale × part` fit off by 62 ms rms, 302 ms max, where a
       0.01 s sawtooth was expected. Only a cross-check today, but step 10's
       delayed-measurement handling will rely on arrival stamps.
+
+      **Diagnosed 2026-11-19 (branch `examples/arrival-stamps`).** There are
+      two causes. `scripts/fit_arrival_clock.py` fits the stamps per stream.
+      - **Cause 1, every host: the plant cannot keep real time.** This is
+        with Aetherion.
+        - Measured inside Ecos's step on this Windows laptop, F16Plant took
+          23 ms per 0.01 s step (worst 126 ms). All four sensor FMUs together
+          took under 0.04 s for a 20 s run.
+        - Pacing sleeps to absolute targets, so a host that cannot keep up
+          falls behind for good, and the varying step cost becomes the
+          residual. The stamping itself is fine.
+        - In case 11 of CI run 43482563098, 11 of 20 seeds kept real time:
+          scale 1.0000, residual 0.9–3.9 ms rms. The other 9 fell behind:
+          scale 1.03–1.36, residual 231–471 ms rms, identical on all four
+          streams, with 205–272 s of wall time for 200 s.
+        - Case 13.4 (run 44537264437, seed 1): scale 1.096, 30 ms rms.
+        - Hemerion cannot fix this. The plant's step cost is reported to
+          Aetherion.
+      - **Cause 2, Windows only: timer resolution.** The shared-memory buses
+        back off with a 50 µs sleep, which Windows rounds up to a 15.6 ms
+        tick. The effect on the I2C round trip:
+
+        | 2 ms idle between transactions | Mean | p95 |
+        |---|---|---|
+        | 15.6 ms tick | 14–26 ms | 30 ms |
+        | 1 ms timer | 2.0 ms | 4.0 ms |
+
+        The flight computer's loop stretched to ~400 ms. GNSS datagrams
+        queued for seconds, and the BMP390's single data register was
+        overwritten between polls (the "starved" Windows barometer).
+
+      **What the branch does.**
+      - **Windows timer.** `examples/common/pacing.hpp`'s
+        ScopedTimerResolution holds `timeBeginPeriod(1)` for the process
+        lifetime in all three hosts and both flight computers; it is compiled
+        out off Windows. Paired runs, case 11, seed 5, 20 s, `--rtf 0.25` so
+        the plant stays out of it, before → after:
+        - BMP390: 274–383 → 870–889 of ~1000.
+        - Loops: 269–530 → ~4540.
+        - GNSS send-to-stamp p95: 662–749 → 131–192 ms.
+        - IMU send-to-stamp p95: 111–114 → 50–56 ms.
+
+        The machine was under 36–63% load from other work.
+      - **Flagging cause 1.**
+        - The hosts print how far pacing fell behind and append it to the
+          sidecar as optional keys: `pacing_rtf_honoured`,
+          `pacing_max_lag_s`, `pacing_final_lag_s`, `pacing_late_steps`,
+          `pacing_steps` and `pacing_tolerance_s`. These are not log-contract
+          keys.
+        - `run_integration_case.py` records the per-stream fit in the
+          manifest (`clock_fit`, `clock_ok`, `clock_flags`). A run outside
+          0.02 scale error or 20 ms rms gets a WARN, never a failure.
+        - The step-7 tables gain `clock_scale`, `clock_rms_s`, `clock_ok`,
+          `pacing_max_lag_s` and `pacing_rtf_honoured`.
+        - `scripts/compare_run_values.py` checks that two runs of a seed
+          logged the same values.
+
+      **Still open.**
+      - The plant's step cost (Aetherion).
+      - On this laptop the stamps cannot come within bounds even at
+        `--rtf 0.25`: the plant ran 3.5–4.4× slower than real time under
+        load.
+      - Not yet seen in CI:
+        - Linux value columns identical against the reference, runs
+          44517640931 and 44530268940.
+        - `clock_ok` yes on the seeds that keep up.
 
 ## To do, in order
 
