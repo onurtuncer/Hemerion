@@ -120,7 +120,20 @@ class Aggregate(unittest.TestCase):
     def test_calm_runs_name_no_turbulence_seed(self):
         write_run(self.root, "calm", 11, SUMMARY, turbulence=0.0)
         _, text = self.run_main(str(self.root / "calm"))
-        self.assertIn("| calm | 11 | 0 |  | 200 | yes |", text)
+        self.assertIn("| calm |  | 11 | 0 |  | 200 | yes |", text)
+
+    def test_case_from_the_sidecar_and_no_nis_for_a_measurement_never_applied(self):
+        no_fix = (SUMMARY.replace("199 GNSS position, 199 GNSS velocity", "0 GNSS position, 0 GNSS velocity")
+                  .replace("GNSS pos 0.942716, GNSS vel 1.08823", "GNSS pos 0, GNSS vel 0"))
+        run = write_run(self.root, "case12-seed1", 1, no_fix)
+        with (run / "f16_truth.config").open("a", encoding="utf-8") as f:
+            f.write("check_case=12\n")
+        csv_path = self.root / "table.csv"
+        self.assertEqual(self.run_main(str(run), "--csv", str(csv_path))[0], 0)
+        with csv_path.open(newline="") as f:
+            row = next(csv.DictReader(f))
+        self.assertEqual(row["case"], "12")
+        self.assertEqual((row["nis_gnss_pos"], row["nis_gnss_vel"], row["nis_baro"]), ("", "", "0.109845"))
 
     def test_strict_and_empty(self):
         write_run(self.root, "ok", 1, SUMMARY)
@@ -136,6 +149,31 @@ class GateThreshold(unittest.TestCase):
     def test_the_gate_still_wants_150_fixes_and_a_longer_run_proportionally_more(self):
         self.assertEqual(gate.min_3d_fixes(gate.CASE), 150)
         self.assertEqual(gate.min_3d_fixes(dict(gate.CASE, stop_s=200.0)), 1500)
+
+    def test_every_case_has_a_host_and_only_case_12_flies_without_a_fix(self):
+        self.assertEqual(gate.CASES[gate.CASE["case"]]["host"], "f16_trim_cosim")
+        self.assertEqual([name for name, case in gate.CASES.items() if not case["gnss_fix"]], ["12"])
+        self.assertEqual({case["host"] for name, case in gate.CASES.items() if name.startswith("13.")},
+                         {"f16_autopilot_cosim"})
+
+    def test_a_case_with_no_fix_wants_every_epoch_and_no_3d_fix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gps = Path(tmp) / "gps_fixes.csv"
+            header = ("fix_index,nominal_time_s,host_time_s,latitude_deg,longitude_deg,altitude_m,ground_speed_mps,"
+                      "course_deg,horizontal_accuracy_m,vertical_accuracy_m,num_satellites,fix_type,vel_north_mps,"
+                      "vel_east_mps,vel_down_mps,speed_accuracy_mps\n")
+            no_fix = "".join(f"{i},{(i - 1) * 0.1},{i * 0.1},,,,,,,,0,0,,,,\n" for i in range(1, 201))
+            gps.write_text(header + no_fix, encoding="utf-8")
+            failures: list[str] = []
+            self.assertEqual(gate.check_gnss_velocity(gps, failures, 0, max_fixes=0, min_epochs=150), 0)
+            self.assertEqual(failures, [])
+            gate.check_gnss_velocity(gps, failures, 0, max_fixes=0, min_epochs=250)
+            self.assertEqual(len(failures), 1)
+            fix = "201,20.0,20.1,36,-75,3000,600,45,2,3,12,2,400,400,0,0.1\n"
+            gps.write_text(header + no_fix + fix, encoding="utf-8")
+            failures = []
+            gate.check_gnss_velocity(gps, failures, 0, max_fixes=0, min_epochs=150)
+            self.assertEqual(failures, ["gps_fixes.csv: 1 3D fixes, expected at most 0"])
 
 
 if __name__ == "__main__":

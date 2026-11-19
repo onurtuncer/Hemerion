@@ -58,10 +58,13 @@ COUNT_NAMES = {
     "fixes skipped": "fixes_skipped",
 }
 NIS_NAMES = {"GNSS pos": "nis_gnss_pos", "GNSS vel": "nis_gnss_vel", "baro": "nis_baro"}
+# The update count behind each NIS. The replay prints NIS 0 for a measurement it never applied (case 12 has no GNSS
+# fix); that is no figure at all, so it is dropped rather than averaged in as a perfect fit.
+NIS_COUNTS = {"nis_gnss_pos": "gnss_pos_updates", "nis_gnss_vel": "gnss_vel_updates", "nis_baro": "baro_updates"}
 UNIT_SLUGS = {"m": "m", "m/s": "mps", "deg": "deg", "rad": "rad", "rad/s": "radps"}
 
 # Column order: identity, outcome, counts, consistency, accuracy. Unknown figures go after their group.
-IDENTITY = ["run", "seed", "turbulence_w20_mps", "turbulence_seed", "stop_s", "passed", "summary"]
+IDENTITY = ["run", "case", "seed","turbulence_w20_mps", "turbulence_seed", "stop_s", "passed", "summary"]
 COUNTS = ["duration_s", "imu_steps", "gnss_pos_updates", "gnss_vel_updates", "baro_updates", "fixes_skipped"]
 CONSISTENCY = ["anees_nav", "nis_gnss_pos", "nis_gnss_vel", "nis_baro"]
 ACCURACY = ["rms_position_m", "rms_velocity_mps", "rms_tilt_deg", "rms_yaw_deg"]
@@ -116,6 +119,9 @@ def parse_summary(text: str) -> dict[str, object]:
                     if match:
                         name = match.group(1).strip()
                         figures[NIS_NAMES.get(name, "nis_" + slug(name))] = to_float(match.group(2))
+    for nis, count in NIS_COUNTS.items():
+        if figures.get(count) == 0:
+            figures.pop(nis, None)
     return figures
 
 
@@ -143,6 +149,8 @@ def read_run(run: Path, root: Path) -> dict[str, object]:
     name = run.relative_to(root).as_posix() if run != root else run.name
     row: dict[str, object] = {"run": name or run.name}
     seed = sidecar.get("seed", case.get("seed"))
+    check_case = sidecar.get("check_case", case.get("case"))
+    row["case"] = str(check_case) if check_case not in (None, "") else None
     row["seed"] = int(seed) if seed not in (None, "") else None
     turbulence = to_float(str(sidecar.get("turbulence_w20_mps", case.get("turbulence_w20_mps", 0.0)) or 0.0))
     row["turbulence_w20_mps"] = turbulence
@@ -260,7 +268,7 @@ def markdown(rows: list[dict[str, object]], names: list[str], title: str) -> str
 
 def sort_key(row: dict[str, object]) -> tuple:
     seed = row.get("seed")
-    return (seed is None, seed if isinstance(seed, int) else 0, str(row.get("run")))
+    return (str(row.get("case") or ""), seed is None, seed if isinstance(seed, int) else 0, str(row.get("run")))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,49 +1,65 @@
-name: Step 7 log batch (case 11, turbulence, over seeds)
+name: Step 7 log batch (NESC cases, turbulence, over seeds)
 
 # Logs for Aetherion's step 7 (tuning and consistency over seeds), generated on
 # Linux: on Windows the polled BMP390 is starved and non-reproducible and
 # host_time_s drifts, so tuning logs come from here (maintainer, 2026-11-13).
 #
-# NESC check-case 11 with Dryden turbulence, one job per seed, at the
-# sensor-fusion baseline, which is fixed here and not an input: IMU 100 Hz,
-# GNSS 10 Hz (--gps-period 0.1), --step 0.01, --rtf 1, against the Aetherion
-# commit pinned in cmake/aetherion_plant_version.cmake. Each seed is flown by
+# The NESC check-cases step 7 names -- 11 (baseline), 12 (degraded mode: no
+# GNSS fix, barometer below its rated floor), 13.1 (barometer bias in the
+# climb), 13.3 and 13.4 (heading observability); 13.2 is accepted too -- with
+# Dryden turbulence, one job per case and seed, at the sensor-fusion baseline,
+# which is fixed here and not an input: IMU 100 Hz, GNSS 10 Hz (--gps-period
+# 0.1), --step 0.01, --rtf 1, against the Aetherion commit pinned in
+# cmake/aetherion_plant_version.cmake. 11 and 12 fly f16_trim_cosim, 13.x
+# f16_autopilot_cosim (with the same f16_flight_computer). Every sensor runs
+# at its FMU's defaults, the GNSS velocity error model included: no receiver
+# option is passed, so a change of default in the FMU reaches the next batch
+# with nothing changed here. Each job is flown by
 # scripts/run_integration_case.py -- the integration gate's own runner, so
 # the log-contract check (check_log_contract.py --results, against the
-# installed LogContract.h), the GNSS-velocity check and EKFReplay
-# nav-baro-gnss16 are the gate's -- and uploaded as its own artifact whatever
-# the outcome: the logs are the product, a failed replay does not drop them.
+# installed LogContract.h), the GNSS check and EKFReplay nav-baro-gnss16 are
+# the gate's (for case 12 the GNSS check wants every epoch logged and no 3D
+# fix) -- and uploaded as its own artifact whatever the outcome: the logs are
+# the product, a failed replay does not drop them.
 #
-# Seed convention: matrix seed N is f16_trim_cosim --seed N (each sensor's
-# seed is hashed from N per part) and --turbulence-seed N, so one integer
-# names the whole realisation. Both are in the f16_truth.config sidecar
-# (seed=, turbulence_seed=) and in manifest.json (case.seed,
-# case.turbulence_seed, and the cosim command line).
+# Seed convention: matrix seed N is the host's --seed N (each sensor's seed
+# is hashed from N per part) and --turbulence-seed N, so one integer names
+# the whole realisation of a case. Both are in the f16_truth.config sidecar
+# (check_case=, seed=, turbulence_seed=) and in manifest.json (case.case,
+# case.seed, case.turbulence_seed, and the cosim command line).
 #
-# The last job reads every seed's EKFReplay summary into one table
-# (scripts/aggregate_replay_summaries.py): job summary and a CSV artifact.
+# The last job reads every run's EKFReplay summary into one table per case
+# (scripts/aggregate_replay_summaries.py): job summary and CSV artifacts.
 #
-# Dispatch (the branch must be on GitHub):
+# Dispatch (the branch must be on GitHub); duration_s left out flies each
+# case's reference window (11 and 12: 200 s, 13.1 and 13.2: 60 s, 13.3 and
+# 13.4: 240 s):
 #   gh workflow run step7-log-batch.yml --ref <branch> \
-#     -f seeds=1-20 -f duration_s=200 -f turbulence=8 -f max_parallel=10
+#     -f cases=11 -f seeds=1-20 -f turbulence=8 -f max_parallel=10
+#   gh workflow run step7-log-batch.yml --ref <branch> \
+#     -f cases=12,13.1,13.3,13.4 -f seeds=1-20 -f turbulence=8 -f max_parallel=20
 
 on:
   workflow_dispatch:
     inputs:
+      cases:
+        description: "NESC check-cases, comma-separated: 11, 12, 13.1, 13.2, 13.3, 13.4 (e.g. 12,13.1,13.3,13.4)"
+        type: string
+        default: "11"
       seeds:
-        description: "Seeds: a range and/or a list, e.g. 1-20 or 1,3,5-8 (positive, at most 256)"
+        description: "Seeds: a range and/or a list, e.g. 1-20 or 1,3,5-8 (positive; cases x seeds at most 256)"
         type: string
         default: "1-20"
       duration_s:
-        description: "Simulated seconds per seed (1 to 1800; at --rtf 1 this is also the wall time)"
+        description: "Simulated seconds per run (1 to 1800; at --rtf 1 also the wall time). Blank: each case's window"
         type: string
-        default: "200"
+        default: ""
       turbulence:
         description: "MIL-F-8785C W20 [m/s] (--turbulence); 8 as in TODO-sensor-fusion.md's 2026-10-19 table"
         type: string
         default: "8"
       max_parallel:
-        description: "Seed jobs at once (1 to 20)"
+        description: "Jobs at once (1 to 20)"
         type: string
         default: "10"
 
@@ -63,8 +79,9 @@ jobs:
     env:
       AETHERION_RECIPE: 1
     outputs:
+      cases: ${{ steps.inputs.outputs.cases }}
       seeds: ${{ steps.inputs.outputs.seeds }}
-      duration_s: ${{ steps.inputs.outputs.duration_s }}
+      matrix: ${{ steps.inputs.outputs.matrix }}
       turbulence: ${{ steps.inputs.outputs.turbulence }}
       max_parallel: ${{ steps.inputs.outputs.max_parallel }}
       commit: ${{ steps.pin.outputs.commit }}
@@ -75,9 +92,10 @@ jobs:
         with:
           path: hemerion
 
-      - name: Check the inputs and expand the seeds
+      - name: Check the inputs and expand the cases and seeds
         id: inputs
         env:
+          IN_CASES: ${{ inputs.cases }}
           IN_SEEDS: ${{ inputs.seeds }}
           IN_DURATION: ${{ inputs.duration_s }}
           IN_TURBULENCE: ${{ inputs.turbulence }}
@@ -86,9 +104,19 @@ jobs:
           python3 - <<'EOF'
           import json, math, os, re, sys
 
+          sys.path.insert(0, "hemerion/scripts")
+          from run_integration_case import CASES  # the runner's own table: hosts and reference windows
+
           def fail(message):
               print(f"::error::{message}")
               sys.exit(1)
+
+          cases = [item for item in os.environ["IN_CASES"].replace(" ", "").split(",") if item]
+          unknown = [item for item in cases if item not in CASES]
+          if unknown or not cases:
+              fail(f"cases: {', '.join(unknown) or 'none given'}; choose from {', '.join(CASES)}")
+          if len(set(cases)) != len(cases):
+              fail("cases: a case is listed twice")
 
           seeds = []
           for item in os.environ["IN_SEEDS"].replace(" ", "").split(","):
@@ -103,26 +131,33 @@ jobs:
               seeds += range(first, last + 1)
           if len(set(seeds)) != len(seeds):
               fail("seeds: a seed is listed twice")
-          if not 1 <= len(seeds) <= 256:
-              fail(f"seeds: {len(seeds)} seeds; a matrix takes 1 to 256")
+          if not 1 <= len(seeds) * len(cases) <= 256:
+              fail(f"{len(cases)} case(s) x {len(seeds)} seed(s); a matrix takes 1 to 256 jobs")
           try:
-              duration = float(os.environ["IN_DURATION"])
+              duration = float(os.environ["IN_DURATION"]) if os.environ["IN_DURATION"].strip() else None
               turbulence = float(os.environ["IN_TURBULENCE"])
               max_parallel = int(os.environ["IN_MAX_PARALLEL"])
           except ValueError as error:
               fail(f"inputs: {error}")
-          if not (math.isfinite(duration) and 1.0 <= duration <= 1800.0):
-              fail("duration_s must lie in [1, 1800]")
+          if duration is not None and not (math.isfinite(duration) and 1.0 <= duration <= 1800.0):
+              fail("duration_s must lie in [1, 1800], or be blank for each case's reference window")
           if not (math.isfinite(turbulence) and 0.0 <= turbulence <= 30.0):
               fail("turbulence must lie in [0, 30] m/s")
           if not 1 <= max_parallel <= 20:
               fail("max_parallel must lie in [1, 20]")
+          # One matrix entry per case and seed; the stop time travels with the case, so a batch of several
+          # cases flies each over its own window.
+          matrix = [{"case": case, "seed": seed, "duration_s": f"{duration or CASES[case]['window_s']:g}"}
+                    for case in cases for seed in seeds]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"cases={json.dumps(cases)}\n")
               out.write(f"seeds={json.dumps(seeds)}\n")
-              out.write(f"duration_s={duration:g}\n")
+              out.write(f"matrix={json.dumps({'include': matrix})}\n")
               out.write(f"turbulence={turbulence:g}\n")
               out.write(f"max_parallel={max_parallel}\n")
-          print(f"{len(seeds)} seeds {seeds}, {duration:g} s, W20 {turbulence:g} m/s, {max_parallel} at once")
+          for case in cases:
+              print(f"case {case}: {len(seeds)} seeds {seeds}, {duration or CASES[case]['window_s']:g} s")
+          print(f"{len(matrix)} jobs, W20 {turbulence:g} m/s, {max_parallel} at once")
           EOF
 
       # ── From here to "Show the Aetherion build": integration.yml's recipe ──
@@ -271,27 +306,28 @@ jobs:
           grep -q "${{ steps.pin.outputs.commit }}" aetherion-install/BUILDINFO.txt
       # ── End of integration.yml's recipe ─────────────────────────────────────
 
-  # ── One job per seed: build, fly, check, replay, upload ─────────────────────
+  # ── One job per case and seed: build, fly, check, replay, upload ────────────
   fly:
-    name: case 11 seed ${{ matrix.seed }}
+    name: case ${{ matrix.case }} seed ${{ matrix.seed }}
     needs: plan
     runs-on: ubuntu-24.04
-    # 200 s flies in about 6 min (build 1 min, flight at --rtf 1 = wall time); 1800 s, the cap, in about 36.
-    # Each process is capped at 1.5 x duration + 300 s (50 min at the cap), inside the job's limit, so a hung
-    # run is stopped by the runner script and its logs are still uploaded.
-    timeout-minutes: 75
+    # Case 11's 200 s flies in about 6 min (build 1 min, flight at --rtf 1 = wall time). A host that cannot keep
+    # up runs slower than real time: on a 2-core Windows laptop cases 12 and 13.1 took 1.8x. Each process is
+    # capped by the runner script at max(600 s, 3 x duration + 300 s) (95 min at the 1800 s maximum), inside the
+    # job's limit, so a hung run is stopped there and its logs are still uploaded.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
-      matrix:
-        seed: ${{ fromJSON(needs.plan.outputs.seeds) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
+      CASE: ${{ matrix.case }}
       SEED: ${{ matrix.seed }}
-      DURATION_S: ${{ needs.plan.outputs.duration_s }}
+      DURATION_S: ${{ matrix.duration_s }}
       TURBULENCE: ${{ needs.plan.outputs.turbulence }}
       PIN_COMMIT: ${{ needs.plan.outputs.commit }}
       PIN_VERSION: ${{ needs.plan.outputs.version }}
-      OUT: case11-seed${{ matrix.seed }}
+      OUT: case${{ matrix.case }}-seed${{ matrix.seed }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -324,16 +360,26 @@ jobs:
           CXX: g++-14
         run: |
           cmake --preset=examples-native 2>&1 | tee configure.log
-          # The plant must be the pinned build, not merely above the floor.
+          # The plant (and, for 13.x, the autopilot) must be the pinned build, not merely above the floor.
           grep -q "f16_trim_ecos: Aetherion build is the pinned $PIN_COMMIT" configure.log
+          grep -q "f16_autopilot_ecos: Aetherion build is the pinned $PIN_COMMIT" configure.log
 
-      - name: Build case 11
+      # f16_flight_computer is f16_trim_ecos's for every case; the host is the case's.
+      - name: Build case ${{ matrix.case }}
         working-directory: hemerion
-        run: cmake --build build/examples-native --target f16_trim_cosim f16_flight_computer
+        run: |
+          case "$CASE" in
+            13.*) host=f16_autopilot_cosim ;;
+            *) host=f16_trim_cosim ;;
+          esac
+          cmake --build build/examples-native --target "$host" f16_flight_computer
 
       - name: Record the environment
         env:
+          IN_CASES: ${{ inputs.cases }}
           IN_SEEDS: ${{ inputs.seeds }}
+          IN_DURATION: ${{ inputs.duration_s }}
+          CASE_LIST: ${{ needs.plan.outputs.cases }}
           SEED_LIST: ${{ needs.plan.outputs.seeds }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -369,12 +415,16 @@ jobs:
               "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
               "ref": os.environ["GITHUB_REF"],
               "sha": os.environ["GITHUB_SHA"],
-              "inputs": {"seeds": os.environ["IN_SEEDS"], "duration_s": os.environ["DURATION_S"],
-                         "turbulence": os.environ["TURBULENCE"]},
+              "inputs": {"cases": os.environ["IN_CASES"], "seeds": os.environ["IN_SEEDS"],
+                         "duration_s": os.environ["IN_DURATION"], "turbulence": os.environ["TURBULENCE"]},
+              "cases": json.loads(os.environ["CASE_LIST"]),
               "seeds": json.loads(os.environ["SEED_LIST"]),
+              "case": os.environ["CASE"],
               "seed": int(os.environ["SEED"]),
-              "seed_convention": "f16_trim_cosim --seed N and --turbulence-seed N for matrix seed N",
-              "baseline": "IMU 100 Hz, GNSS 10 Hz (--gps-period 0.1), --step 0.01, --rtf 1 (fixed, not inputs)",
+              "duration_s": float(os.environ["DURATION_S"]),
+              "seed_convention": "the case's host --seed N and --turbulence-seed N for matrix seed N",
+              "baseline": "IMU 100 Hz, GNSS 10 Hz (--gps-period 0.1), --step 0.01, --rtf 1 (fixed, not inputs); "
+                          "every sensor FMU at its defaults (no receiver option passed)",
           }
           with open("environment.json", "w", encoding="utf-8") as out:
               json.dump(environment, out, indent=2)
@@ -389,10 +439,10 @@ jobs:
             --bin hemerion/build/examples-native/examples/f16_trim_ecos \
             --ekfreplay aetherion-install/bin/EKFReplay \
             --aetherion-header aetherion-install/include/Aetherion/Estimation/LogContract.h \
+            --autopilot-bin hemerion/build/examples-native/examples/f16_autopilot_ecos \
             --aetherion-commit "$PIN_COMMIT" \
-            --seed "$SEED" --stop "$DURATION_S" --turbulence "$TURBULENCE" \
+            --case "$CASE" --seed "$SEED" --stop "$DURATION_S" --turbulence "$TURBULENCE" \
             --environment environment.json \
-            --timeout-s "$(python3 -c "import os; print(1.5 * float(os.environ['DURATION_S']) + 300)")" \
             --out "$OUT"
 
       - name: Record both commits
@@ -404,6 +454,7 @@ jobs:
             echo "hemerion_ref=$GITHUB_REF"
             echo "aetherion_commit=$PIN_COMMIT"
             echo "aetherion_version=$PIN_VERSION"
+            echo "case=$CASE"
             echo "seed=$SEED"
           } > "$OUT/commits.txt"
           cp environment.json "$OUT/environment.json" 2>/dev/null || true
@@ -415,13 +466,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: step7-case11-seed-${{ matrix.seed }}
+          name: step7-case${{ matrix.case }}-seed-${{ matrix.seed }}
           path: ${{ env.OUT }}
           if-no-files-found: error
 
-  # ── One table over every seed that produced a run ───────────────────────────
+  # ── One table per case over every seed that produced a run ──────────────────
   aggregate:
-    name: table over seeds
+    name: table per case over seeds
     needs: [plan, fly]
     if: always() && needs.plan.result == 'success'
     runs-on: ubuntu-24.04
@@ -431,30 +482,44 @@ jobs:
         with:
           path: hemerion
 
-      - name: Download every seed's run
+      - name: Download every run
         uses: actions/download-artifact@v8
         with:
-          pattern: step7-case11-seed-*
+          pattern: step7-case*-seed-*
           path: step7-runs
 
+      # A case whose every job failed before uploading has no directory; its table is then missing, not empty,
+      # and the step says so instead of failing the others.
       - name: Aggregate the EKFReplay summaries
         env:
-          TITLE: >-
-            Step 7 batch: case 11, W20 ${{ needs.plan.outputs.turbulence }} m/s,
-            ${{ needs.plan.outputs.duration_s }} s, Aetherion ${{ needs.plan.outputs.version }}
+          CASE_LIST: ${{ needs.plan.outputs.cases }}
+          TITLE_TAIL: >-
+            W20 ${{ needs.plan.outputs.turbulence }} m/s, Aetherion ${{ needs.plan.outputs.version }}
             (${{ needs.plan.outputs.commit }}), Linux
         run: |
           mkdir -p step7-summary
-          python3 hemerion/scripts/aggregate_replay_summaries.py step7-runs \
-            --title "$TITLE" \
-            --csv step7-summary/step7_case11_summary.csv \
-            --markdown step7-summary/step7_case11_summary.md
-          cat step7-summary/step7_case11_summary.md >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          for c in $(python3 -c "import json, os; print(' '.join(json.loads(os.environ['CASE_LIST'])))"); do
+            runs=$(find step7-runs -maxdepth 1 -type d -name "step7-case$c-seed-*" | sort)
+            if [ -z "$runs" ]; then
+              echo "::error::case $c: no run was uploaded"
+              echo "## Step 7 batch: case $c -- no run was uploaded" >> "$GITHUB_STEP_SUMMARY"
+              status=1
+              continue
+            fi
+            # shellcheck disable=SC2086  # one argument per run directory
+            python3 hemerion/scripts/aggregate_replay_summaries.py $runs \
+              --title "Step 7 batch: case $c, $TITLE_TAIL" \
+              --csv "step7-summary/step7_case${c}_summary.csv" \
+              --markdown "step7-summary/step7_case${c}_summary.md" || status=1
+            cat "step7-summary/step7_case${c}_summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+          done
+          exit $status
 
-      - name: Upload the table
+      - name: Upload the tables
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: step7-case11-summary
+          name: step7-summary
           path: step7-summary
           if-no-files-found: error
