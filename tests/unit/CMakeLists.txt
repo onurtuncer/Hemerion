@@ -23,6 +23,16 @@ add_executable(test_hemerion_example_environment test_example_environment.cpp)
 target_include_directories(test_hemerion_example_environment PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
 target_link_libraries(test_hemerion_example_environment PRIVATE hemerion_test_support)
 
+# The hosts' pacing report and the Windows timer-resolution scope (examples/common/pacing.hpp).
+add_executable(test_hemerion_pacing test_pacing.cpp)
+target_include_directories(test_hemerion_pacing PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
+target_link_libraries(test_hemerion_pacing PRIVATE hemerion_test_support)
+if(WIN32)
+  target_link_libraries(test_hemerion_pacing PRIVATE winmm)
+endif()
+add_test(NAME examples.pacing COMMAND test_hemerion_pacing)
+set_tests_properties(examples.pacing PROPERTIES LABELS "unit")
+
 add_test(NAME examples.environment COMMAND test_hemerion_example_environment)
 set_tests_properties(examples.environment PROPERTIES LABELS "unit")
 

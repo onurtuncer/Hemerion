@@ -95,6 +95,7 @@
 #include "Hemerion/imu/imu_types.h"
 
 #include "environment.hpp"
+#include "pacing.hpp"
 #include "log_contract.hpp"
 
 #include <algorithm>
@@ -781,6 +782,9 @@ private:
 
 int main(int argc, char** argv)
 {
+  // 1 ms scheduler ticks on Windows for the whole run: this process hosts the sensor FMUs, whose bus service
+  // threads back off with sub-millisecond sleeps. A no-op elsewhere. See pacing.hpp.
+  const hemerion::examples::ScopedTimerResolution timer_resolution;
   Options options;
   if (!parse_args(argc, argv, options))
   {
@@ -1092,6 +1096,7 @@ int main(int argc, char** argv)
               << "[cosim] stop " << options.stop_s << " s (the case's longest published reference window)\n";
 
     const auto wall_start = std::chrono::steady_clock::now();
+    hemerion::examples::PacingMonitor pacing(options.realtime_factor, wall_start);
     long print_counter = 0;
     const long print_period = std::lround(10.0 / options.step_s);  // one status line per 10 s of sim time
 
@@ -1141,12 +1146,8 @@ int main(int argc, char** argv)
         }
         std::cout << "\n";
       }
-      if (options.realtime_factor > 0.0)
-      {
-        const auto target = wall_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                             std::chrono::duration<double>(sim->time() / options.realtime_factor));
-        std::this_thread::sleep_until(target);
-      }
+      // Sleeps to the same absolute target as always; also notes how late the step already was.
+      pacing.pace(sim->time());
     }
 
     // The BMP390 rating diagnostic, as in the trim example -- informational
@@ -1164,6 +1165,11 @@ int main(int argc, char** argv)
     const double final_latdev_ft = lateral_deviation_ft();
 
     sim->terminate();
+
+    // Whether --rtf held, and by how much it did not: the console and the sidecar, so a run whose
+    // arrival stamps are not a clock says so where its logs are read.
+    hemerion::examples::print_pacing(std::cout, pacing.report());
+    hemerion::examples::append_pacing_to_sidecar(options.csv_path, pacing.report());
 
     std::cout << "[cosim] done: " << sim->iterations() << " steps of " << options.step_s << " s\n"
               << "[cosim] the BMP390 latched " << baro_conversions << " conversions, " << baro_out_of_rating

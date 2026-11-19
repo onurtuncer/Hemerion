@@ -178,6 +178,11 @@ endif()
 add_executable(rocket_gps_cosim cosim_host_main.cpp)
 target_link_libraries(rocket_gps_cosim PRIVATE libecos hemerion_sensors)
 target_compile_features(rocket_gps_cosim PRIVATE cxx_std_23)
+# winmm for timeBeginPeriod (examples/common/pacing.hpp): 1 ms scheduler ticks on Windows, so the shared-memory buses'
+# sub-millisecond back-off does not round up to 15.6 ms.
+if(WIN32)
+  target_link_libraries(rocket_gps_cosim PRIVATE winmm)
+endif()
 # Ecos keeps src/ off its public include path. cosim_host_main.cpp reaches into it for util/unzipper.hpp so its
 # FMU-extraction preflight runs the same code Ecos will rather than a reimplementation that could drift -- see the
 # comment on that include. Ecos is pinned, so a moved header fails the build instead of rotting the check.
@@ -212,5 +217,5 @@ target_link_libraries(gps_flight_computer PRIVATE hemerion_sensors hemerion_spi_
 target_include_directories(gps_flight_computer PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
 target_compile_features(gps_flight_computer PRIVATE cxx_std_23)
 if(WIN32)
-  target_link_libraries(gps_flight_computer PRIVATE ws2_32)
+  target_link_libraries(gps_flight_computer PRIVATE ws2_32 winmm)
 endif()

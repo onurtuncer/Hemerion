@@ -172,6 +172,11 @@ endif()
 add_executable(f16_autopilot_cosim cosim_host_main.cpp)
 target_link_libraries(f16_autopilot_cosim PRIVATE libecos hemerion_sensors)
 target_compile_features(f16_autopilot_cosim PRIVATE cxx_std_23)
+# winmm for timeBeginPeriod (examples/common/pacing.hpp): 1 ms scheduler ticks on Windows, so the shared-memory buses'
+# sub-millisecond back-off does not round up to 15.6 ms.
+if(WIN32)
+  target_link_libraries(f16_autopilot_cosim PRIVATE winmm)
+endif()
 # Ecos' src/ for util/unzipper.hpp (the extraction preflight), and examples/common/ for the shared host logic -- the
 # environment models and the geomagnetic field.
 target_include_directories(f16_autopilot_cosim PRIVATE "${CMAKE_SOURCE_DIR}/modules/sensors/include"

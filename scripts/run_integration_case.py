@@ -47,6 +47,17 @@ commits, every command line, the host, anything --environment adds, and the
 outcome of each check. Exit status 0
 when every check passes, 1 otherwise, with each failure named.
 
+One more thing is measured but never fails a run: whether the flight
+computer's arrival stamps (`host_time_s`) are a clock. scripts/
+fit_arrival_clock.py fits them per stream against simulation time; the fit
+lands in the manifest as `clock_fit`, and a stream outside --clock-max-scale-
+error / --clock-max-rms-s (0.02 and 0.02 s) is a warning (`clock_ok` false,
+`clock_flags`), printed as WARN. A host that cannot keep --rtf 1 -- the plant
+FMU's step costing more than the step, on a slow runner -- produces exactly
+that, and the sensor values are still right; only a filter that would use the
+stamps as a clock needs to know. The host's own pacing report is in the
+sidecar (`pacing_*`).
+
     python scripts/run_integration_case.py \\
         --bin build/examples-native/examples/f16_trim_ecos \\
         --ekfreplay <EKFReplay executable> \\
@@ -66,6 +77,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fit_arrival_clock  # noqa: E402  (beside this script)
 
 REPO = Path(__file__).resolve().parent.parent
 PIN_FILE = REPO / "cmake" / "aetherion_plant_version.cmake"
@@ -92,6 +106,10 @@ CASE = {
 # three quarters of the epochs as 3D fixes (150 of the gate's 200) means the
 # receiver or the link broke, not that the filter had little to work with.
 MIN_3D_FIX_FRACTION = 0.75
+
+# When the arrival stamps count as a usable clock; see fit_arrival_clock.py for where the numbers come from.
+CLOCK_MAX_SCALE_ERROR = fit_arrival_clock.DEFAULT_MAX_SCALE_ERROR
+CLOCK_MAX_RMS_S = fit_arrival_clock.DEFAULT_MAX_RMS_S
 
 # The NESC check-cases this runner flies: the host that flies each, its reference window (the stop time when
 # --stop is not given, except for the gate's case 11, which flies 20 s) and whether the receiver holds a fix.
@@ -212,6 +230,21 @@ def check_gnss_velocity(gps_csv: Path, failures: list[str], min_fixes: int, max_
     return fixes
 
 
+def assess_clock(out: Path, max_scale_error: float, max_rms_s: float) -> dict:
+    """The arrival-stamp fit of a run directory, for the manifest: `clock_fit` (per stream), `clock_bounds`,
+    `clock_flags` (each stream out of bounds, or unusable) and `clock_ok` (none flagged, and something to fit)."""
+    fits = fit_arrival_clock.fit_run(out)
+    flags = fit_arrival_clock.violations(fits, max_scale_error, max_rms_s)
+    if not fits:
+        flags = ["no flight-computer logs to fit"]
+    return {
+        "clock_fit": fits,
+        "clock_bounds": {"max_scale_error": max_scale_error, "max_rms_s": max_rms_s},
+        "clock_flags": flags,
+        "clock_ok": not flags,
+    }
+
+
 def run(command: list[str], log: Path, timeout_s: float, cwd: Path) -> subprocess.CompletedProcess:
     with log.open("w", encoding="utf-8") as out:
         return subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, timeout=timeout_s, cwd=cwd, check=False)
@@ -245,6 +278,12 @@ def main() -> int:
                         help="JSON object recorded as the manifest's 'environment' (runner, compiler, CI run)")
     parser.add_argument("--timeout-s", type=float,
                         help="wall-clock cap per process (default 600 s, or 3 x --stop + 300 s if longer)")
+    parser.add_argument("--clock-max-scale-error", type=float, default=CLOCK_MAX_SCALE_ERROR,
+                        help=f"arrival-stamp clock: warn when |scale - 1| exceeds this "
+                             f"(default {CLOCK_MAX_SCALE_ERROR:g}; a warning, never a failure)")
+    parser.add_argument("--clock-max-rms-s", type=float, default=CLOCK_MAX_RMS_S,
+                        help=f"arrival-stamp clock: warn when the fit residual exceeds this rms [s] "
+                             f"(default {CLOCK_MAX_RMS_S:g}; a warning, never a failure)")
     args = parser.parse_args()
     if args.seed <= 0:
         parser.error("--seed must be positive: 0 makes every sensor a fresh, unreproducible draw")
@@ -383,11 +422,20 @@ def main() -> int:
     if args.aetherion_commit and pin["commit"] and args.aetherion_commit != pin["commit"]:
         failures.append(f"Aetherion {args.aetherion_commit} is not the pinned {pin['commit']}")
 
+    # 6. The arrival stamps as a clock: recorded and flagged, never a failure (see the module docstring).
+    clock = assess_clock(out, args.clock_max_scale_error, args.clock_max_rms_s)
+    manifest.update(clock)
+
     manifest["passed"] = not failures
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     if summary.exists():
         print(summary.read_text(encoding="utf-8", errors="replace").rstrip())
+    if clock["clock_fit"]:
+        print("arrival stamps against simulation time (scripts/fit_arrival_clock.py):")
+        print(fit_arrival_clock.table(clock["clock_fit"]))
+    for flag in clock["clock_flags"]:
+        print(f"WARN: arrival stamps are not a clock for this run: {flag}")
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:

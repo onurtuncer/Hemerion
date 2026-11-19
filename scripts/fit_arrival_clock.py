@@ -50,6 +50,13 @@ STREAMS = [
     ("mag", "mag_samples.csv", "imu_part_time_s"),
 ]
 HOST = "host_time_s"
+
+# A usable clock: every stream within 2 % of scale 1 and under 20 ms rms (two 0.01 s steps). Runners that kept
+# --rtf 1 fit at 1.0000 and 1-4 ms; those that fell behind at 1.03-1.36 and 231-471 ms (case 11, CI run
+# 43482563098), so the bounds split the two with room. run_integration_case.py and aggregate_replay_summaries.py
+# flag against these unless told otherwise.
+DEFAULT_MAX_SCALE_ERROR = 0.02
+DEFAULT_MAX_RMS_S = 0.02
 SENSORTIME_WRAP_S = 512.0  # the BMP390's 24-bit counter at 30.5 us per count, as the log contract documents
 
 
