@@ -94,6 +94,7 @@ void ImuSpiSlave::reset()
   clear_fifo();
   control_ = kImuSpiControlFifoEnable;
   overflow_sticky_ = false;
+  control_written_ = false;
   frames_dropped_ = 0;
   byte_index_ = 0;
   address_ = 0;
@@ -116,6 +117,12 @@ std::uint64_t ImuSpiSlave::frames_dropped() const
 {
   const std::lock_guard<std::mutex> guard(mutex_);
   return frames_dropped_;
+}
+
+bool ImuSpiSlave::configured() const
+{
+  const std::lock_guard<std::mutex> guard(mutex_);
+  return control_written_;
 }
 
 std::uint8_t ImuSpiSlave::read_register(std::uint8_t address)
@@ -172,6 +179,7 @@ void ImuSpiSlave::write_register(std::uint8_t address, std::uint8_t value)
   }
   // The reset bit is self-clearing, so it never survives into the readback.
   control_ = static_cast<std::uint8_t>(value & ~kImuSpiControlFifoReset);
+  control_written_ = true;
 }
 
 std::uint8_t ImuSpiSlave::pop_fifo()

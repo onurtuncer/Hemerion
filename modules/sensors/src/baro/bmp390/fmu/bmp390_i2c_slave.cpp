@@ -137,6 +137,20 @@ bool Bmp390I2cSlave::interrupt_asserted() const
   return interrupt_condition_locked();
 }
 
+bool Bmp390I2cSlave::measuring() const
+{
+  const std::lock_guard<std::mutex> lock(mutex_);
+  const bool normal = (pwr_ctrl_ & kBmp390PwrCtrlModeMask) == kBmp390PwrCtrlModeNormal;
+  const bool enabled = (pwr_ctrl_ & (kBmp390PwrCtrlPressureEnable | kBmp390PwrCtrlTemperatureEnable)) != 0U;
+  return (normal && enabled) || forced_pending_;
+}
+
+bool Bmp390I2cSlave::conversion_unread() const
+{
+  const std::lock_guard<std::mutex> lock(mutex_);
+  return (status_ & (kBmp390StatusPressureReady | kBmp390StatusTemperatureReady)) != 0U;
+}
+
 void Bmp390I2cSlave::reset()
 {
   const std::lock_guard<std::mutex> lock(mutex_);

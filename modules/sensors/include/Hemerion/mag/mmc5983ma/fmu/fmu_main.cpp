@@ -57,6 +57,19 @@
 /// (200 x 1 ms as configured), or bring-up times out against a part that is
 /// merely paused.
 ///
+/// **When measurements start, in simulation time.** The controller is a
+/// separate process on the wall clock, and its bring-up blocks on this part:
+/// the SET/RESET pair is two triggered measurements it polls for. Served by
+/// whichever steps happened to be running, those measurements -- and the step
+/// continuous mode began in, and so the phase and the plant state of every
+/// later measurement -- depended on wall-clock timing rather than on the
+/// seed. `bring_up_timeout_s` holds the first step (PartBringUpGate,
+/// part_bring_up.h) until continuous mode is on, answering the bring-up's
+/// triggered measurements from the t = 0 inputs while it holds, so the whole
+/// bring-up completes at t = 0. `ready_at_start` says whether that happened.
+/// 0 (the default) does not hold, and the constraint above then still
+/// applies.
+///
 /// The INT line level is re-published once per step; a clear-on-write inside
 /// a step therefore reaches the shared bus line at the next communication
 /// point. The `Status` register, which the driver polls, clears immediately.
@@ -67,6 +80,7 @@
 /// implements do_step(); see cmake/generate_fmu.cmake for how the two halves
 /// are compiled and packaged into an .fmu archive.
 
+#include "Hemerion/part_bring_up.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.h"
 #include "Hemerion/mag/mmc5983ma/fmu/mmc5983ma_measurement_model.h"
 
@@ -75,7 +89,9 @@
 #include <fmu4cpp/fmu_base.hpp>
 #include <fmu4cpp/fmu_except.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <thread>
 
 namespace hemerion::sensors::mag::mmc5983ma::fmu
 {
@@ -88,6 +104,7 @@ namespace
 constexpr Mmc5983maMeasurementConfig kDefaultNoise{};
 
 using fmu4cpp::causality_t;
+using fmu4cpp::initial_t;
 using fmu4cpp::variability_t;
 
 /// Where this part sits: the bus it creates, and the environment variable a
@@ -96,6 +113,10 @@ const sim::i2c_shm::I2cPeripheralConfig kI2cBus{ "hemerion_mmc5983ma_i2c", "HEME
 
 /// Die temperature the part reports when the host does not drive it.
 constexpr double kDefaultTemperatureC = 25.0;
+
+/// How long terminate() keeps the part powered for a controller to read the
+/// last measurement. A polling controller comes back within milliseconds.
+constexpr auto kDrainTimeout = std::chrono::seconds(1);
 
 }  // namespace
 
@@ -155,6 +176,21 @@ public:
         .setCausality(causality_t::PARAMETER)
         .setVariability(variability_t::FIXED)
         .setDescription("Die-temperature white noise, 1-sigma [degrees C]");
+
+    // When simulation time may start: see the file comment. Registered after every earlier variable so their
+    // value references keep their numbers.
+    register_real("bring_up_timeout_s", &bring_up_timeout_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Wall-clock time the first step waits for a controller to put the part into continuous "
+                        "mode, answering its triggered measurements meanwhile, so the bring-up completes at t = 0 "
+                        "and the measurement schedule depends on simulation time and the seed only [s]; 0 does "
+                        "not wait");
+    register_integer("ready_at_start", &ready_at_start_)
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("1 if a controller had the part in continuous mode when simulation time started, else 0");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -164,6 +200,9 @@ public:
   void exit_initialisation_mode() override
   {
     apply_noise_config();
+    gate_.arm(bring_up_timeout_s_);
+    soft_resets_seen_ = slave_.soft_resets();
+    schedule_.reset();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_mmc5983ma_fmu] Unable to create the I2C bus '" + endpoint_.bus_name() +
@@ -172,10 +211,20 @@ public:
     debugLog(fmiOK, "[hemerion_mmc5983ma_fmu] I2C peripheral ready on bus '" + endpoint_.bus_name() + "'");
   }
 
-  /// Powers the part down. The data registers hold at most one measurement,
-  /// so unlike the FIFO-buffering IMU there is nothing to let a controller
-  /// drain: whatever is unread at power-down is lost, as on the real board.
-  void terminate() override { endpoint_.detach(); }
+  /// Powers the part down -- once a controller still on the bus has read the
+  /// last measurement, so the sample stream ends where the simulation does
+  /// rather than wherever the controller's last poll landed. Bounded, and
+  /// abandoned immediately if nobody is left on the bus.
+  void terminate() override
+  {
+    const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+    while (slave_.measurement_unread() && endpoint_.controller_attached() &&
+           std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    endpoint_.detach();
+  }
 
   /// fmi2Reset equivalent. The hard-iron and bridge offsets
   /// Mmc5983maMeasurementModel drew at construction are kept: they model this
@@ -189,11 +238,13 @@ public:
     bridge_offset_sigma_ut_ = kDefaultNoise.bridge_offset_sigma_ut;
     soft_iron_sigma_ = kDefaultNoise.soft_iron_sigma;
     temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
+    bring_up_timeout_s_ = 0.0;
+    ready_at_start_ = 0;
     truth_x_ut_ = 0.0;
     truth_y_ut_ = 0.0;
     truth_z_ut_ = 0.0;
     temperature_c_ = kDefaultTemperatureC;
-    time_into_period_s_ = 0.0;
+    schedule_.reset();
     slave_.reset();
     endpoint_.detach();
   }
@@ -206,41 +257,34 @@ protected:
       throw fmu4cpp::fatal_error("[hemerion_mmc5983ma_fmu] Stepped before initialisation mode was exited");
     }
 
+    // The first step holds until the controller has the part in continuous
+    // mode, answering its bring-up's triggered measurements meanwhile from the
+    // t = 0 inputs, so the bring-up takes effect at t = 0 rather than at
+    // whichever steps the wall clock delivered it in.
+    if (gate_.outcome() == PartBringUpGate::Outcome::kPending)
+    {
+      gate_.hold([this] { return slave_.sampling_period_us() != 0; }, [this] { serve_bring_up(); });
+      ready_at_start_ = gate_.ready_at_start() ? 1 : 0;
+      if (gate_.outcome() == PartBringUpGate::Outcome::kTimedOut)
+      {
+        debugLog(fmiWarning,
+                 "[hemerion_mmc5983ma_fmu] No controller put the part into continuous mode within "
+                 "bring_up_timeout_s; simulation time starts anyway, and the measurement phase now depends on when "
+                 "it does");
+      }
+    }
+
     // Triggered measurements first, so a TM_M raised before this step is
     // answered by it rather than a step later -- the driver's blocking
     // bring-up paths poll on exactly this.
-    if (slave_.take_triggered_measurement())
-    {
-      latch_field();
-    }
-    if (slave_.take_triggered_temperature())
-    {
-      slave_.latch_temperature(measurement_model_.measure_temperature(temperature_c_));
-    }
+    serve_triggered();
 
     // Continuous mode: the part free-runs at the period its Internal control
-    // 2 register selects. Whole periods elapsed within this step each latch a
-    // fresh measurement (truth zero-order-held, noise redrawn), and the
-    // remainder carries into the next step so a 50 Hz part stepped at 10 Hz
-    // really measures at 50 Hz. The data registers are not a FIFO -- a
-    // controller polling slower than the rate observes only the newest.
-    const std::uint64_t period_us = slave_.sampling_period_us();
-    if (period_us == 0)
-    {
-      time_into_period_s_ = 0.0;  // one-shot: the measurement engine is idle
-    }
-    else
-    {
-      const double period_s = static_cast<double>(period_us) * 1e-6;
-      double remaining_s = dt;
-      while (time_into_period_s_ + remaining_s >= period_s)
-      {
-        remaining_s -= period_s - time_into_period_s_;
-        time_into_period_s_ = 0.0;
-        latch_field();
-      }
-      time_into_period_s_ += remaining_s;
-    }
+    // 2 register selects (none while it is off). Each measurement is a fresh
+    // one (truth zero-order-held, noise redrawn). The data registers are not
+    // a FIFO -- a controller polling slower than the rate observes only the
+    // newest.
+    schedule_.advance(dt, slave_.sampling_period_us(), [this](double /*offset_s*/) { latch_field(); });
 
     // The INT line is a level; re-drive it so a clear-on-write inside the
     // step reaches the bus line here.
@@ -249,6 +293,46 @@ protected:
   }
 
 private:
+  /// The bring-up hold's service: answers the bring-up's triggered
+  /// measurements from the t = 0 inputs.
+  ///
+  /// It also restarts the seeded error model at each software reset the
+  /// controller sends before simulation time starts. A controller whose
+  /// first bring-up attempt timed out (the master had not stepped yet) leaves
+  /// a TM_M behind; served by the hold before the controller's retry resets
+  /// the part, that orphan would cost one noise draw, and how many orphans
+  /// there were depends on the wall clock. Every attempt begins with SW_RST,
+  /// so rebuilding the model there -- same seed, so the same biases and the
+  /// same stream -- makes the successful attempt's draws the stream's first,
+  /// however many attempts preceded it. An unseeded part is left alone: a
+  /// rebuild would draw a different part.
+  void serve_bring_up()
+  {
+    const std::uint32_t resets = slave_.soft_resets();
+    if (resets != soft_resets_seen_)
+    {
+      soft_resets_seen_ = resets;
+      if (seed_ != 0)
+      {
+        apply_noise_config();
+      }
+    }
+    serve_triggered();
+  }
+
+  /// Answers a pending TM_M or TM_T trigger with one measurement.
+  void serve_triggered()
+  {
+    if (slave_.take_triggered_measurement())
+    {
+      latch_field();
+    }
+    if (slave_.take_triggered_temperature())
+    {
+      slave_.latch_temperature(measurement_model_.measure_temperature(temperature_c_));
+    }
+  }
+
   // The sensing state is read from the device model at the moment of the
   // measurement, not cached: SET and RESET land as ordinary register writes
   // from the bus service thread, and a measurement taken after a RESET must
@@ -280,6 +364,11 @@ private:
   double bridge_offset_sigma_ut_ = kDefaultNoise.bridge_offset_sigma_ut;
   double soft_iron_sigma_ = kDefaultNoise.soft_iron_sigma;
   double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
+  double bring_up_timeout_s_ = 0.0;
+  int ready_at_start_ = 0;
+  std::uint32_t soft_resets_seen_ = 0;
+  PartBringUpGate gate_;
+  FreeRunningSchedule schedule_;
 
   Mmc5983maMeasurementModel measurement_model_;
   Mmc5983maI2cSlave slave_;
@@ -288,7 +377,6 @@ private:
   double truth_y_ut_ = 0.0;
   double truth_z_ut_ = 0.0;
   double temperature_c_ = kDefaultTemperatureC;
-  double time_into_period_s_ = 0.0;
 };
 
 }  // namespace hemerion::sensors::mag::mmc5983ma::fmu

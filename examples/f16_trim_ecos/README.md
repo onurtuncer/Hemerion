@@ -109,6 +109,13 @@ finishes far faster than wall clock and starves them: 200 s of flight yields abo
 With `./f16_trim_cosim --rtf 1` the same 20 s of flight yields **83**, a ~23× higher rate. The GPS and IMU
 are unaffected — their data queues in a socket or a FIFO.
 
+**Simulation time waits for the bring-up.** The IMU, BMP390 and MMC5983MA FMUs hold the first step until the
+flight computer has brought them up (`--bring-up-timeout`, default 30 s), so every bring-up command takes effect
+at t = 0 and a seeded run's sensor logs depend on the seed alone, not on when `f16_flight_computer` started
+(see `doc/sensor_models.rst`, "Reproducibility"). Either program may start first. The host prints
+`[cosim] bring-up: ... ready at t = 0` and appends `bring_up_*` keys to the sidecar; a part that was not ready
+is flagged there. `--bring-up-timeout 0` restores the old behaviour.
+
 ## Verifying
 
 `verify_trajectory.py` keeps two bars apart, because they have very different resolution:

@@ -29,8 +29,12 @@ sample_index is not compared; the row counts are.
 
 Row counts must match too, per file. Exit status 0 when nothing differs, 1 when
 something does (each difference named), 2 when a run has none of the files.
-On Windows the polled BMP390's log is not reproducible run to run; give
---skip baro (and mag) there.
+Since the bus parts are brought up before simulation time starts (part_bring_up.h,
+2026-11-20) every conversion a run logs has the same value in every run of its
+seed; the rows differ only where the flight computer's poll loop missed a
+conversion. On Linux at --rtf 1 or slower it misses none. On Windows it can
+still miss some, so the BMP390 and magnetometer row counts differ there; give
+--skip baro (and mag) on Windows.
 
     python scripts/compare_run_values.py main-run/case11-seed1 branch-run/case11-seed1
 """

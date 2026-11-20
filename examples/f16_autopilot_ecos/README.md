@@ -88,7 +88,8 @@ Two terminals, from `build/examples-native/examples/`:
 ```
 
 The same pacing caveat as the trim example applies to the polled I2C parts: run with `--rtf 1` if the BMP390
-and MMC5983MA sample counts matter.
+and MMC5983MA sample counts matter. So does the bring-up hold (`--bring-up-timeout`, default 30 s): simulation
+time starts once the flight computer has brought the bus parts up, so either program may start first.
 
 ## Measured responses (unpaced, default configuration)
 

@@ -1046,6 +1046,14 @@ int main(int argc, char** argv)
     poll_mag();
   }
 
+  // The IMU powering down is what ends the loop above, and it can do so before
+  // the loop came back for the two polled parts' last conversions. Their FMUs
+  // keep them powered until those are read, so take them now: the barometer
+  // and magnetometer logs then end where the simulation does, not where the
+  // last loop iteration happened to fall.
+  poll_baro();
+  poll_mag();
+
   // The co-simulation stopping does not mean the last datagrams have been
   // read: UDP queues them in the socket, and the IMU FMU's power-down is what
   // ends the loop above. Take whatever is still queued before summarising, so

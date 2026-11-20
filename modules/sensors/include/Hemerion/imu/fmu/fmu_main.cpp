@@ -50,12 +50,24 @@
 /// oversampling a plant that is itself only resolved at the communication
 /// rate.
 ///
+/// **When the stream starts, in simulation time.** The controller's bring-up
+/// writes CONTROL with the FIFO-reset bit, which empties whatever the part had
+/// buffered. The controller is a separate process on the wall clock, so if the
+/// master was already stepping, how many samples that reset threw away
+/// depended on wall-clock timing, not on the seed (Linux CI, 2026-11-20: the
+/// t = 0.01 s sample was in some runs of a seed and not in others).
+/// `bring_up_timeout_s` holds the first step (PartBringUpGate,
+/// part_bring_up.h) until CONTROL has been written, so the stream starts with
+/// the first sample after t = 0 every time. `ready_at_start` says whether that
+/// happened. 0 (the default) does not hold.
+///
 /// All the FMI plumbing -- entry points, variable marshalling, GUID handling
 /// and modelDescription.xml generation -- belongs to the vendored fmu4cpp
 /// export layer (vendor/fmu4cpp). This file only registers the variables and
 /// implements do_step(); see cmake/generate_fmu.cmake for how the two halves
 /// are compiled and packaged into an .fmu archive.
 
+#include "Hemerion/part_bring_up.h"
 #include "Hemerion/sensor_clock.h"
 #include "Hemerion/imu/fmu/imu_noise_model.h"
 #include "Hemerion/imu/fmu/imu_packet_emitter.h"
@@ -287,6 +299,20 @@ public:
           variability_t::DISCRETE,
           "Gyroscope triad misalignment angle about this axis [rad]");
     }
+
+    // When simulation time may start: see the file comment. Registered after every earlier variable so their
+    // value references keep their numbers.
+    register_real("bring_up_timeout_s", &bring_up_timeout_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Wall-clock time the first step waits for a controller to write CONTROL (its bring-up, which "
+                        "empties the FIFO), so no sample is buffered before it and the stream depends on simulation "
+                        "time and the seed only [s]; 0 does not wait");
+    register_integer("ready_at_start", &ready_at_start_)
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("1 if a controller had brought the part up when simulation time started, else 0");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -296,6 +322,7 @@ public:
   void exit_initialisation_mode() override
   {
     apply_noise_config();
+    gate_.arm(bring_up_timeout_s_);
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Unable to create the SPI bus '" + endpoint_.bus_name() +
@@ -342,6 +369,8 @@ public:
     gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
     truth_ = ImuTruthSample{};
     sample_rate_hz_ = kDefaultSampleRateHz;
+    bring_up_timeout_s_ = 0.0;
+    ready_at_start_ = 0;
     slave_.reset();
     reported_overflow_ = false;
     endpoint_.detach();
@@ -353,6 +382,21 @@ protected:
     if (!endpoint_.attached())
     {
       throw fmu4cpp::fatal_error("[hemerion_imu_fmu] Stepped before initialisation mode was exited");
+    }
+
+    // The first step holds until the controller has brought the part up, so
+    // its FIFO reset lands before the first sample rather than after
+    // however many steps the wall clock let through.
+    if (gate_.outcome() == PartBringUpGate::Outcome::kPending)
+    {
+      gate_.hold([this] { return slave_.configured(); });
+      ready_at_start_ = gate_.ready_at_start() ? 1 : 0;
+      if (gate_.outcome() == PartBringUpGate::Outcome::kTimedOut)
+      {
+        debugLog(fmiWarning,
+                 "[hemerion_imu_fmu] No controller wrote CONTROL within bring_up_timeout_s; simulation time starts "
+                 "anyway, and its FIFO reset may now discard samples");
+      }
     }
 
     // Truth is zero-order-held over the step; latch one sample per sensor
@@ -434,6 +478,9 @@ private:
   double misalignment_sigma_rad_ = kDefaultNoise.misalignment_sigma_rad;
   double accel_lsb_per_g_ = kDefaultNoise.scale.accel_lsb_per_g;
   double gyro_lsb_per_dps_ = kDefaultNoise.scale.gyro_lsb_per_dps;
+  double bring_up_timeout_s_ = 0.0;
+  int ready_at_start_ = 0;
+  PartBringUpGate gate_;
 
   std::mt19937_64 clock_rng_{ 1 };
   SensorClock clock_{ SensorClockConfig{}, clock_rng_ };

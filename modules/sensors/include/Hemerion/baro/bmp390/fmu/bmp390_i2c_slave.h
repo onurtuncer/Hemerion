@@ -119,6 +119,15 @@ public:
   /// True while the part would be driving its INT pin.
   [[nodiscard]] bool interrupt_asserted() const;
 
+  /// @brief True once a controller has started the measurement engine:
+  /// normal mode with a measurement enabled, or a forced conversion owed.
+  /// What the FMU's bring-up gate waits for (part_bring_up.h).
+  [[nodiscard]] bool measuring() const;
+
+  /// True while the newest conversion has not been read (a drdy status bit is
+  /// still set): what the FMU's power-down waits on.
+  [[nodiscard]] bool conversion_unread() const;
+
   /// Power-on state (fmi2Reset's equivalent): user registers to defaults,
   /// pending data dropped; the calibration NVM and strap survive.
   void reset();

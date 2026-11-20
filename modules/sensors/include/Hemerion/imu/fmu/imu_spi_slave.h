@@ -95,6 +95,12 @@ public:
   /// `STATUS` bit only says "at least one, since you last looked").
   [[nodiscard]] std::uint64_t frames_dropped() const;
 
+  /// @brief True once a controller has written `CONTROL` since power-on (the
+  /// driver's bring-up: FIFO enabled and emptied). What the FMU's bring-up
+  /// gate waits for (part_bring_up.h), so samples buffered before the
+  /// controller arrived are not emptied away at a wall-clock-dependent step.
+  [[nodiscard]] bool configured() const;
+
 private:
   // Callers hold mutex_ for all of these.
   [[nodiscard]] std::uint8_t read_register(std::uint8_t address);
@@ -113,6 +119,7 @@ private:
 
   std::uint8_t control_ = kImuSpiControlFifoEnable;  ///< Power-on default: buffering enabled.
   bool overflow_sticky_ = false;
+  bool control_written_ = false;
   std::uint64_t frames_dropped_ = 0;
 
   // Command state machine, valid while chip select is asserted.

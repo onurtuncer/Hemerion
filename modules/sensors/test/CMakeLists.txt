@@ -149,3 +149,19 @@ target_link_libraries(test_hemerion_sensors_mmc5983ma PRIVATE hemerion_sensors h
 
 add_test(NAME sensors.mmc5983ma COMMAND test_hemerion_sensors_mmc5983ma)
 set_tests_properties(sensors.mmc5983ma PROPERTIES LABELS "unit")
+
+# When a bus part's sample stream starts, in simulation time (part_bring_up.h): the IMU, BMP390 and MMC5983MA device
+# models, stepped the way their FMUs' do_step() steps them, against the real on-target drivers run from a second thread
+# after a wall-clock delay. A late controller must not move the stream once the first step holds for it.
+add_executable(
+  test_hemerion_sensors_part_bring_up
+  test_part_bring_up.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src/baro/bmp390/fmu/bmp390_i2c_slave.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_spi_slave.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src/imu/fmu/imu_packet_emitter.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src/mag/mmc5983ma/fmu/mmc5983ma_i2c_slave.cpp")
+find_package(Threads REQUIRED)
+target_link_libraries(test_hemerion_sensors_part_bring_up PRIVATE hemerion_sensors hemerion_test_support
+                                                                  Threads::Threads)
+add_test(NAME sensors.part_bring_up COMMAND test_hemerion_sensors_part_bring_up)
+set_tests_properties(sensors.part_bring_up PROPERTIES LABELS "unit")

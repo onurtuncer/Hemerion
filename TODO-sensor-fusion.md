@@ -160,8 +160,9 @@ Not built:
       flew case 11 for seeds 1–20 (W20 8, turbulence seed = seed, 200 s,
       baseline settings, plant 0.18.2): 20 of 20 passed every check.
       Every seed has 2000 GNSS position and 2000 velocity updates and
-      9998–9999 barometer updates, so the Linux barometer channel is
-      reproducible. The first attempt (run 43481383124) was stopped by the
+      9998–9999 barometer updates, so the Linux barometer channel's *rate*
+      is reproducible (not its values run to run: see "Sampling phase"
+      below, 2026-11-20). The first attempt (run 43481383124) was stopped by the
       recipe guard after Dependabot bumped `actions/cache` in
       `integration.yml` only; PR #64 matched the versions. Aetherion's
       per-block NEES over these logs is in its step 7. Arrival stamps are not
@@ -362,10 +363,113 @@ before this change.
       - On this laptop the stamps cannot come within bounds even at
         `--rtf 0.25`: the plant ran 3.5–4.4× slower than real time under
         load.
-      - Not yet seen in CI:
-        - Linux value columns identical against the reference, runs
-          44517640931 and 44530268940.
-        - `clock_ok` yes on the seeds that keep up.
+      - Not yet seen in CI: `clock_ok` yes on the seeds that keep up.
+      - Linux value columns identical against the reference (runs
+        44517640931 and 44530268940): seen *not* identical, 2026-11-20, and
+        not because of this branch. See "Sampling phase".
+- [x] **Sampling phase (2026-11-20, branch
+      `sensors/deterministic-sample-phase`).** Seeded Linux runs did not
+      reproduce their barometer, magnetometer or IMU logs. Fixed; maintainer
+      approved the change in logged values.
+      - **Measured.** `scripts/compare_run_values.py`, case 11, 200 s, W20 8,
+        seeds 1–20: main's step-7 batch (run 44517640931; seed 5 from
+        44530268940) against the same seeds from `examples/arrival-stamps`
+        (run 44561642127) differed on 16 of 20 seeds (3, 14, 17 and 20
+        identical). The control, two runs of `main` before that branch (run
+        43482563098 at `3b85d6f` against 44517640931 at `85d3052`, compared
+        with `--skip gps`), differed the same way: seed 8's `mag_y` at
+        sample 10 is −18.2678, −18.2617, −18.2678. So it was there before.
+        - `baro_samples.csv`: no row matched. The first conversion's
+          `part_time_s` was 0.039978, 0.049987 or 0.059997 between runs, so
+          the whole stream was offset by one 0.01 s step either way. Aligned
+          by that shift, only 33–42 % of pressures were equal.
+        - `mag_samples.csv`: ±1 row, values shifted.
+        - `imu_samples.csv`: 20 000 or 20 001 rows. The difference was the
+          *first* row (t = 0.01 s present or not), not the end of the run.
+          Shared rows were equal.
+        - `gps_fixes.csv`: identical.
+      - **Cause, one for all three.** The flight computer is a separate
+        process and brings the parts up on its own wall clock, while the
+        co-simulation is already stepping. Which step each bring-up command
+        landed in decided the rest:
+        - BMP390: normal mode starts converting one period after the step
+          that sees PWR_CTRL, so the step fixed the conversion phase, and so
+          which plant state each conversion sampled.
+        - MMC5983MA: the same for continuous mode, plus the SET/RESET pair,
+          served by whichever steps were running.
+        - IMU: the bring-up's FIFO reset emptied whatever had been buffered
+          by then, so the t = 0.01 s sample survived or not.
+      - **Fix.** The IMU, BMP390 and MMC5983MA FMUs take
+        `bring_up_timeout_s` (default 0 = off, the old behaviour). Their first
+        step holds on the wall clock until the part is up: CONTROL written,
+        normal or forced mode, continuous mode. Simulation time then starts,
+        so every bring-up command takes effect at t = 0
+        (`modules/sensors/include/Hemerion/part_bring_up.h`).
+        - The magnetometer answers the bring-up's triggered measurements from
+          the t = 0 inputs while it holds. It restarts its seeded model at
+          each software reset received before t = 0, so a probe attempt that
+          timed out before the master stepped costs no noise draw.
+        - The register protocol is unchanged: the parts still start converting
+          when commanded, one period later. The command is simply never late.
+        - New output `ready_at_start` (1/0) on each FMU. The hosts read it and
+          append `bring_up_timeout_s` and `bring_up_{imu,baro,mag}_ready` to the
+          sidecar; these are not log-contract keys.
+        - All three hosts set the parameter from `--bring-up-timeout` (default
+          30 s), write the magnetic field before the first step (the bring-up
+          measurements used to see zero), and restart pacing after the held
+          first step.
+        - The two polled parts now stay powered at the end until their last
+          conversion is read (as the IMU already did), and the flight
+          computers poll them once more after the IMU powers down.
+        - Test: `sensors.part_bring_up` steps each device model as its FMU does
+          against the on-target driver run from a second thread. It requires
+          identical streams for a controller 0 ms and 60 ms late. With the hold
+          disabled all three benches fail.
+        - Error models, RNG streams and every other parameter are unchanged.
+      - **Verified locally (Windows, 2026-11-20).** Case 11, seed 5
+        (turbulence seed 5, W20 8), 20 s, baseline settings, pinned plant.
+        Seven runs with the hold:
+        - flight computer first (A, B, G, H);
+        - host first with the flight computer 3 s late (C, I);
+        - `--rtf 0.5` (D).
+
+        A–D ran beside a clang-tidy job. Each reported every part
+        `ready at t = 0` and logged the IMU from t = 0.01 s, 2000 of 2000 rows.
+        - **Values.** All 21 pairs agree, value for value, on every
+          conversion both runs logged:
+          - `compare_run_values.py --skip baro --skip mag` reports "same
+            values" (GPS, IMU, truth, sidecar; only `realtime_factor` differs
+            for D);
+          - the BMP390 rows over all seven runs cover exactly the 1000
+            conversion times 0.02–20.00 s, each with one value;
+          - the magnetometer rows hold 999 distinct readings.
+        - **Control: two runs with `--bring-up-timeout 0`** (E, J), the old
+          behaviour:
+          - first BMP390 conversion at 0.03 and 0.21 s;
+          - 402 of the 402 shared conversion times had different pressures;
+          - 1188 distinct magnetometer readings;
+          - J lost its first 13 IMU samples to the FIFO reset (1986 rows).
+        - **Row counts are not reproducible on Windows.** The flight
+          computer's poll loop still misses conversions: 989–994 of 1000 in
+          A–C, 808 in D, 416–608 in G–I, when the host stepped faster than
+          the loop polled. The missed rows differ run to run; the values of
+          the rows that are logged do not. `compare_run_values.py` now says
+          so, and Windows comparisons keep `--skip baro --skip mag`. Linux CI
+          read every conversion in every earlier batch (9998–9999 of the
+          9998–9999 the phase allowed), which is why the row-count claim
+          above is made for Linux only.
+      - **What it changes.** Barometer and magnetometer values change
+        against every earlier batch, because conversions now fall on the
+        0.02 s grid from t = 0 (the BMP390's first is at 0.02 s). The IMU log
+        gains its t = 0.01 s row on every seed. GPS is unchanged. Step-7
+        batches flown before the fix (runs 43482563098, 44517640931,
+        44530268940, 44561642127, and any other-case batch flown before) are
+        statistically valid but not bit-reproducible for barometer and
+        magnetometer.
+      - **Not yet seen on Linux.** A CI batch twice over the same seeds,
+        compared with `compare_run_values.py` (no `--skip`), must report
+        "same values" on every seed, with `bring_up_*_ready=1` in every
+        sidecar.
 
 ## To do, in order
 
