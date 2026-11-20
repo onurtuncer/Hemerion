@@ -71,13 +71,17 @@ jobs:
           echo "Breathe version: $(python -c 'import breathe; print(breathe.__version__)')"
 
       - name: Install system dependencies
-        # Bounded and retried: on 2026-11-19 this step hung indefinitely on two
-        # runs out of four (the others took ~1 min), with no timeout to end it
-        # before GitHub's 6 h default. Network timeouts make a stalled mirror
-        # fail and retry instead of waiting forever.
-        timeout-minutes: 20
+        # Bounded and retried. This job downloads far more than any other (TeX
+        # Live), and that download stalled three times on 2026-11-19/20, silently
+        # until the step timeout. A healthy download takes about 80 s, so each
+        # download attempt gets 5 min before it is killed and retried; the step
+        # limit covers a stall, a retry and the install. -q rather than -qq so the
+        # log shows which download a stall stopped in.
+        timeout-minutes: 30
+        env:
+          APT_DOWNLOAD_TIMEOUT: "300"
         run: |
-          .github/scripts/apt-install.sh -qq doxygen graphviz \
+          .github/scripts/apt-install.sh -q doxygen graphviz \
             texlive-latex-extra texlive-pictures texlive-fonts-recommended \
             poppler-utils
           echo "Doxygen version: $(doxygen --version)"
