@@ -192,6 +192,59 @@ class Aggregate(unittest.TestCase):
         self.assertEqual((row["clock_scale"], row["clock_rms_s"], row["clock_ok"]), ("", "", ""))
 
 
+    def test_bring_up_columns_from_the_manifest_the_sidecar_and_neither(self):
+        # One run the runner recorded, one only the host's sidecar knows about (a part late), and one from before
+        # the hosts wrote the keys at all.
+        recorded = write_run(self.root, "case11-seed1", 1, SUMMARY)
+        sidecar_only = write_run(self.root, "case11-seed2", 2, SUMMARY)
+        write_run(self.root, "case11-seed3", 3, SUMMARY)
+        manifest = json.loads((recorded / "manifest.json").read_text(encoding="utf-8"))
+        manifest["bring_up_ready"] = {"imu": True, "baro": True, "mag": True}
+        (recorded / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        with (sidecar_only / "f16_truth.config").open("a", encoding="utf-8") as f:
+            f.write("bring_up_timeout_s=30\nbring_up_imu_ready=1\nbring_up_baro_ready=0\nbring_up_mag_ready=1\n")
+        rows = self.read_csv(self.root)
+        self.assertEqual([row["seed"] for row in rows], ["1", "2", "3"])
+        self.assertEqual([row["bring_up_ok"] for row in rows], ["yes", "no", ""])
+        self.assertEqual([row["bring_up_baro_ready"] for row in rows], ["yes", "no", ""])
+        self.assertEqual([row["bring_up_imu_ready"] for row in rows], ["yes", "yes", ""])
+        # After the clock columns, before the trailer; not averaged as numbers.
+        names = list(rows[0])
+        self.assertLess(names.index("pacing_rtf_honoured"), names.index("bring_up_ok"))
+        self.assertLess(names.index("bring_up_mag_ready"), names.index("cosim_wall_s"))
+
+
+class GateBringUp(unittest.TestCase):
+    """The runner's bring-up assessment: recorded and flagged, never a failure."""
+
+    def assess(self, text: str | None) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            sidecar = Path(tmp) / "f16_truth.config"
+            if text is not None:
+                sidecar.write_text(text, encoding="utf-8")
+            return gate.assess_bring_up(sidecar)
+
+    def test_every_part_ready(self):
+        result = self.assess("seed=11\nbring_up_timeout_s=30\nbring_up_imu_ready=1\nbring_up_baro_ready=1\n"
+                             "bring_up_mag_ready=1\n")
+        self.assertTrue(result["bring_up_ok"])
+        self.assertEqual(result["bring_up_flags"], [])
+        self.assertEqual(result["bring_up_ready"], {"imu": True, "baro": True, "mag": True})
+
+    def test_a_late_part_is_flagged(self):
+        result = self.assess("bring_up_imu_ready=1\nbring_up_baro_ready=1\nbring_up_mag_ready=0\n")
+        self.assertFalse(result["bring_up_ok"])
+        self.assertEqual(result["bring_up_flags"], ["mag: not brought up before t = 0"])
+        self.assertIs(result["bring_up_ready"]["mag"], False)
+
+    def test_a_host_from_before_records_nothing(self):
+        for text in ("seed=11\n", None):
+            result = self.assess(text)
+            self.assertIsNone(result["bring_up_ok"])
+            self.assertEqual(result["bring_up_ready"], {"imu": None, "baro": None, "mag": None})
+            self.assertEqual(result["bring_up_flags"], ["the host recorded no bring-up keys"])
+
+
 class GateClock(unittest.TestCase):
     """The runner's clock assessment: recorded and flagged, never a failure."""
 

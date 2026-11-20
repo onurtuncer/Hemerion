@@ -413,7 +413,17 @@ before this change.
           when commanded, one period later. The command is simply never late.
         - New output `ready_at_start` (1/0) on each FMU. The hosts read it and
           append `bring_up_timeout_s` and `bring_up_{imu,baro,mag}_ready` to the
-          sidecar; these are not log-contract keys.
+          sidecar; these are not log-contract keys. Like `clock_ok`, they flag
+          and never fail. `run_integration_case.py` records them in the manifest
+          (`bring_up_ready`, `bring_up_flags`, `bring_up_ok`) and prints a WARN
+          when a part was not ready at t = 0; its exit status is unchanged.
+          The step-7 tables (`aggregate_replay_summaries.py`) gain `bring_up_ok`
+          and `bring_up_{imu,baro,mag}_ready`. Runs from before the change show
+          these columns empty, not "no".
+        - Maintainer decisions (2026-11-20): the hold is on in all three hosts,
+          the rocket included, and the timeout stays at 30 s. Paper 1's TODO
+          records that re-running its results with the old start needs
+          `--bring-up-timeout 0`.
         - All three hosts set the parameter from `--bring-up-timeout` (default
           30 s), write the magnetic field before the first step (the bring-up
           measurements used to see zero), and restart pacing after the held

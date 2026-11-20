@@ -81,6 +81,22 @@ when. Branch `papers/paper1-smpt-resync`, as of 2026-10-09.
       positions are identical. So the reference run still reproduces from the
       current tree, but `main.tex`'s "the one sensor-model change since that
       commit" is now one of two: say so, and name the flag.
+- [ ] **Reproducibility paragraph: the run now starts after the bring-up.**
+      Since commit `34a9c1f` (branch `sensors/deterministic-sample-phase`,
+      2026-11-20) `rocket_gps_cosim` holds simulation time at t = 0 until
+      the flight computer has brought the IMU, BMP390 and MMC5983MA up
+      (`--bring-up-timeout`, default 30 s; FMU parameter
+      `bring_up_timeout_s`). That makes a seeded run's sensor logs a
+      function of the seed alone. It also changes how the case study
+      starts: the IMU log always begins at t = 0.01 s, and the polled parts
+      convert on a grid from t = 0, where before both depended on when the
+      flight computer happened to run. The error models are unchanged.
+      Re-running Paper 1's results to reproduce the old start needs
+      `--bring-up-timeout 0` as well as `--gps-velocity speed-course` (the
+      host's default, noted above). `main.tex`'s Reproducibility paragraph
+      should name both flags. The barometer and magnetometer figures were
+      never bit-reproducible before this change; they reproduce statistically
+      either way.
 
 ## Repository follow-ups the paper surfaced
 
