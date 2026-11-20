@@ -58,6 +58,14 @@ that, and the sensor values are still right; only a filter that would use the
 stamps as a clock needs to know. The host's own pacing report is in the
 sidecar (`pacing_*`).
 
+The same goes for whether the flight computer had brought the IMU, BMP390 and
+MMC5983MA up before simulation time started (Hemerion/part_bring_up.h): the
+host writes `bring_up_{imu,baro,mag}_ready` to the sidecar, the manifest
+records them as `bring_up_ready`, `bring_up_flags` and `bring_up_ok`, and a part
+that was not ready is a WARN, never a failure. Such a run's values are still
+right; they are only not a function of the seed alone, so it does not
+reproduce bit for bit.
+
     python scripts/run_integration_case.py \\
         --bin build/examples-native/examples/f16_trim_ecos \\
         --ekfreplay <EKFReplay executable> \\
@@ -245,6 +253,31 @@ def assess_clock(out: Path, max_scale_error: float, max_rms_s: float) -> dict:
     }
 
 
+BRING_UP_PARTS = ("imu", "baro", "mag")
+
+
+def assess_bring_up(sidecar: Path) -> dict:
+    """Whether each bus part was up at t = 0, from the host's sidecar, for the manifest: `bring_up_ready` (part ->
+    True/False, None where the host wrote no key), `bring_up_flags` (each part not ready, or no keys at all) and
+    `bring_up_ok` (every part ready; None when the host recorded nothing, as hosts before 2026-11-20 did not)."""
+    keys: dict[str, str] = {}
+    if sidecar.exists():
+        for line in sidecar.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, sep, value = line.partition("=")
+            if sep:
+                keys[key.strip()] = value.strip()
+    ready: dict[str, bool | None] = {}
+    for part in BRING_UP_PARTS:
+        value = keys.get(f"bring_up_{part}_ready")
+        ready[part] = (value == "1") if value in ("0", "1") else None
+    recorded = [part for part in BRING_UP_PARTS if ready[part] is not None]
+    if not recorded:
+        return {"bring_up_ready": ready, "bring_up_flags": ["the host recorded no bring-up keys"], "bring_up_ok": None}
+    flags = [f"{part}: not brought up before t = 0" for part in BRING_UP_PARTS if ready[part] is False]
+    flags += [f"{part}: no bring-up key" for part in BRING_UP_PARTS if ready[part] is None]
+    return {"bring_up_ready": ready, "bring_up_flags": flags, "bring_up_ok": not flags}
+
+
 def run(command: list[str], log: Path, timeout_s: float, cwd: Path) -> subprocess.CompletedProcess:
     with log.open("w", encoding="utf-8") as out:
         return subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, timeout=timeout_s, cwd=cwd, check=False)
@@ -425,6 +458,9 @@ def main() -> int:
     # 6. The arrival stamps as a clock: recorded and flagged, never a failure (see the module docstring).
     clock = assess_clock(out, args.clock_max_scale_error, args.clock_max_rms_s)
     manifest.update(clock)
+    # 7. The bus parts up before t = 0: recorded and flagged, never a failure (see the module docstring).
+    bring_up = assess_bring_up(out / "f16_truth.config")
+    manifest.update(bring_up)
 
     manifest["passed"] = not failures
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -436,6 +472,8 @@ def main() -> int:
         print(fit_arrival_clock.table(clock["clock_fit"]))
     for flag in clock["clock_flags"]:
         print(f"WARN: arrival stamps are not a clock for this run: {flag}")
+    for flag in bring_up["bring_up_flags"]:
+        print(f"WARN: sensor logs are not a function of the seed alone for this run: {flag}")
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:

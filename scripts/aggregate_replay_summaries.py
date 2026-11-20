@@ -36,6 +36,13 @@ pacing_rtf_honoured come from the sidecar where the host wrote them. A run
 whose stamps are not a clock still has valid sensor values; the columns only
 say which seeds a filter could use the stamps of.
 
+Whether the flight computer had brought the bus parts up before simulation
+time started (Hemerion/part_bring_up.h) gets columns too: bring_up_ok and
+bring_up_{imu,baro,mag}_ready, from the manifest's `bring_up_ready` or else
+the sidecar. A run made before the hosts recorded it (2026-11-20) shows them
+empty, not "no". A "no" run's values are right but do not reproduce bit for
+bit.
+
     python scripts/aggregate_replay_summaries.py step7-logs --csv step7.csv \\
         --markdown step7.md
 """
@@ -81,6 +88,8 @@ COUNTS = ["duration_s", "imu_steps", "gnss_pos_updates", "gnss_vel_updates", "ba
 CONSISTENCY = ["anees_nav", "nis_gnss_pos", "nis_gnss_vel", "nis_baro"]
 ACCURACY = ["rms_position_m", "rms_velocity_mps", "rms_tilt_deg", "rms_yaw_deg"]
 CLOCK = ["clock_scale", "clock_rms_s", "clock_ok", "pacing_max_lag_s", "pacing_rtf_honoured"]
+BRING_UP_PARTS = ("imu", "baro", "mag")
+BRING_UP = ["bring_up_ok"] + [f"bring_up_{part}_ready" for part in BRING_UP_PARTS]
 TRAILER = ["cosim_wall_s", "convention", "hemerion_commit", "aetherion_commit"]
 NUMERIC_GROUPS = (COUNTS, CONSISTENCY, ACCURACY)
 
@@ -177,6 +186,7 @@ def read_run(run: Path, root: Path) -> dict[str, object]:
     if row["summary"]:
         row.update(parse_summary((run / SUMMARY).read_text(encoding="utf-8", errors="replace")))
     row.update(clock_columns(run, manifest, sidecar))
+    row.update(bring_up_columns(manifest, sidecar))
     row["cosim_wall_s"] = manifest.get("checks", {}).get("cosim_wall_s")
     row["hemerion_commit"] = manifest.get("hemerion_commit", "")
     row["aetherion_commit"] = manifest.get("aetherion_commit", "")
@@ -206,6 +216,22 @@ def clock_columns(run: Path, manifest: dict, sidecar: dict[str, str]) -> dict[st
     return columns
 
 
+def bring_up_columns(manifest: dict, sidecar: dict[str, str]) -> dict[str, object]:
+    """bring_up_{part}_ready from the manifest's `bring_up_ready`, else the sidecar; bring_up_ok when every part says.
+    None wherever nothing was recorded, so a run from before the hosts wrote the keys is empty, not "no"."""
+    recorded = manifest.get("bring_up_ready") or {}
+    columns: dict[str, object] = {}
+    for part in BRING_UP_PARTS:
+        value = recorded.get(part)
+        if value is None:
+            text = sidecar.get(f"bring_up_{part}_ready")
+            value = (text == "1") if text in ("0", "1") else None
+        columns[f"bring_up_{part}_ready"] = value
+    parts = [columns[f"bring_up_{part}_ready"] for part in BRING_UP_PARTS]
+    columns["bring_up_ok"] = None if any(value is None for value in parts) else all(parts)
+    return columns
+
+
 def find_runs(paths: list[Path]) -> list[tuple[Path, Path]]:
     """(run directory, the path it was found under), each run once, in a stable order."""
     found: dict[Path, Path] = {}
@@ -220,12 +246,13 @@ def find_runs(paths: list[Path]) -> list[tuple[Path, Path]]:
 
 
 def columns(rows: list[dict[str, object]]) -> list[str]:
-    known = set(IDENTITY + CLOCK + TRAILER).union(*NUMERIC_GROUPS)
+    known = set(IDENTITY + CLOCK + BRING_UP + TRAILER).union(*NUMERIC_GROUPS)
     extra = sorted({key for row in rows for key in row} - known)
     ordered = list(IDENTITY)
     for group, prefix in zip(NUMERIC_GROUPS, ("n_", "nis_", "rms_")):
         ordered += group + [key for key in extra if key.startswith(prefix)]
     ordered += CLOCK
+    ordered += BRING_UP
     ordered += [key for key in extra if not key.startswith(("n_", "nis_", "rms_"))]
     return ordered + TRAILER
 

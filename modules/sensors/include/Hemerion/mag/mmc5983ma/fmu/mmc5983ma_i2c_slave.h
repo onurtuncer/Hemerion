@@ -146,6 +146,14 @@ public:
   /// True while the part would be driving its INT pin.
   [[nodiscard]] bool interrupt_asserted() const;
 
+  /// True while Meas_M_Done is set: a field measurement the controller has
+  /// not acknowledged. What the FMU's power-down waits on.
+  [[nodiscard]] bool measurement_unread() const;
+
+  /// Software resets (SW_RST) received since construction. The FMU's
+  /// bring-up hold watches it: see Mmc5983maSimulatorFmu::serve_bring_up().
+  [[nodiscard]] std::uint32_t soft_resets() const;
+
   /// Power-on state (fmi2Reset's equivalent): registers to defaults, pending
   /// measurements dropped. The magnetization goes to SET polarity -- see the
   /// note on @ref kPowerOnMagnetization.
@@ -194,6 +202,7 @@ private:
 
   bool measurement_pending_ = false;
   bool temperature_pending_ = false;
+  std::uint32_t soft_resets_ = 0;
 
   // Bus state machine, valid while a transaction is open.
   std::uint8_t pointer_ = 0;

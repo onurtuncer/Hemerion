@@ -61,6 +61,16 @@
 /// trigger). Configuration observable in the sample stream is exactly the
 /// kind of coupling a protocol-accurate simulator exists to exercise.
 ///
+/// **When conversions start, in simulation time.** A controller is a separate
+/// process on the wall clock, so if it configured the part while the master
+/// was already stepping, the step its PWR_CTRL write landed in -- and with it
+/// the conversion phase and which plant state each conversion sampled --
+/// would depend on wall-clock timing, not on the seed. `bring_up_timeout_s`
+/// holds the first step (PartBringUpGate, part_bring_up.h) until the part is
+/// measuring, so the bring-up completes at t = 0 and the conversions fall on
+/// a grid from there. `ready_at_start` says whether that happened. 0 (the
+/// default) does not hold: the part behaves as it always has.
+///
 /// The INT line level is re-published once per step; a clear-on-read inside
 /// a step therefore reaches the shared bus line at the next communication
 /// point. The STATUS register, which the driver polls, clears immediately.
@@ -71,6 +81,7 @@
 /// implements do_step(); see cmake/generate_fmu.cmake for how the two halves
 /// are compiled and packaged into an .fmu archive.
 
+#include "Hemerion/part_bring_up.h"
 #include "Hemerion/sensor_clock.h"
 #include "Hemerion/baro/bmp390/fmu/bmp390_i2c_slave.h"
 #include "Hemerion/baro/bmp390/fmu/bmp390_measurement_model.h"
@@ -80,9 +91,11 @@
 #include <fmu4cpp/fmu_base.hpp>
 #include <fmu4cpp/fmu_except.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <random>
 #include <cstdio>
+#include <thread>
 
 namespace hemerion::sensors::baro::bmp390::fmu
 {
@@ -101,6 +114,10 @@ using fmu4cpp::variability_t;
 /// Where this part sits: the bus it creates, and the environment variable a
 /// launch script can retarget it with.
 const sim::i2c_shm::I2cPeripheralConfig kI2cBus{ "hemerion_bmp390_i2c", "HEMERION_BMP390_FMU_I2C_BUS" };
+
+/// How long terminate() keeps the part powered for a controller to read the
+/// last conversion. A polling controller comes back within milliseconds.
+constexpr auto kDrainTimeout = std::chrono::seconds(1);
 
 }  // namespace
 
@@ -206,6 +223,20 @@ public:
         .setVariability(variability_t::DISCRETE)
         .setInitial(initial_t::CALCULATED)
         .setDescription("Turn-on die-temperature bias this part was drawn with [degrees C]");
+
+    // When simulation time may start: see the file comment. Registered after every earlier variable so their
+    // value references keep their numbers.
+    register_real("bring_up_timeout_s", &bring_up_timeout_s_)
+        .setCausality(causality_t::PARAMETER)
+        .setVariability(variability_t::FIXED)
+        .setDescription("Wall-clock time the first step waits for a controller to put the part into normal or "
+                        "forced mode, so the bring-up completes at t = 0 and the conversion schedule depends on "
+                        "simulation time and the seed only [s]; 0 does not wait");
+    register_integer("ready_at_start", &ready_at_start_)
+        .setCausality(causality_t::OUTPUT)
+        .setVariability(variability_t::DISCRETE)
+        .setInitial(initial_t::CALCULATED)
+        .setDescription("1 if a controller had the part measuring when simulation time started, else 0");
   }
 
   /// Brings the simulated part up on its bus. Deliberately not done in the
@@ -215,6 +246,8 @@ public:
   void exit_initialisation_mode() override
   {
     apply_noise_config();
+    gate_.arm(bring_up_timeout_s_);
+    schedule_.reset();
     if (!endpoint_.attach())
     {
       throw fmu4cpp::fatal_error("[hemerion_bmp390_fmu] Unable to create the I2C bus '" + endpoint_.bus_name() +
@@ -223,10 +256,19 @@ public:
     debugLog(fmiOK, "[hemerion_bmp390_fmu] I2C peripheral ready on bus '" + endpoint_.bus_name() + "'");
   }
 
-  /// Powers the part down. The data registers hold at most one conversion,
-  /// so unlike the FIFO-buffering IMU there is nothing to let a controller
-  /// drain: whatever is unread at power-down is lost, as on the real board.
-  void terminate() override { endpoint_.detach(); }
+  /// Powers the part down -- once a controller still on the bus has read the
+  /// last conversion, so the sample stream ends where the simulation does
+  /// rather than wherever the controller's last poll landed. Bounded, and
+  /// abandoned immediately if nobody is left on the bus.
+  void terminate() override
+  {
+    const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+    while (slave_.conversion_unread() && endpoint_.controller_attached() && std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    endpoint_.detach();
+  }
 
   /// fmi2Reset equivalent. The turn-on biases Bmp390MeasurementModel drew at
   /// construction are kept: they model this instance's physical part, which
@@ -240,12 +282,14 @@ public:
     temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
     pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
     temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
+    bring_up_timeout_s_ = 0.0;
+    ready_at_start_ = 0;
     altitude_m_ = 0.0;
     ambient_pressure_pa_ = 0.0;
     ambient_temperature_c_ = 0.0;
     ambient_pressure_set_ = false;
     ambient_temperature_set_ = false;
-    time_into_period_s_ = 0.0;
+    schedule_.reset();
     conversions_ = 0;
     conversions_out_of_rating_ = 0;
     pressure_was_out_ = false;
@@ -262,6 +306,21 @@ protected:
       throw fmu4cpp::fatal_error("[hemerion_bmp390_fmu] Stepped before initialisation mode was exited");
     }
 
+    // The first step holds until the controller has the part measuring, so
+    // its PWR_CTRL write takes effect at t = 0 rather than at whichever step
+    // the wall clock delivered it in.
+    if (gate_.outcome() == PartBringUpGate::Outcome::kPending)
+    {
+      gate_.hold([this] { return slave_.measuring(); });
+      ready_at_start_ = gate_.ready_at_start() ? 1 : 0;
+      if (gate_.outcome() == PartBringUpGate::Outcome::kTimedOut)
+      {
+        debugLog(fmiWarning,
+                 "[hemerion_bmp390_fmu] No controller put the part into a measuring mode within bring_up_timeout_s; "
+                 "simulation time starts anyway, and the conversion phase now depends on when it does");
+      }
+    }
+
     // One conversion per forced-mode trigger, regardless of the ODR.
     if (slave_.take_forced_conversion())
     {
@@ -269,30 +328,13 @@ protected:
     }
 
     // Normal mode: the part free-runs at the period its ODR register
-    // selects. Whole periods elapsed within this step each latch a fresh
-    // conversion (truth zero-order-held, noise redrawn) stamped with its own
-    // conversion time, and the remainder carries into the next step so a
-    // 50 Hz part stepped at 10 Hz really converts at 50 Hz. The data
-    // registers are not a FIFO -- a controller that polls slower than the
-    // ODR observes only the newest conversion, and SENSORTIME is how it
-    // still knows when that conversion happened.
-    const std::uint64_t period_us = slave_.sampling_period_us();
-    if (period_us == 0)
-    {
-      time_into_period_s_ = 0.0;  // sleep: the measurement engine is idle
-    }
-    else
-    {
-      const double period_s = static_cast<double>(period_us) * 1e-6;
-      double remaining_s = dt;
-      while (time_into_period_s_ + remaining_s >= period_s)
-      {
-        remaining_s -= period_s - time_into_period_s_;
-        time_into_period_s_ = 0.0;
-        latch_one(currentTime() + (dt - remaining_s));
-      }
-      time_into_period_s_ += remaining_s;
-    }
+    // selects (none in sleep). Each conversion is a fresh one (truth
+    // zero-order-held, noise redrawn) stamped with its own conversion time.
+    // The data registers are not a FIFO -- a controller that polls slower
+    // than the ODR observes only the newest conversion, and SENSORTIME is how
+    // it still knows when that conversion happened.
+    schedule_.advance(
+        dt, slave_.sampling_period_us(), [this](double offset_s) { latch_one(currentTime() + offset_s); });
 
     // The INT line is a level; re-drive it so clear-on-read inside the step
     // reaches the bus line here.
@@ -388,6 +430,10 @@ private:
   double temperature_noise_c_ = kDefaultNoise.temperature_noise_c;
   double pressure_bias_sigma_pa_ = kDefaultNoise.pressure_bias_sigma_pa;
   double temperature_bias_sigma_c_ = kDefaultNoise.temperature_bias_sigma_c;
+  double bring_up_timeout_s_ = 0.0;
+  int ready_at_start_ = 0;
+  PartBringUpGate gate_;
+  FreeRunningSchedule schedule_;
 
   std::mt19937_64 clock_rng_{ 1 };
   SensorClock clock_{ SensorClockConfig{}, clock_rng_ };
@@ -404,7 +450,6 @@ private:
   double ambient_temperature_c_ = 0.0;
   bool ambient_pressure_set_ = false;
   bool ambient_temperature_set_ = false;
-  double time_into_period_s_ = 0.0;
   int conversions_ = 0;
   int conversions_out_of_rating_ = 0;
   bool pressure_was_out_ = false;

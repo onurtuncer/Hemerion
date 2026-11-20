@@ -6,7 +6,8 @@
 
 /// @file pacing.hpp
 /// @brief Wall-clock pacing for the co-simulation hosts, the honest report of
-/// how well it held, and the Windows timer resolution the hosts and flight
+/// how well it held, whether the bus parts were brought up before simulation
+/// time started, and the Windows timer resolution the hosts and flight
 /// computers run at.
 ///
 /// **Why the report.** `--rtf 1` asks for one simulated second per wall
@@ -141,6 +142,21 @@ public:
     std::this_thread::sleep_until(target);
   }
 
+  /// @brief Re-anchors the targets so the step that just reached
+  /// `sim_time_s` is exactly on time now. The hosts call it after the first
+  /// step, which holds on the wall clock until the flight computer has brought
+  /// the bus parts up (part_bring_up.h): that hold is not simulation time, and
+  /// pacing from before it would leave every later step late by its length.
+  void restart(double sim_time_s, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now())
+  {
+    if (report_.realtime_factor <= 0.0)
+    {
+      return;
+    }
+    start_ = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                       std::chrono::duration<double>(sim_time_s / report_.realtime_factor));
+  }
+
   /// @brief Records one step's lag behind its target [s]; negative is early.
   void record(double lag_s)
   {
@@ -207,6 +223,52 @@ inline void append_pacing_to_sidecar(const std::filesystem::path& csv_path, cons
       << "pacing_late_steps=" << report.late_steps << "\n"
       << "pacing_steps=" << report.steps << "\n"
       << "pacing_tolerance_s=" << report.tolerance_s << "\n";
+}
+
+/// @brief Whether the flight computer had brought each bus part up before
+/// simulation time started -- the condition for its sensor logs to be a
+/// function of the seed alone (part_bring_up.h). Read from the FMUs'
+/// `ready_at_start` outputs after the run.
+struct BringUpReport
+{
+  double timeout_s = 0.0;  ///< The parts' bring_up_timeout_s; 0 = the first step did not hold.
+  int imu_ready = 0;       ///< 1 if the IMU was up at t = 0.
+  int baro_ready = 0;      ///< 1 if the BMP390 was measuring at t = 0.
+  int mag_ready = 0;       ///< 1 if the MMC5983MA was in continuous mode at t = 0.
+
+  [[nodiscard]] bool all_ready() const { return imu_ready == 1 && baro_ready == 1 && mag_ready == 1; }
+};
+
+/// @brief The report as one console line, `[cosim] bring-up: ...`.
+inline void print_bring_up(std::ostream& out, const BringUpReport& report)
+{
+  out << "[cosim] bring-up: IMU " << (report.imu_ready == 1 ? "ready" : "NOT ready") << ", BMP390 "
+      << (report.baro_ready == 1 ? "ready" : "NOT ready") << ", MMC5983MA "
+      << (report.mag_ready == 1 ? "ready" : "NOT ready") << " at t = 0 (hold up to " << report.timeout_s << " s)\n";
+  if (!report.all_ready())
+  {
+    out << "[cosim] warning: a part was brought up after simulation time started, so this run's sensor logs "
+           "depend on when the flight computer ran, not only on the seed\n";
+  }
+}
+
+/// @brief Appends the report to the run's sidecar, after the pacing keys.
+///
+/// Keys: `bring_up_timeout_s`, `bring_up_imu_ready`, `bring_up_baro_ready`,
+/// `bring_up_mag_ready` (1/0). Not log-contract keys.
+inline void append_bring_up_to_sidecar(const std::filesystem::path& csv_path, const BringUpReport& report)
+{
+  std::filesystem::path config_path = csv_path;
+  config_path.replace_extension(".config");
+  std::ofstream out(config_path, std::ios::app);
+  if (!out)
+  {
+    return;  // the sidecar itself already warned when it could not be written
+  }
+  out << "bring_up_timeout_s=" << report.timeout_s << "\n"
+      << "bring_up_imu_ready=" << report.imu_ready << "\n"
+      << "bring_up_baro_ready=" << report.baro_ready << "\n"
+      << "bring_up_mag_ready=" << report.mag_ready << "\n";
 }
 
 }  // namespace hemerion::examples

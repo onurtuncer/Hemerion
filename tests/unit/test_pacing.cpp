@@ -21,8 +21,11 @@
 
 #include "pacing.hpp"
 
+using hemerion::examples::append_bring_up_to_sidecar;
 using hemerion::examples::append_pacing_to_sidecar;
+using hemerion::examples::BringUpReport;
 using hemerion::examples::PacingMonitor;
+using hemerion::examples::print_bring_up;
 using hemerion::examples::print_pacing;
 using hemerion::examples::ScopedTimerResolution;
 
@@ -164,6 +167,63 @@ void test_sidecar_keys_are_appended()
   std::filesystem::remove_all(dir);
 }
 
+// The first step holds on the wall clock while the flight computer brings the
+// bus parts up. Without restart() every later step would be late by that hold;
+// with it the step that just finished is on time and the next targets follow.
+void test_restart_after_the_held_first_step()
+{
+  const auto now = std::chrono::steady_clock::now();
+  PacingMonitor monitor(1.0, now - std::chrono::seconds(5));  // a 5 s hold before step 1 finished
+  monitor.restart(0.01, now);
+  monitor.pace(0.01, now);                                  // step 1: due now
+  monitor.pace(0.02, now + std::chrono::milliseconds(10));  // step 2: due 10 ms later, there on time
+  CHECK(near(monitor.report().max_lag_s, 0.0, 1e-6));
+  CHECK(monitor.report().late_steps == 0);
+
+  // At rtf 0.5 the step that reached 0.01 s is anchored 20 ms after start.
+  PacingMonitor half(0.5, now - std::chrono::seconds(5));
+  half.restart(0.01, now);
+  half.pace(0.03, now + std::chrono::milliseconds(70));  // due at now + 40 ms: 30 ms late
+  CHECK(near(half.report().max_lag_s, 0.03, 1e-6));
+
+  // Unpaced, it does nothing (and pace() records nothing).
+  PacingMonitor unpaced(0.0, now);
+  unpaced.restart(0.01, now);
+  unpaced.pace(0.02, now);
+  CHECK(unpaced.report().steps == 0);
+}
+
+// The bring-up report: one console line, a warning when any part came up
+// late, and four keys appended to the sidecar.
+void test_bring_up_report()
+{
+  const BringUpReport ready{ 30.0, 1, 1, 1 };
+  std::ostringstream line;
+  print_bring_up(line, ready);
+  CHECK(line.str().find("IMU ready, BMP390 ready, MMC5983MA ready at t = 0") != std::string::npos);
+  CHECK(line.str().find("warning") == std::string::npos);
+
+  const BringUpReport late_baro{ 30.0, 1, 0, 1 };
+  std::ostringstream late_line;
+  print_bring_up(late_line, late_baro);
+  CHECK(late_line.str().find("BMP390 NOT ready") != std::string::npos);
+  CHECK(late_line.str().find("warning") != std::string::npos);
+
+  const auto dir = std::filesystem::temp_directory_path() / "hemerion_test_pacing_bring_up";
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream(dir / "f16_truth.config") << "seed=5\n";
+  }
+  append_bring_up_to_sidecar(dir / "f16_truth.csv", late_baro);
+  const auto keys = read_keys(dir / "f16_truth.config");
+  CHECK(keys.at("seed") == "5");
+  CHECK(keys.at("bring_up_timeout_s") == "30");
+  CHECK(keys.at("bring_up_imu_ready") == "1");
+  CHECK(keys.at("bring_up_baro_ready") == "0");
+  CHECK(keys.at("bring_up_mag_ready") == "1");
+  std::filesystem::remove_all(dir);
+}
+
 // The timer scope is active on Windows and inert elsewhere; either way it
 // constructs and destructs cleanly, nested too.
 void test_timer_resolution_scope()
@@ -193,6 +253,8 @@ int main()
   test_pace_measures_against_the_absolute_target();
   test_unpaced_reports_nothing();
   test_sidecar_keys_are_appended();
+  test_restart_after_the_held_first_step();
+  test_bring_up_report();
   test_timer_resolution_scope();
   std::cout << "test_pacing: all checks passed\n";
   return 0;

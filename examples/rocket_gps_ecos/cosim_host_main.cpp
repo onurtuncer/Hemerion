@@ -190,6 +190,9 @@ struct Options
   double gps_period_s = 0.1;     // NAV-PVT period: the GPS FMU's step-size hint (10 Hz), independent of step_s
   double imu_rate_hz = 100.0;    // IMU output data rate; the IMU FMU emits step * rate frames per step
   double realtime_factor = 0.0;  // 0 = run as fast as possible
+  // How long the bus parts' FMUs hold the first step for the flight computer to
+  // bring them up (their bring_up_timeout_s). 0 = do not hold.
+  double bring_up_timeout_s = 30.0;
   // Receiver dynamics envelope. The platform model is off by default and
   // COCOM is on, which isolates the mechanism that is not a configuration
   // choice: COCOM is export control, present in any receiver you can buy,
@@ -219,12 +222,11 @@ struct Options
   // 0 = every sensor draws a fresh instrument, as an unseeded run always has.
   //
   // Any other value fixes every sensor's error stream: the sample a part produces
-  // at a given simulation time is then identical run to run (measured: 790 of 790
-  // shared IMU timestamps, byte for byte). It does *not* make the two-process run
-  // reproducible -- the flight computer polls the I2C parts and drains the IMU
-  // FIFO on its own wall clock, so which samples it catches still varies, and the
-  // logs differ in their first timestamp and their length. Statistics reproduce;
-  // a diff of the sensor logs does not.
+  // at a given simulation time is then identical run to run. With the parts
+  // brought up before simulation time starts (--bring-up-timeout, on by default)
+  // the flight computer's logs are too, values and row counts, as long as it
+  // polls faster than the parts convert (Linux at --rtf 1, or slower); only the
+  // arrival stamps (host_time_s, and the magnetometer's imu_part_time_s) vary.
   // Each part's own oscillator. 0,0 is the single perfect clock the FMUs shared
   // before this existed; see --sensor-clock.
   double sensor_clock_skew_ppm = 0.0;
@@ -274,9 +276,14 @@ void print_usage()
                "              velocity errors, or the earlier speed and course errors. Positions are\n"
                "              the same under either; only the velocity fields differ\n"
                "  --seed      seed every sensor's error model: each part then produces the same\n"
-               "              sample at a given simulation time run to run. The flight computer's\n"
-               "              own polling still varies, so the logs are not diff-identical.\n"
+               "              sample at a given simulation time run to run, and with the parts\n"
+               "              brought up before t = 0 (--bring-up-timeout) the flight computer\n"
+               "              logs the same values; only arrival stamps vary\n"
                "              (default 0 = each part is a fresh draw)\n"
+               "  --bring-up-timeout  how long the IMU, BMP390 and MMC5983MA FMUs hold the first step\n"
+               "              for the flight computer to bring them up, so every bring-up command\n"
+               "              takes effect at t = 0 [s] (default 30; 0 = do not hold, and the\n"
+               "              sampling phase then depends on when the flight computer started)\n"
                "  --gps-seed  override just the receiver's seed (default: derived from --seed)\n"
                "  --gps-latency  receiver processing latency [s] (default 0). A real receiver\n"
                "              delivers an epoch's solution 50-200 ms after closing it; at the\n"
@@ -315,7 +322,7 @@ struct ValueOption
   void (*apply)(Options&, const char*);
 };
 
-constexpr std::array<ValueOption, 24> kValueOptions = { {
+constexpr std::array<ValueOption, 25> kValueOptions = { {
     { "--rocket", [](Options& o, const char* v) { o.rocket_fmu = v; } },
     { "--gps", [](Options& o, const char* v) { o.gps_fmu = v; } },
     { "--imu", [](Options& o, const char* v) { o.imu_fmu = v; } },
@@ -378,6 +385,7 @@ constexpr std::array<ValueOption, 24> kValueOptions = { {
     { "--gps-period", [](Options& o, const char* v) { o.gps_period_s = std::stod(v); } },
     { "--csv", [](Options& o, const char* v) { o.csv_path = v; } },
     { "--rtf", [](Options& o, const char* v) { o.realtime_factor = std::stod(v); } },
+    { "--bring-up-timeout", [](Options& o, const char* v) { o.bring_up_timeout_s = std::stod(v); } },
 } };
 
 bool parse_args(int argc, char** argv, Options& options)
@@ -851,6 +859,12 @@ int main(int argc, char** argv)
     launch_site["imu::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
     launch_site["baro::clock_skew_sigma_ppm"] = options.sensor_clock_skew_ppm;
     launch_site["baro::clock_jitter_sigma_s"] = options.sensor_clock_jitter_s;
+    // Simulation time starts once the flight computer has brought every bus
+    // part up, so its bring-up commands take effect at t = 0 and the parts'
+    // sample streams depend on the seed alone (part_bring_up.h).
+    launch_site["imu::bring_up_timeout_s"] = options.bring_up_timeout_s;
+    launch_site["baro::bring_up_timeout_s"] = options.bring_up_timeout_s;
+    launch_site["mag::bring_up_timeout_s"] = options.bring_up_timeout_s;
     launch_site["gps::horizontal_pos_noise_m"] = receiver.horizontal_pos_noise_m;
     launch_site["gps::vertical_pos_noise_m"] = receiver.vertical_pos_noise_m;
     launch_site["gps::speed_noise_mps"] = receiver.speed_noise_mps;
@@ -980,14 +994,13 @@ int main(int argc, char** argv)
     // zeroing the part's input; see the write below.
     WmmFieldBody last_field_body;
     bool reported_field_gap = false;
-    truth_log.write_row(sim->iterations(), sim->time());  // the state at t = 0, before any stepping
-    while (sim->time() < options.stop_s)
-    {
-      sim->step();
-
-      // Where the vehicle is and how it is pointing, turned into the body-frame
-      // field the part is immersed in. Written after the step, so it carries the
-      // same one-communication-step transport delay every Ecos connection does.
+    // Where the vehicle is and how it is pointing, turned into the body-frame
+    // field the part is immersed in. Written after each step, so it carries the
+    // same one-communication-step transport delay every Ecos connection does --
+    // and once before the first, so the magnetometer's bring-up measurements,
+    // which it answers at t = 0 (--bring-up-timeout), see the field it sits in
+    // rather than zero.
+    const auto write_mag_field = [&] {
       WmmField field_ned;
       if (WorldMagneticModel::field_ned(
               latitude->get_value(), longitude->get_value(), altitude->get_value(), options.mag_date_year, field_ned) ==
@@ -1007,6 +1020,20 @@ int main(int argc, char** argv)
       mag_bx->set_value(field_body_ut[0]);
       mag_by->set_value(field_body_ut[1]);
       mag_bz->set_value(field_body_ut[2]);
+    };
+    write_mag_field();
+    truth_log.write_row(sim->iterations(), sim->time());  // the state at t = 0, before any stepping
+    while (sim->time() < options.stop_s)
+    {
+      sim->step();
+      if (sim->iterations() == 1)
+      {
+        // The first step held (wall clock, not simulation time) until the
+        // flight computer had brought the bus parts up; pace from its end.
+        pacing.restart(sim->time());
+      }
+
+      write_mag_field();
       // After the specific-force write, so the logged imu:: inputs are the ones
       // the FMU will sample on the next step -- matching what csv_writer
       // recorded as a post-step listener.
@@ -1032,12 +1059,21 @@ int main(int argc, char** argv)
       pacing.pace(sim->time());
     }
 
+    const hemerion::examples::BringUpReport bring_up{
+      options.bring_up_timeout_s,
+      sim->get_int_property("imu::ready_at_start")->get_value(),
+      sim->get_int_property("baro::ready_at_start")->get_value(),
+      sim->get_int_property("mag::ready_at_start")->get_value(),
+    };
+
     sim->terminate();
 
     // Whether --rtf held, and by how much it did not: the console and the sidecar, so a run whose
     // arrival stamps are not a clock says so where its logs are read.
     hemerion::examples::print_pacing(std::cout, pacing.report());
     hemerion::examples::append_pacing_to_sidecar(options.csv_path, pacing.report());
+    hemerion::examples::print_bring_up(std::cout, bring_up);
+    hemerion::examples::append_bring_up_to_sidecar(options.csv_path, bring_up);
 
     const long imu_frames_per_step = std::lround(options.step_s * options.imu_rate_hz);
     // One NAV-PVT frame per step regardless of fix validity -- a receiver

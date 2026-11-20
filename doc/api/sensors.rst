@@ -151,6 +151,18 @@ which is the perfect clock the FMUs have always had.
 
 .. doxygenfile:: Hemerion/sensor_clock.h
 
+The other shared piece is *when* a bus part starts sampling. The IMU, BMP390
+and MMC5983MA are brought up by the flight computer, a separate process on the
+wall clock; if the co-simulation was already stepping, the step each bring-up
+command landed in -- and so the conversion phase, and which plant state each
+conversion sampled -- depended on wall-clock timing rather than on the seed.
+``PartBringUpGate`` holds each part's first step until its controller has
+brought it up, so every bring-up command takes effect at t = 0, and
+``FreeRunningSchedule`` runs the part's conversions on a grid in simulation
+time from there. A timeout of 0, every FMU's default, does not hold.
+
+.. doxygenfile:: Hemerion/part_bring_up.h
+
 Sensor families
 ===============
 

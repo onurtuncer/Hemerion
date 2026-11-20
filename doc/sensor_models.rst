@@ -201,10 +201,21 @@ defaults. The examples' ``--seed`` sets all of them from one number, deriving
 a distinct stream per part so they are reproducible without being correlated.
 
 What that buys is worth stating exactly: the sample a part produces at a given
-simulation time becomes identical run to run. It does *not* make a two-process
-co-simulation diff-identical, because the flight computer polls the I2C parts
-and drains the IMU FIFO on its own wall clock, so which samples it catches
-still varies. Statistics reproduce; a ``diff`` of the sensor logs does not.
+simulation time becomes identical run to run. For the flight computer's logs
+to be identical too, *when* each part starts sampling has to be a function of
+simulation time as well, and the flight computer brings the bus parts up on
+its own wall clock. Until 2026-11-20 nothing tied the two together, and on
+Linux CI two runs of a seed differed in the BMP390's conversion phase (one
+0.01 s step either way), in the magnetometer's, and in whether the IMU's first
+sample survived the bring-up's FIFO reset. The IMU, BMP390 and MMC5983MA FMUs
+now take ``bring_up_timeout_s``: their first step holds until the flight
+computer has brought them up, so every bring-up command takes effect at
+t = 0 (``Hemerion/part_bring_up.h``), and ``ready_at_start`` says whether it
+did. The examples set it (``--bring-up-timeout``, default 30 s). With it, a
+seeded run's sensor logs reproduce value for value and row for row, provided
+the flight computer polls the BMP390 and MMC5983MA faster than they convert
+(Linux at ``--rtf 1`` or slower); only the arrival stamps (``host_time_s``,
+and the magnetometer's ``imu_part_time_s``) vary.
 
 GPS receiver model
 ------------------

@@ -261,6 +261,10 @@ Useful knobs (`--help` lists all):
   velocity fields differ. The F-16 hosts default to `doppler`.
 * `--rtf 1` — pace the co-simulation to wall-clock speed (default is as-fast-as-possible, about 1.7× real
   time on a typical desktop), e.g. to watch the fix stream come in live.
+* `--bring-up-timeout <s>` — how long the IMU, BMP390 and MMC5983MA FMUs hold the first step for the flight
+  computer to bring them up (default 30; 0 = do not hold). Holding makes every bring-up command take effect at
+  t = 0, so a seeded run's sensor logs depend on the seed alone and not on when the flight computer started;
+  the host prints whether each part was ready and appends `bring_up_*` keys to the sidecar.
 * `HEMERION_GPS_FMU_UDP_HOST` / `HEMERION_GPS_FMU_UDP_PORT` — read by the GPS FMU at instantiation; point them
   at another host to feed a remote consumer (e.g. Renode on a different machine).
 * `HEMERION_IMU_FMU_SPI_BUS` (FMU side) and `--imu-bus` (flight-computer side) — the shared-memory SPI bus

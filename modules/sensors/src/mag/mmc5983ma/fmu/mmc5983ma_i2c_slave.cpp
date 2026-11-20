@@ -163,6 +163,18 @@ bool Mmc5983maI2cSlave::interrupt_asserted() const
   return interrupt_condition_locked();
 }
 
+bool Mmc5983maI2cSlave::measurement_unread() const
+{
+  const std::lock_guard<std::mutex> lock(mutex_);
+  return (status_ & kMmc5983maStatusMeasurementDone) != 0U;
+}
+
+std::uint32_t Mmc5983maI2cSlave::soft_resets() const
+{
+  const std::lock_guard<std::mutex> lock(mutex_);
+  return soft_resets_;
+}
+
 void Mmc5983maI2cSlave::reset()
 {
   const std::lock_guard<std::mutex> lock(mutex_);
@@ -216,6 +228,7 @@ void Mmc5983maI2cSlave::write_register(std::uint8_t address, std::uint8_t value)
       if ((value & kMmc5983maControl1SoftReset) != 0U)
       {
         apply_soft_reset();
+        ++soft_resets_;
         return;
       }
       control1_ = value;
