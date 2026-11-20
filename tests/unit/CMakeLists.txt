@@ -23,6 +23,16 @@ add_executable(test_hemerion_example_environment test_example_environment.cpp)
 target_include_directories(test_hemerion_example_environment PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
 target_link_libraries(test_hemerion_example_environment PRIVATE hemerion_test_support)
 
+# The hosts' pacing report and the Windows timer-resolution scope (examples/common/pacing.hpp).
+add_executable(test_hemerion_pacing test_pacing.cpp)
+target_include_directories(test_hemerion_pacing PRIVATE "${CMAKE_SOURCE_DIR}/examples/common")
+target_link_libraries(test_hemerion_pacing PRIVATE hemerion_test_support)
+if(WIN32)
+  target_link_libraries(test_hemerion_pacing PRIVATE winmm)
+endif()
+add_test(NAME examples.pacing COMMAND test_hemerion_pacing)
+set_tests_properties(examples.pacing PROPERTIES LABELS "unit")
+
 add_test(NAME examples.environment COMMAND test_hemerion_example_environment)
 set_tests_properties(examples.environment PROPERTIES LABELS "unit")
 
@@ -59,4 +69,13 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME scripts.aggregate_replay_summaries
            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_aggregate_replay_summaries.py")
   set_tests_properties(scripts.aggregate_replay_summaries PROPERTIES LABELS "unit")
+  # The arrival-clock fit (scripts/fit_arrival_clock.py) against synthetic logs with a known clock.
+  add_test(NAME scripts.fit_arrival_clock COMMAND "${Python3_EXECUTABLE}"
+                                                  "${CMAKE_CURRENT_SOURCE_DIR}/test_fit_arrival_clock.py")
+  set_tests_properties(scripts.fit_arrival_clock PROPERTIES LABELS "unit")
+  # Two runs' value columns compared exactly (scripts/compare_run_values.py): the check that a timing change moved no
+  # sensor value.
+  add_test(NAME scripts.compare_run_values COMMAND "${Python3_EXECUTABLE}"
+                                                   "${CMAKE_CURRENT_SOURCE_DIR}/test_compare_run_values.py")
+  set_tests_properties(scripts.compare_run_values PROPERTIES LABELS "unit")
 endif()

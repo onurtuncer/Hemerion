@@ -144,6 +144,84 @@ class Aggregate(unittest.TestCase):
         empty.mkdir()
         self.assertEqual(self.run_main(str(empty))[0], 2)
 
+    def read_csv(self, *paths: Path) -> list[dict[str, str]]:
+        csv_path = self.root / "clock.csv"
+        self.assertEqual(self.run_main(*map(str, paths), "--csv", str(csv_path))[0], 0)
+        with csv_path.open(newline="") as f:
+            return list(csv.DictReader(f))
+
+    def test_clock_columns_from_the_manifest_and_the_sidecar(self):
+        # A seed that kept real time and one that fell behind, as the runner records them.
+        kept = write_run(self.root, "case11-seed2", 2, SUMMARY)
+        behind = write_run(self.root, "case11-seed1", 1, SUMMARY)
+        fits = {"kept": {"gps": {"scale": 1.00001, "rms_s": 0.0011}, "imu": {"scale": 0.99999, "rms_s": 0.0016}},
+                "behind": {"gps": {"scale": 1.3034, "rms_s": 0.3077}, "imu": {"scale": 1.3034, "rms_s": 0.3075},
+                           "mag": {"error": "fewer than two rows"}}}
+        for run, key, ok, lag, honoured in ((kept, "kept", True, 0.004, 1), (behind, "behind", False, 59.7, 0)):
+            manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+            manifest.update({"clock_fit": fits[key], "clock_ok": ok})
+            (run / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            with (run / "f16_truth.config").open("a", encoding="utf-8") as f:
+                f.write(f"pacing_rtf_honoured={honoured}\npacing_max_lag_s={lag}\n")
+        rows = self.read_csv(self.root)
+        self.assertEqual([row["seed"] for row in rows], ["1", "2"])
+        self.assertEqual([row["clock_ok"] for row in rows], ["no", "yes"])
+        self.assertEqual([row["pacing_rtf_honoured"] for row in rows], ["no", "yes"])
+        self.assertEqual(rows[0]["clock_scale"], "1.3034")    # the stream furthest from 1
+        self.assertEqual(rows[1]["clock_scale"], "1.00001")
+        self.assertEqual(rows[0]["clock_rms_s"], "0.3077")    # the largest residual; the unusable stream skipped
+        self.assertEqual(rows[0]["pacing_max_lag_s"], "59.7")
+        # The clock columns sit after the accuracy figures, before the trailer.
+        names = list(rows[0])
+        self.assertLess(names.index("rms_yaw_deg"), names.index("clock_scale"))
+        self.assertLess(names.index("pacing_rtf_honoured"), names.index("cosim_wall_s"))
+
+    def test_clock_fitted_from_the_logs_of_an_older_run(self):
+        # A run from before the runner recorded clock_fit: the aggregator fits the logs it has.
+        run = write_run(self.root, "old", 3, SUMMARY)
+        rows = ["sample_index,part_time_s,host_time_s,pressure_pa,temperature_c"]
+        rows += [f"{k},{0.02 * k},{0.5 + 1.3 * 0.02 * k},70000,5" for k in range(1, 501)]
+        (run / "baro_samples.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        row = self.read_csv(run)[0]
+        self.assertAlmostEqual(float(row["clock_scale"]), 1.3, places=6)
+        self.assertEqual(row["clock_ok"], "no")
+        self.assertEqual(row["pacing_rtf_honoured"], "")  # this host wrote no pacing keys
+
+    def test_no_logs_and_no_fit_leave_the_clock_columns_empty(self):
+        row = self.read_csv(write_run(self.root, "bare", 4, SUMMARY))[0]
+        self.assertEqual((row["clock_scale"], row["clock_rms_s"], row["clock_ok"]), ("", "", ""))
+
+
+class GateClock(unittest.TestCase):
+    """The runner's clock assessment: recorded and flagged, never a failure."""
+
+    def test_assess_clock_flags_out_of_bounds_and_records_the_fit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            rows = ["sample_index,part_time_s,host_time_s,accel_x_mps2,accel_y_mps2,accel_z_mps2,gyro_x_rad_s,"
+                    "gyro_y_rad_s,gyro_z_rad_s"]
+            rows += [f"{k},{0.01 * k},{0.2 + 0.01 * k},0,0,-9.8,0,0,0" for k in range(1, 1001)]
+            (out / "imu_samples.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            clock = gate.assess_clock(out, gate.CLOCK_MAX_SCALE_ERROR, gate.CLOCK_MAX_RMS_S)
+            self.assertTrue(clock["clock_ok"])
+            self.assertAlmostEqual(clock["clock_fit"]["imu"]["scale"], 1.0, places=9)
+            self.assertEqual(clock["clock_bounds"], {"max_scale_error": 0.02, "max_rms_s": 0.02})
+
+            rows = rows[:1] + [f"{k},{0.01 * k},{0.2 + 0.013 * k},0,0,-9.8,0,0,0" for k in range(1, 1001)]
+            (out / "imu_samples.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            clock = gate.assess_clock(out, 0.02, 0.02)
+            self.assertFalse(clock["clock_ok"])
+            self.assertEqual(len(clock["clock_flags"]), 1)
+            self.assertIn("scale 1.3", clock["clock_flags"][0])
+            # Looser bounds, as --clock-max-scale-error would give: no flag.
+            self.assertTrue(gate.assess_clock(out, 0.5, 0.02)["clock_ok"])
+
+    def test_nothing_to_fit_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = gate.assess_clock(Path(tmp), 0.02, 0.02)
+            self.assertFalse(clock["clock_ok"])
+            self.assertEqual(clock["clock_flags"], ["no flight-computer logs to fit"])
+
 
 class GateThreshold(unittest.TestCase):
     def test_the_gate_still_wants_150_fixes_and_a_longer_run_proportionally_more(self):

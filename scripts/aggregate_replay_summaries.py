@@ -27,6 +27,15 @@ figure; whether those figures are consistent is Aetherion's step 7, not this
 script's. Exit status 0 when at least one run is found (with --strict, only
 when every run passed and has a summary), 2 when none is.
 
+Whether a run's arrival stamps are a clock gets its own columns: clock_scale
+(the scale of the stream furthest from 1), clock_rms_s (the largest residual
+of any stream) and clock_ok, from the manifest's `clock_fit` -- or, for a run
+made before the runner recorded it, fitted here from the logs
+(scripts/fit_arrival_clock.py, default bounds). pacing_max_lag_s and
+pacing_rtf_honoured come from the sidecar where the host wrote them. A run
+whose stamps are not a clock still has valid sensor values; the columns only
+say which seeds a filter could use the stamps of.
+
     python scripts/aggregate_replay_summaries.py step7-logs --csv step7.csv \\
         --markdown step7.md
 """
@@ -41,6 +50,9 @@ import re
 import statistics
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fit_arrival_clock  # noqa: E402  (beside this script)
 
 SUMMARY = "EKFReplay_summary.txt"
 MANIFEST = "manifest.json"
@@ -68,6 +80,7 @@ IDENTITY = ["run", "case", "seed","turbulence_w20_mps", "turbulence_seed", "stop
 COUNTS = ["duration_s", "imu_steps", "gnss_pos_updates", "gnss_vel_updates", "baro_updates", "fixes_skipped"]
 CONSISTENCY = ["anees_nav", "nis_gnss_pos", "nis_gnss_vel", "nis_baro"]
 ACCURACY = ["rms_position_m", "rms_velocity_mps", "rms_tilt_deg", "rms_yaw_deg"]
+CLOCK = ["clock_scale", "clock_rms_s", "clock_ok", "pacing_max_lag_s", "pacing_rtf_honoured"]
 TRAILER = ["cosim_wall_s", "convention", "hemerion_commit", "aetherion_commit"]
 NUMERIC_GROUPS = (COUNTS, CONSISTENCY, ACCURACY)
 
@@ -163,10 +176,34 @@ def read_run(run: Path, root: Path) -> dict[str, object]:
     row["summary"] = (run / SUMMARY).exists()
     if row["summary"]:
         row.update(parse_summary((run / SUMMARY).read_text(encoding="utf-8", errors="replace")))
+    row.update(clock_columns(run, manifest, sidecar))
     row["cosim_wall_s"] = manifest.get("checks", {}).get("cosim_wall_s")
     row["hemerion_commit"] = manifest.get("hemerion_commit", "")
     row["aetherion_commit"] = manifest.get("aetherion_commit", "")
     return row
+
+
+def clock_columns(run: Path, manifest: dict, sidecar: dict[str, str]) -> dict[str, object]:
+    """clock_scale, clock_rms_s and clock_ok from the manifest's fit, or from the logs when it has none; the host's
+    pacing keys from the sidecar. Each is None where there is nothing to read it from."""
+    fits = manifest.get("clock_fit")
+    ok = manifest.get("clock_ok")
+    if fits is None:
+        fits = fit_arrival_clock.fit_run(run)
+        ok = None
+        if fits:
+            ok = not fit_arrival_clock.violations(fits, fit_arrival_clock.DEFAULT_MAX_SCALE_ERROR,
+                                                  fit_arrival_clock.DEFAULT_MAX_RMS_S)
+    usable = [fit for fit in (fits or {}).values() if "error" not in fit]
+    columns: dict[str, object] = {"clock_scale": None, "clock_rms_s": None, "clock_ok": ok if fits else None}
+    if usable:
+        columns["clock_scale"] = max((fit["scale"] for fit in usable), key=lambda scale: abs(scale - 1.0))
+        columns["clock_rms_s"] = max(fit["rms_s"] for fit in usable)
+    lag = sidecar.get("pacing_max_lag_s")
+    columns["pacing_max_lag_s"] = to_float(lag) if lag not in (None, "") else None
+    honoured = sidecar.get("pacing_rtf_honoured")
+    columns["pacing_rtf_honoured"] = (honoured == "1") if honoured in ("0", "1") else None
+    return columns
 
 
 def find_runs(paths: list[Path]) -> list[tuple[Path, Path]]:
@@ -183,11 +220,12 @@ def find_runs(paths: list[Path]) -> list[tuple[Path, Path]]:
 
 
 def columns(rows: list[dict[str, object]]) -> list[str]:
-    known = set(IDENTITY + TRAILER).union(*NUMERIC_GROUPS)
+    known = set(IDENTITY + CLOCK + TRAILER).union(*NUMERIC_GROUPS)
     extra = sorted({key for row in rows for key in row} - known)
     ordered = list(IDENTITY)
     for group, prefix in zip(NUMERIC_GROUPS, ("n_", "nis_", "rms_")):
         ordered += group + [key for key in extra if key.startswith(prefix)]
+    ordered += CLOCK
     ordered += [key for key in extra if not key.startswith(("n_", "nis_", "rms_"))]
     return ordered + TRAILER
 

@@ -91,6 +91,7 @@
 #include "Hemerion/imu/imu_conversion.h"
 #include "Hemerion/imu/imu_spi_driver.h"
 #include "log_contract.hpp"
+#include "pacing.hpp"
 #include "udpReceiver.hpp"
 
 #include <hemerion/sim/i2c_shm/i2c_shm_link.h>
@@ -482,6 +483,10 @@ std::ofstream open_csv(const std::filesystem::path& path)
 
 int main(int argc, char** argv)
 {
+  // 1 ms scheduler ticks on Windows for the whole run: every bus transaction this process makes waits for
+  // the part's service thread, which backs off with sub-millisecond sleeps, and at the default 15.6 ms tick
+  // that made each poll tens of milliseconds and starved the BMP390. A no-op elsewhere. See pacing.hpp.
+  const hemerion::examples::ScopedTimerResolution timer_resolution;
   Options options;
   if (!parse_args(argc, argv, options))
   {
