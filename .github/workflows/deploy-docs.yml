@@ -52,7 +52,9 @@ env:
 
 jobs:
   build-docs:
-    runs-on: ubuntu-latest
+    # Pinned like every other Linux workflow: ubuntu-latest moved to 26.04 unannounced (seen 2026-11-20),
+    # changing the Doxygen this job's zero-warning gate runs.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -247,7 +249,7 @@ jobs:
   deploy:
     needs: build-docs
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
